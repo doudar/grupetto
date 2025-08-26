@@ -209,8 +209,7 @@ class BleServerManager(
     private fun startAdvertising() {
         try {
             val settings = AdvertiseSettings.Builder()
-                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY) // More responsive for connections
-                .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH) // Higher power for better range
+                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
                 .setConnectable(true)
                 .setTimeout(0) // Advertise indefinitely
                 .build()
@@ -222,7 +221,7 @@ class BleServerManager(
             val data = AdvertiseData.Builder()
                 .setIncludeDeviceName(true)
                 .addServiceUuid(ParcelUuid(BleUuids.FITNESS_MACHINE_SERVICE_UUID))
-                .addServiceUuid(ParcelUuid(BleUuids.CYCLING_POWER_SERVICE_UUID))
+                //.addServiceUuid(ParcelUuid(BleUuids.CYCLING_POWER_SERVICE_UUID))
                 .addManufacturerData(0xFFFF, deviceIdBytes) // Use 0xFFFF as test/development company ID
                 .build()
                 
