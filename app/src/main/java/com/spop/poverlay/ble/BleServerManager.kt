@@ -11,11 +11,30 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.ParcelUuid
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
+import com.spop.poverlay.ble.BleUuids
+import com.spop.poverlay.ble.CyclingPowerServiceImpl
+import com.spop.poverlay.ble.DeviceInformationServiceImpl
+import com.spop.poverlay.sensor.interfaces.DummySensorInterface
+import com.spop.poverlay.sensor.interfaces.PelotonBikePlusSensorInterface
+import com.spop.poverlay.sensor.interfaces.PelotonBikeSensorInterfaceV1New
+import com.spop.poverlay.sensor.interfaces.SensorInterface
+import com.spop.poverlay.util.IsBikePlus
+import com.spop.poverlay.util.IsRunningOnPeloton
+import com.spop.poverlay.util.calculateSpeedFromPelotonV1Power
 import kotlin.random.Random
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import timber.log.Timber
+import kotlin.math.abs
+import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
  * BLE GATT Server Manager
@@ -23,6 +42,7 @@ import timber.log.Timber
  */
 class BleServerManager(
     private val context: Context,
+    private val lifecycleOwner: LifecycleOwner,
     private val deviceName: String = "Grupetto FTMS"
 ) {
     
@@ -47,6 +67,29 @@ class BleServerManager(
     private lateinit var ftmsService: FtmsServiceImpl
     private lateinit var cyclingPowerService: CyclingPowerServiceImpl
     private lateinit var deviceInfoService: DeviceInformationServiceImpl
+    
+    // Sensor data collection
+    private var sensorInterface: SensorInterface? = null
+    private var dataUpdateJob: Job? = null
+    
+    // Data smoothing and timing constants
+    companion object {
+        private const val UPDATE_INTERVAL_MS = 500L // 500ms for responsive data updates
+        private const val SMOOTHING_BUFFER_SIZE = 5 // Number of samples to average
+        private const val OUTLIER_THRESHOLD = 2.0 // Standard deviations for outlier detection
+    }
+    
+    // Data smoothing buffers
+    private val powerBuffer = mutableListOf<Float>()
+    private val cadenceBuffer = mutableListOf<Float>()
+    private val resistanceBuffer = mutableListOf<Float>()
+    
+    // Data tracking variables
+    private var startTime: Long = 0
+    private var totalDistance: Float = 0f
+    private var totalEnergy: Float = 0f
+    private var lastPowerValue: Float = 0f
+    private var lastUpdateTime: Long = 0
     
     // SharedPreferences for storing device identifier
     private val prefs: SharedPreferences by lazy {
@@ -94,10 +137,14 @@ class BleServerManager(
             }
             
             setupGattServices()
+            setupSensorInterface()
             
             // Start advertising immediately for testing - this will help determine if issue is with advertising or service setup
             Timber.i("Starting immediate advertising for testing")
             startAdvertising()
+            
+            // Start collecting sensor data
+            startDataUpdates()
             
             return true
         } catch (e: SecurityException) {
@@ -109,6 +156,7 @@ class BleServerManager(
     fun stopServer() {
         try {
             stopAdvertising()
+            stopDataUpdates()
             gattServer?.close()
             gattServer = null
             connectedDevices.clear()
@@ -248,12 +296,25 @@ class BleServerManager(
         }
     }
     
-    fun sendIndoorBikeData(ftmsData: FtmsData) {
+    fun sendIndoorBikeData(ftmsData: FtmsServiceImpl.FtmsData) {
         ftmsService.sendIndoorBikeData(ftmsData, ::notifyCharacteristicChanged)
     }
     
     fun sendCyclingPowerMeasurement(power: Int, cadence: Int? = null) {
         cyclingPowerService.sendPowerMeasurement(power, cadence, ::notifyCharacteristicChanged)
+    }
+    
+    /**
+     * Send data to all applicable BLE services with consistent timing
+     */
+    fun sendAllSensorData(ftmsData: FtmsServiceImpl.FtmsData) {
+        // Send FTMS data
+        sendIndoorBikeData(ftmsData)
+        
+        // Send cycling power data - round cadence instead of truncating
+        val cadenceInt = ftmsData.instantaneousCadence.roundToInt()
+        Timber.d("BleServerManager: Sending cadence ${ftmsData.instantaneousCadence} -> $cadenceInt to cycling power service")
+        sendCyclingPowerMeasurement(ftmsData.instantaneousPower, cadenceInt)
     }
     
     fun sendFitnessMachineStatus(statusData: ByteArray) {
@@ -570,5 +631,147 @@ class BleServerManager(
                 }
             }
         }
+    }
+    
+    // Sensor data collection and management
+    fun setupSensorInterface() {
+        sensorInterface = if (IsRunningOnPeloton) {
+            if (IsBikePlus) {
+                PelotonBikePlusSensorInterface(context)
+            } else {
+                PelotonBikeSensorInterfaceV1New(context)
+            }
+        } else {
+            DummySensorInterface()
+        }
+    }
+    
+    fun startDataUpdates() {
+        val sensor = sensorInterface ?: return
+        
+        startTime = System.currentTimeMillis()
+        lastUpdateTime = startTime
+        resetCounters()
+        
+        Timber.i("Starting BLE data updates with sensor: ${sensor::class.simpleName}")
+        
+        dataUpdateJob = lifecycleOwner.lifecycleScope.launch {
+            var dataCount = 0
+            combine(
+                sensor.power,
+                sensor.cadence,
+                sensor.resistance
+            ) { power, cadence, resistance ->
+                Triple(power, cadence, resistance)
+            }.collect { (power, cadence, resistance) ->
+                dataCount++
+                if (dataCount % 10 == 0) { // Log every 10th reading to avoid spam
+                    Timber.i("BLE raw data #$dataCount: power=$power, cadence=$cadence, resistance=$resistance")
+                }
+                
+                // Add data to smoothing buffers and get smoothed values
+                val smoothedPower = addToBufferAndSmooth(powerBuffer, power)
+                val smoothedCadence = addToBufferAndSmooth(cadenceBuffer, cadence)
+                val smoothedResistance = addToBufferAndSmooth(resistanceBuffer, resistance)
+                
+                Timber.v("BLE smoothed data: power=$smoothedPower, cadence=$smoothedCadence, resistance=$smoothedResistance")
+
+                // Collect all of the time, but only update services every UPDATE_INTERVAL_MS
+                if (System.currentTimeMillis() - lastUpdateTime > UPDATE_INTERVAL_MS) {
+                    updateAllServices(smoothedPower, smoothedCadence, smoothedResistance)
+                    lastUpdateTime = System.currentTimeMillis()
+                }
+            }
+        }
+    }
+    
+    fun stopDataUpdates() {
+        dataUpdateJob?.cancel()
+        dataUpdateJob = null
+        
+        // Stop sensor interface if it has a stop method
+        val sensor = sensorInterface
+        when (sensor) {
+            is PelotonBikePlusSensorInterface -> sensor.stop()
+            is PelotonBikeSensorInterfaceV1New -> sensor.stop()
+            // DummySensorInterface and others don't need explicit stopping
+        }
+    }
+    
+    private fun addToBufferAndSmooth(buffer: MutableList<Float>, newValue: Float): Float {
+        // Add new value to buffer
+        buffer.add(newValue)
+        
+        // Keep buffer at fixed size
+        if (buffer.size > SMOOTHING_BUFFER_SIZE) {
+            buffer.removeAt(0)
+        }
+        
+        // If we don't have enough samples yet, return the current value
+        if (buffer.size < 3) {
+            return newValue
+        }
+        
+        // Calculate mean and standard deviation for outlier detection
+        val mean = buffer.average().toFloat()
+        val variance = buffer.map { (it - mean) * (it - mean) }.average()
+        val stdDev = sqrt(variance).toFloat()
+        
+        // Filter out outliers (values more than OUTLIER_THRESHOLD standard deviations from mean)
+        val filteredValues = buffer.filter { 
+            abs(it - mean) <= OUTLIER_THRESHOLD * stdDev 
+        }
+        
+        // If we filtered out too many values, use the original buffer
+        val valuesToAverage = if (filteredValues.size >= 2) filteredValues else buffer
+        
+        // Return the average of the filtered values
+        return valuesToAverage.average().toFloat()
+    }
+    
+    private fun updateAllServices(power: Float, cadence: Float, resistance: Float) {
+        val currentTime = System.currentTimeMillis()
+        val elapsedTimeSeconds = ((currentTime - startTime) / 1000).toInt()
+        val deltaTimeSeconds = (currentTime - lastUpdateTime) / 1000f
+        
+        // Calculate speed from power (using existing utility function)
+        val speed = calculateSpeedFromPelotonV1Power(power)
+        
+        // Update cumulative values
+        if (deltaTimeSeconds > 0) {
+            totalDistance += speed * deltaTimeSeconds
+            totalEnergy += power * deltaTimeSeconds / 3600f / 1000f // Convert to kJ
+        }
+        
+        // Calculate energy rates
+        val energyPerHour = power.toInt()
+        val energyPerMinute = (power / 60f).toInt()
+        
+        val ftmsData = FtmsServiceImpl.FtmsData(
+            instantaneousPower = power.toInt(),
+            instantaneousCadence = cadence,
+            instantaneousSpeed = speed,
+            totalDistance = totalDistance.toInt(),
+            elapsedTime = elapsedTimeSeconds,
+            heartRate = 0, // Not available from Peloton data
+            resistanceLevel = resistance,
+            totalEnergy = totalEnergy.toInt(),
+            energyPerHour = energyPerHour,
+            energyPerMinute = energyPerMinute
+        )
+        
+        Timber.d("Sending smoothed data: power=${ftmsData.instantaneousPower}W, cadence=${ftmsData.instantaneousCadence}RPM, resistance=${ftmsData.resistanceLevel}")
+        
+        // Send data to all connected BLE services
+        sendAllSensorData(ftmsData)
+        
+        lastPowerValue = power
+        lastUpdateTime = currentTime
+    }
+    
+    private fun resetCounters() {
+        totalDistance = 0f
+        totalEnergy = 0f
+        lastPowerValue = 0f
     }
 }

@@ -66,6 +66,7 @@ class CyclingPowerServiceImpl {
     private var crankRevolutions: Int = 0
     private var lastCrankEventTime: Int = 0
     private var accumulatedEnergy: Int = 0
+    private var lastUpdateTimeMs: Long = 0
     
     fun createService(): BluetoothGattService {
         val service = BluetoothGattService(
@@ -125,6 +126,7 @@ class CyclingPowerServiceImpl {
         cadence: Int? = null, 
         notifyCallback: (BluetoothGattCharacteristic) -> Boolean
     ) {
+        Timber.d("CyclingPower: Received power=${power}W, cadence=${cadence}rpm")
         cyclingPowerMeasurementCharacteristic?.let { characteristic ->
             try {
                 val data = createPowerMeasurementData(power, cadence)
@@ -143,6 +145,15 @@ class CyclingPowerServiceImpl {
     
     private fun createPowerMeasurementData(power: Int, cadence: Int?): ByteArray {
         val buffer = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN)
+        val currentTimeMs = System.currentTimeMillis()
+        
+        // Calculate time delta in seconds for energy calculation
+        val deltaTimeSeconds = if (lastUpdateTimeMs > 0) {
+            (currentTimeMs - lastUpdateTimeMs) / 1000f
+        } else {
+            0.5f // Default interval for first call
+        }
+        lastUpdateTimeMs = currentTimeMs
         
         // Flags field (2 bytes)
         var flags = 0
@@ -158,25 +169,25 @@ class CyclingPowerServiceImpl {
         
         // Crank Revolution Data (if present)
         if (cadence != null && cadence > 0) {
-            // Update crank revolutions based on cadence
-            // Assuming we're called every second, add revolutions
-            val rpm = cadence.toFloat()
-            val revolutionsPerSecond = rpm / 60f
-            crankRevolutions += revolutionsPerSecond.toInt()
+            // Simple approach: increment crank revolutions and calculate period
+            val cadenceFloat = cadence.toFloat()
+            val crankRevPeriod = (60 * 1024) / cadenceFloat
             
-            // Last Crank Event Time (1/1024 second resolution)
-            lastCrankEventTime = (System.currentTimeMillis() % 64000 * 1024 / 1000).toInt()
+            crankRevolutions++
+            lastCrankEventTime += crankRevPeriod.toInt()
+            
+            Timber.d("CyclingPower: cadence=${cadenceFloat}rpm, period=${crankRevPeriod.toInt()}, totalRevs=$crankRevolutions, eventTime=$lastCrankEventTime")
             
             // Cumulative Crank Revolutions (2 bytes)
             buffer.putShort((crankRevolutions and 0xFFFF).toShort())
             
-            // Last Crank Event Time (2 bytes)
+            // Last Crank Event Time (2 bytes) - rolls over every 64 seconds
             buffer.putShort((lastCrankEventTime and 0xFFFF).toShort())
         }
         
         // Accumulated Energy (2 bytes) - in kilojoules
-        // Simple approximation: energy = power * time / 1000
-        accumulatedEnergy += power / 1000 // Rough approximation for 1-second intervals
+        // Calculate energy based on actual time interval: energy = power * time / 1000
+        accumulatedEnergy += (power * deltaTimeSeconds / 1000).toInt()
         buffer.putShort((accumulatedEnergy and 0xFFFF).toShort())
         
         // Create the final byte array with only the used bytes

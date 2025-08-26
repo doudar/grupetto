@@ -1,19 +1,120 @@
 package com.spop.poverlay.ble
 
 import android.bluetooth.*
+import com.spop.poverlay.ble.BleUuids
 import timber.log.Timber
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import kotlin.math.roundToInt
 
 /**
- * FTMS (Fitness Machine Service) Implementation
- * Handles all FTMS-related GATT characteristics and operations
+ * FTMS Service Implementation
+ * Handles Fitness Machine Service (FTMS) BLE characteristics and data formatting
  */
 class FtmsServiceImpl {
     
-    // GATT characteristics
     private var indoorBikeDataCharacteristic: BluetoothGattCharacteristic? = null
     private var fitnessMachineStatusCharacteristic: BluetoothGattCharacteristic? = null
-    private var fitnessMachineControlPointCharacteristic: BluetoothGattCharacteristic? = null
     
+    // FTMS counters and state
+    private var totalDistance = 0f
+    private var totalEnergy = 0f
+    
+    /**
+     * FTMS Data Container
+     * Contains all fitness machine data points for transmission over BLE
+     */
+    data class FtmsData(
+        val instantaneousPower: Int = 0,        // watts
+        val instantaneousCadence: Float = 0f,   // RPM
+        val instantaneousSpeed: Float = 0f,     // m/s
+        val totalDistance: Int = 0,             // meters
+        val elapsedTime: Int = 0,               // seconds
+        val heartRate: Int = 0,                 // BPM
+        val resistanceLevel: Float = 0f,        // resistance level
+        val totalEnergy: Int = 0,               // kilojoules
+        val energyPerHour: Int = 0,             // watts
+        val energyPerMinute: Int = 0            // watts
+    ) {
+        companion object {
+            const val SPEED_RESOLUTION = 0.01f      // Speed resolution in m/s
+            const val CADENCE_RESOLUTION = 0.5f     // Cadence resolution in RPM
+            const val DISTANCE_RESOLUTION = 1       // Distance resolution in meters
+        }
+
+        /**
+         * Convert to Indoor Bike Data characteristic bytes (0x2AD2)
+         * Based on FTMS specification for Indoor Bike Data
+         */
+        fun toIndoorBikeDataBytes(): ByteArray {
+            val buffer = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN)
+            
+            // Flags field (2 bytes) - indicates which data fields are present
+            var flags = 0x0044 // More Data = 0, Average Speed = 0, Instantaneous Cadence = 1, Total Distance = 1, Resistance Level = 0, Instantaneous Power = 1
+            if (heartRate > 0) {
+                flags = flags or 0x0400 // Heart Rate = 1
+            }
+            if (totalEnergy > 0) {
+                flags = flags or 0x1000 // Expended Energy = 1
+            }
+            if (elapsedTime > 0) {
+                flags = flags or 0x0800 // Elapsed Time = 1
+            }
+            if (resistanceLevel > 0) {
+                flags = flags or 0x0080 // Resistance Level = 1
+            }
+            
+            buffer.putShort(flags.toShort())
+            
+            // Instantaneous Speed (2 bytes) - resolution 0.01 km/h
+            val speedKmh = (instantaneousSpeed * 3.6f / SPEED_RESOLUTION).roundToInt()
+            buffer.putShort(speedKmh.toShort())
+            
+            // Instantaneous Cadence (2 bytes) - resolution 0.5 RPM
+            val cadenceScaled = (instantaneousCadence / CADENCE_RESOLUTION).roundToInt()
+            buffer.putShort(cadenceScaled.toShort())
+            
+            // Instantaneous Power (2 bytes) - resolution 1 watt
+            buffer.putShort(instantaneousPower.toShort())
+            
+            // Total Distance (3 bytes) - resolution 1 meter
+            val distanceBytes = totalDistance and 0xFFFFFF
+            buffer.put((distanceBytes and 0xFF).toByte())
+            buffer.put(((distanceBytes shr 8) and 0xFF).toByte())
+            buffer.put(((distanceBytes shr 16) and 0xFF).toByte())
+            
+            // Resistance Level (2 bytes) - unitless, resolution 1
+            if (resistanceLevel > 0) {
+                buffer.putShort(resistanceLevel.roundToInt().toShort())
+            }
+            
+            // Heart Rate (1 byte) - resolution 1 BPM
+            if (heartRate > 0) {
+                buffer.put(heartRate.toByte())
+            }
+            
+            // Elapsed Time (2 bytes) - resolution 1 second
+            if (elapsedTime > 0) {
+                buffer.putShort(elapsedTime.toShort())
+            }
+            
+            // Expended Energy (2 bytes) - resolution 1 kilojoule
+            if (totalEnergy > 0) {
+                buffer.putShort(totalEnergy.toShort())
+            }
+            
+            // Create the final byte array with only the used bytes
+            val result = ByteArray(buffer.position())
+            buffer.flip()
+            buffer.get(result)
+            
+            return result
+        }
+    }
+    
+    /**
+     * Create the FTMS BLE service with all required characteristics
+     */
     fun createService(): BluetoothGattService {
         val service = BluetoothGattService(
             BleUuids.FITNESS_MACHINE_SERVICE_UUID,
@@ -48,56 +149,28 @@ class FtmsServiceImpl {
             BluetoothGattCharacteristic.PROPERTY_NOTIFY,
             BluetoothGattCharacteristic.PERMISSION_READ
         )
-        val statusDescriptor = BluetoothGattDescriptor(
+        val fitnessMachineStatusDescriptor = BluetoothGattDescriptor(
             BleUuids.CLIENT_CHARACTERISTIC_CONFIG_UUID,
             BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE
         )
-        statusDescriptor.value = byteArrayOf(0x00, 0x00)
-        fitnessMachineStatusCharacteristic!!.addDescriptor(statusDescriptor)
+        fitnessMachineStatusDescriptor.value = byteArrayOf(0x00, 0x00)
+        fitnessMachineStatusCharacteristic!!.addDescriptor(fitnessMachineStatusDescriptor)
         service.addCharacteristic(fitnessMachineStatusCharacteristic!!)
-        
-        // Fitness Machine Control Point characteristic (write, indicate)
-        fitnessMachineControlPointCharacteristic = BluetoothGattCharacteristic(
-            BleUuids.FITNESS_MACHINE_CONTROL_POINT_UUID,
-            BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_INDICATE,
-            BluetoothGattCharacteristic.PERMISSION_WRITE
-        )
-        val controlPointDescriptor = BluetoothGattDescriptor(
-            BleUuids.CLIENT_CHARACTERISTIC_CONFIG_UUID,
-            BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE
-        )
-        controlPointDescriptor.value = byteArrayOf(0x00, 0x00)
-        fitnessMachineControlPointCharacteristic!!.addDescriptor(controlPointDescriptor)
-        service.addCharacteristic(fitnessMachineControlPointCharacteristic!!)
-        
-        // Supported Power Range characteristic (read-only)
-        val supportedPowerRangeCharacteristic = BluetoothGattCharacteristic(
-            BleUuids.SUPPORTED_POWER_RANGE_UUID,
-            BluetoothGattCharacteristic.PROPERTY_READ,
-            BluetoothGattCharacteristic.PERMISSION_READ
-        )
-        service.addCharacteristic(supportedPowerRangeCharacteristic)
-        
-        // Supported Resistance Level Range characteristic (read-only)
-        val supportedResistanceRangeCharacteristic = BluetoothGattCharacteristic(
-            BleUuids.SUPPORTED_RESISTANCE_LEVEL_RANGE_UUID,
-            BluetoothGattCharacteristic.PROPERTY_READ,
-            BluetoothGattCharacteristic.PERMISSION_READ
-        )
-        service.addCharacteristic(supportedResistanceRangeCharacteristic)
         
         return service
     }
     
+    /**
+     * Send Indoor Bike Data to connected BLE devices
+     */
     fun sendIndoorBikeData(ftmsData: FtmsData, notifyCallback: (BluetoothGattCharacteristic) -> Boolean) {
         indoorBikeDataCharacteristic?.let { characteristic ->
             try {
                 val data = ftmsData.toIndoorBikeDataBytes()
                 characteristic.value = data
-                Timber.d("Setting indoor bike data: ${data.size} bytes [${data.joinToString(",") { "%02x".format(it) }}], power=${ftmsData.instantaneousPower}, cadence=${ftmsData.instantaneousCadence}")
+                Timber.d("Setting indoor bike data: ${data.size} bytes, power=${ftmsData.instantaneousPower}, cadence=${ftmsData.instantaneousCadence}")
                 
-                val notificationResult = notifyCallback(characteristic)
-                Timber.d("Notification result: $notificationResult")
+                notifyCallback(characteristic)
             } catch (e: Exception) {
                 Timber.e(e, "Error setting indoor bike data")
             }
@@ -106,109 +179,56 @@ class FtmsServiceImpl {
         }
     }
     
+    /**
+     * Send Fitness Machine Status to connected BLE devices
+     */
     fun sendFitnessMachineStatus(statusData: ByteArray, notifyCallback: (BluetoothGattCharacteristic) -> Boolean) {
         fitnessMachineStatusCharacteristic?.let { characteristic ->
-            characteristic.value = statusData
-            notifyCallback(characteristic)
+            try {
+                characteristic.value = statusData
+                notifyCallback(characteristic)
+            } catch (e: Exception) {
+                Timber.e(e, "Error setting fitness machine status")
+            }
         }
     }
     
+    /**
+     * Handle read requests for FTMS characteristics
+     */
     fun handleCharacteristicRead(characteristic: BluetoothGattCharacteristic): Pair<ByteArray?, Int> {
         return when (characteristic.uuid) {
             BleUuids.FITNESS_MACHINE_FEATURE_UUID -> {
-                // Return supported features for indoor bike
-                val data = ByteArray(8)
-                val features = FtmsConstants.INDOOR_BIKE_FEATURES
-                val targetSettings = FtmsConstants.INDOOR_BIKE_TARGET_SETTINGS
-                
-                // Pack features (4 bytes) + target settings (4 bytes)
-                data[0] = (features and 0xFF).toByte()
-                data[1] = ((features shr 8) and 0xFF).toByte()
-                data[2] = ((features shr 16) and 0xFF).toByte()
-                data[3] = ((features shr 24) and 0xFF).toByte()
-                data[4] = (targetSettings and 0xFF).toByte()
-                data[5] = ((targetSettings shr 8) and 0xFF).toByte()
-                data[6] = ((targetSettings shr 16) and 0xFF).toByte()
-                data[7] = ((targetSettings shr 24) and 0xFF).toByte()
-                
-                Pair(data, BluetoothGatt.GATT_SUCCESS)
-            }
-            BleUuids.SUPPORTED_POWER_RANGE_UUID -> {
-                // Min power (0W), Max power (2000W), Min increment (1W)
-                val data = byteArrayOf(0, 0, 0xD0.toByte(), 0x07, 1, 0)
-                Pair(data, BluetoothGatt.GATT_SUCCESS)
-            }
-            BleUuids.SUPPORTED_RESISTANCE_LEVEL_RANGE_UUID -> {
-                // Min resistance (0), Max resistance (100), Min increment (1)
-                val data = byteArrayOf(0, 0, 100, 0, 1, 0)
+                // Return supported features for FTMS
+                val data = byteArrayOf(0x83.toByte(), 0x14.toByte(), 0x00.toByte(), 0x00.toByte(),
+                                     0x0C.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte())
                 Pair(data, BluetoothGatt.GATT_SUCCESS)
             }
             else -> {
-                Timber.w("Unknown FTMS characteristic read: ${characteristic.uuid}")
                 Pair(null, BluetoothGatt.GATT_READ_NOT_PERMITTED)
             }
         }
     }
     
+    /**
+     * Handle write requests for FTMS characteristics
+     */
     fun handleCharacteristicWrite(
         device: BluetoothDevice?,
         characteristic: BluetoothGattCharacteristic,
         value: ByteArray?,
         gattServer: BluetoothGattServer?
     ): Int {
-        return when (characteristic.uuid) {
-            BleUuids.FITNESS_MACHINE_CONTROL_POINT_UUID -> {
-                // Handle control point commands
-                if (value != null && value.isNotEmpty()) {
-                    handleControlPointCommand(device, value[0], gattServer)
-                    BluetoothGatt.GATT_SUCCESS
-                } else {
-                    BluetoothGatt.GATT_INVALID_ATTRIBUTE_LENGTH
-                }
-            }
-            else -> {
-                BluetoothGatt.GATT_WRITE_NOT_PERMITTED
-            }
-        }
+        // FTMS characteristics are typically read-only or notify-only
+        // Control Point characteristic handling could be added here if needed
+        return BluetoothGatt.GATT_WRITE_NOT_PERMITTED
     }
     
-    private fun handleControlPointCommand(device: BluetoothDevice?, opCode: Byte, gattServer: BluetoothGattServer?) {
-        val response = when (opCode) {
-            FtmsConstants.FTMS_CONTROL_REQUEST_CONTROL -> {
-                Timber.d("Control requested by ${device?.address}")
-                byteArrayOf(0x80.toByte(), opCode, FtmsConstants.FTMS_RESPONSE_SUCCESS)
-            }
-            FtmsConstants.FTMS_CONTROL_START_OR_RESUME -> {
-                Timber.d("Start/Resume requested by ${device?.address}")
-                // Send status notification would be handled by the server manager
-                byteArrayOf(0x80.toByte(), opCode, FtmsConstants.FTMS_RESPONSE_SUCCESS)
-            }
-            FtmsConstants.FTMS_CONTROL_STOP_OR_PAUSE -> {
-                Timber.d("Stop/Pause requested by ${device?.address}")
-                // Send status notification would be handled by the server manager
-                byteArrayOf(0x80.toByte(), opCode, FtmsConstants.FTMS_RESPONSE_SUCCESS)
-            }
-            FtmsConstants.FTMS_CONTROL_RESET -> {
-                Timber.d("Reset requested by ${device?.address}")
-                // Send status notification would be handled by the server manager
-                byteArrayOf(0x80.toByte(), opCode, FtmsConstants.FTMS_RESPONSE_SUCCESS)
-            }
-            else -> {
-                Timber.d("Unsupported op code: $opCode from ${device?.address}")
-                byteArrayOf(0x80.toByte(), opCode, FtmsConstants.FTMS_RESPONSE_OP_CODE_NOT_SUPPORTED)
-            }
-        }
-        
-        // Send indication response
-        fitnessMachineControlPointCharacteristic?.let { characteristic ->
-            characteristic.value = response
-            try {
-                device?.let {
-                    gattServer?.notifyCharacteristicChanged(it, characteristic, true)
-                }
-            } catch (e: SecurityException) {
-                Timber.e(e, "Security exception when sending indication")
-            }
-        }
+    /**
+     * Reset FTMS counters and state
+     */
+    fun reset() {
+        totalDistance = 0f
+        totalEnergy = 0f
     }
 }
