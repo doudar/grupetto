@@ -95,6 +95,10 @@ class BleServerManager(
             
             setupGattServices()
             
+            // Start advertising immediately for testing - this will help determine if issue is with advertising or service setup
+            Timber.i("Starting immediate advertising for testing")
+            startAdvertising()
+            
             return true
         } catch (e: SecurityException) {
             Timber.e(e, "Security exception when starting BLE server")
@@ -152,6 +156,7 @@ class BleServerManager(
         try {
             // Add FTMS service first
             gattServer?.addService(ftmsService.createService())
+            // Note: Other services will be added in the onServiceAdded callback
         } catch (e: SecurityException) {
             Timber.e(e, "SecurityException when adding FTMS service")
         }
