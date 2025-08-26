@@ -179,6 +179,35 @@ jobs:
         echo "Found APK: $APK_FILE"
         echo "APK_PATH=$APK_FILE" >> $GITHUB_OUTPUT
 
+    - name: Get commit messages since last tag
+      id: commit_messages
+      run: |
+        # Get commits since the previous tag
+        PREVIOUS_TAG="${{ steps.version_info.outputs.PREVIOUS_TAG }}"
+        
+        if [ "$PREVIOUS_TAG" = "v0.0.0" ]; then
+          # If no previous tag, get last 10 commits
+          COMMITS=$(git log --oneline -10 --pretty=format:"- %s (%h)")
+        else
+          # Get commits since the last tag
+          COMMITS=$(git log ${PREVIOUS_TAG}..HEAD --oneline --pretty=format:"- %s (%h)")
+        fi
+        
+        # If no commits found, provide a default message
+        if [ -z "$COMMITS" ]; then
+          COMMITS="- No new commits since last tag"
+        fi
+        
+        echo "Commits since $PREVIOUS_TAG:"
+        echo "$COMMITS"
+        
+        # Save commits to output (escape newlines for GitHub Actions)
+        {
+          echo "COMMIT_MESSAGES<<EOF"
+          echo "$COMMITS"
+          echo "EOF"
+        } >> $GITHUB_OUTPUT
+
     - name: Create/Update tag
       run: |
         git config user.name "github-actions[bot]"
@@ -203,6 +232,9 @@ jobs:
           **Commit:** ${{ github.sha }}
           
           ### Changes
+          ${{ steps.commit_messages.outputs.COMMIT_MESSAGES }}
+          
+          ### Release Notes
           - Automated release from ${{ github.ref_name }} branch
           - Auto-incremented from ${{ steps.version_info.outputs.PREVIOUS_TAG }}
           - Updated app/build.gradle with new version numbers

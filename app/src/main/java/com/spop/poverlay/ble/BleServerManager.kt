@@ -7,7 +7,10 @@ import android.bluetooth.le.AdvertiseSettings
 import android.bluetooth.le.BluetoothLeAdvertiser
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.ParcelUuid
+import androidx.core.content.ContextCompat
 import kotlin.random.Random
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,10 +18,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import timber.log.Timber
 
 /**
- * BLE GATT Server for FTMS (Fitness Machine Service)
- * Handles BLE advertising and GATT server operations
+ * BLE GATT Server Manager
+ * Handles BLE advertising, GATT server operations, and service coordination
  */
-class BleFtmsServer(
+class BleServerManager(
     private val context: Context,
     private val deviceName: String = "Grupetto FTMS"
 ) {
@@ -40,15 +43,15 @@ class BleFtmsServer(
     private val connectedDevices = mutableSetOf<BluetoothDevice>()
     private val subscribedDevices = mutableMapOf<String, MutableSet<BluetoothGattCharacteristic>>()
     
+    // Service implementations
+    private lateinit var ftmsService: FtmsServiceImpl
+    private lateinit var cyclingPowerService: CyclingPowerServiceImpl
+    private lateinit var deviceInfoService: DeviceInformationServiceImpl
+    
     // SharedPreferences for storing device identifier
     private val prefs: SharedPreferences by lazy {
         context.getSharedPreferences("ble_ftms_server", Context.MODE_PRIVATE)
     }
-    
-    // GATT characteristics
-    private var indoorBikeDataCharacteristic: BluetoothGattCharacteristic? = null
-    private var fitnessMachineStatusCharacteristic: BluetoothGattCharacteristic? = null
-    private var fitnessMachineControlPointCharacteristic: BluetoothGattCharacteristic? = null
     
     fun initialize(): Boolean {
         bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
@@ -70,6 +73,11 @@ class BleFtmsServer(
             return false
         }
         
+        // Initialize service implementations
+        ftmsService = FtmsServiceImpl()
+        cyclingPowerService = CyclingPowerServiceImpl()
+        deviceInfoService = DeviceInformationServiceImpl(deviceName)
+        
         return true
     }
     
@@ -86,7 +94,6 @@ class BleFtmsServer(
             }
             
             setupGattServices()
-            // Note: startAdvertising() will be called automatically after services are added successfully
             
             return true
         } catch (e: SecurityException) {
@@ -109,113 +116,71 @@ class BleFtmsServer(
         }
     }
     
+    private fun hasBluetoothPermissions(): Boolean {
+        val bluetoothPermission = ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.BLUETOOTH
+        ) == PackageManager.PERMISSION_GRANTED
+        
+        val bluetoothAdminPermission = ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.BLUETOOTH_ADMIN
+        ) == PackageManager.PERMISSION_GRANTED
+        
+        // For Android 12+ (API 31+) check new permissions
+        var bluetoothAdvertisePermission = true
+        var bluetoothConnectPermission = true
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            bluetoothAdvertisePermission = ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.BLUETOOTH_ADVERTISE
+            ) == PackageManager.PERMISSION_GRANTED
+            
+            bluetoothConnectPermission = ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.BLUETOOTH_CONNECT
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+        
+        return bluetoothPermission && bluetoothAdminPermission && 
+               bluetoothAdvertisePermission && bluetoothConnectPermission
+    }
+
     private fun setupGattServices() {
-        // Create FTMS service
-        val ftmsService = BluetoothGattService(
-            FtmsUuids.FITNESS_MACHINE_SERVICE_UUID,
-            BluetoothGattService.SERVICE_TYPE_PRIMARY
-        )
+        if (!hasBluetoothPermissions()) {
+            Timber.w("Missing Bluetooth permissions for GATT service setup")
+            return
+        }
         
-        // Fitness Machine Feature characteristic (read-only)
-        val fitnessMachineFeatureCharacteristic = BluetoothGattCharacteristic(
-            FtmsUuids.FITNESS_MACHINE_FEATURE_UUID,
-            BluetoothGattCharacteristic.PROPERTY_READ,
-            BluetoothGattCharacteristic.PERMISSION_READ
-        )
-        ftmsService.addCharacteristic(fitnessMachineFeatureCharacteristic)
+        try {
+            // Add FTMS service first
+            gattServer?.addService(ftmsService.createService())
+        } catch (e: SecurityException) {
+            Timber.e(e, "SecurityException when adding FTMS service")
+        }
+    }
+    
+    private fun addCyclingPowerService() {
+        if (!hasBluetoothPermissions()) {
+            Timber.w("Missing Bluetooth permissions for Cycling Power service setup")
+            return
+        }
         
-        // Indoor Bike Data characteristic (notify)
-        indoorBikeDataCharacteristic = BluetoothGattCharacteristic(
-            FtmsUuids.INDOOR_BIKE_DATA_UUID,
-            BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-            BluetoothGattCharacteristic.PERMISSION_READ
-        )
-        val indoorBikeDataDescriptor = BluetoothGattDescriptor(
-            FtmsUuids.CLIENT_CHARACTERISTIC_CONFIG_UUID,
-            BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE
-        )
-        // Initialize descriptor with default value (notifications disabled)
-        indoorBikeDataDescriptor.value = byteArrayOf(0x00, 0x00)
-        indoorBikeDataCharacteristic!!.addDescriptor(indoorBikeDataDescriptor)
-        ftmsService.addCharacteristic(indoorBikeDataCharacteristic!!)
-        
-        // Fitness Machine Status characteristic (notify)
-        fitnessMachineStatusCharacteristic = BluetoothGattCharacteristic(
-            FtmsUuids.FITNESS_MACHINE_STATUS_UUID,
-            BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-            BluetoothGattCharacteristic.PERMISSION_READ
-        )
-        val statusDescriptor = BluetoothGattDescriptor(
-            FtmsUuids.CLIENT_CHARACTERISTIC_CONFIG_UUID,
-            BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE
-        )
-        // Initialize descriptor with default value (notifications disabled)
-        statusDescriptor.value = byteArrayOf(0x00, 0x00)
-        fitnessMachineStatusCharacteristic!!.addDescriptor(statusDescriptor)
-        ftmsService.addCharacteristic(fitnessMachineStatusCharacteristic!!)
-        
-        // Fitness Machine Control Point characteristic (write, indicate)
-        fitnessMachineControlPointCharacteristic = BluetoothGattCharacteristic(
-            FtmsUuids.FITNESS_MACHINE_CONTROL_POINT_UUID,
-            BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_INDICATE,
-            BluetoothGattCharacteristic.PERMISSION_WRITE
-        )
-        val controlPointDescriptor = BluetoothGattDescriptor(
-            FtmsUuids.CLIENT_CHARACTERISTIC_CONFIG_UUID,
-            BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE
-        )
-        // Initialize descriptor with default value (indications disabled)
-        controlPointDescriptor.value = byteArrayOf(0x00, 0x00)
-        fitnessMachineControlPointCharacteristic!!.addDescriptor(controlPointDescriptor)
-        ftmsService.addCharacteristic(fitnessMachineControlPointCharacteristic!!)
-        
-        // Supported Power Range characteristic (read-only)
-        val supportedPowerRangeCharacteristic = BluetoothGattCharacteristic(
-            FtmsUuids.SUPPORTED_POWER_RANGE_UUID,
-            BluetoothGattCharacteristic.PROPERTY_READ,
-            BluetoothGattCharacteristic.PERMISSION_READ
-        )
-        ftmsService.addCharacteristic(supportedPowerRangeCharacteristic)
-        
-        // Supported Resistance Level Range characteristic (read-only)
-        val supportedResistanceRangeCharacteristic = BluetoothGattCharacteristic(
-            FtmsUuids.SUPPORTED_RESISTANCE_LEVEL_RANGE_UUID,
-            BluetoothGattCharacteristic.PROPERTY_READ,
-            BluetoothGattCharacteristic.PERMISSION_READ
-        )
-        ftmsService.addCharacteristic(supportedResistanceRangeCharacteristic)
-        
-        // Add FTMS service to server first
-        gattServer?.addService(ftmsService)
+        try {
+            gattServer?.addService(cyclingPowerService.createService())
+        } catch (e: SecurityException) {
+            Timber.e(e, "SecurityException when adding Cycling Power service")
+        }
     }
     
     private fun addDeviceInformationService() {
-        // Create Device Information Service
-        val deviceInfoService = BluetoothGattService(
-            FtmsUuids.DEVICE_INFORMATION_SERVICE_UUID,
-            BluetoothGattService.SERVICE_TYPE_PRIMARY
-        )
+        if (!hasBluetoothPermissions()) {
+            Timber.w("Missing Bluetooth permissions for Device Information service setup")
+            return
+        }
         
-        // Manufacturer Name
-        val manufacturerNameCharacteristic = BluetoothGattCharacteristic(
-            FtmsUuids.MANUFACTURER_NAME_UUID,
-            BluetoothGattCharacteristic.PROPERTY_READ,
-            BluetoothGattCharacteristic.PERMISSION_READ
-        )
-        deviceInfoService.addCharacteristic(manufacturerNameCharacteristic)
-        manufacturerNameCharacteristic.value = deviceName.toByteArray()
-        
-        // Model Number
-        val modelNumberCharacteristic = BluetoothGattCharacteristic(
-            FtmsUuids.MODEL_NUMBER_UUID,
-            BluetoothGattCharacteristic.PROPERTY_READ,
-            BluetoothGattCharacteristic.PERMISSION_READ
-        )
-        deviceInfoService.addCharacteristic(modelNumberCharacteristic)
-        modelNumberCharacteristic.value = "Peloton FTMS Bridge".toByteArray()
-
-        // Add device info service
-        gattServer?.addService(deviceInfoService)
+        try {
+            gattServer?.addService(deviceInfoService.createService())
+        } catch (e: SecurityException) {
+            Timber.e(e, "SecurityException when adding Device Information service")
+        }
     }
     
     /**
@@ -251,7 +216,8 @@ class BleFtmsServer(
             
             val data = AdvertiseData.Builder()
                 .setIncludeDeviceName(true)
-                .addServiceUuid(ParcelUuid(FtmsUuids.FITNESS_MACHINE_SERVICE_UUID))
+                .addServiceUuid(ParcelUuid(BleUuids.FITNESS_MACHINE_SERVICE_UUID))
+                .addServiceUuid(ParcelUuid(BleUuids.CYCLING_POWER_SERVICE_UUID))
                 .addManufacturerData(0xFFFF, deviceIdBytes) // Use 0xFFFF as test/development company ID
                 .build()
                 
@@ -279,27 +245,15 @@ class BleFtmsServer(
     }
     
     fun sendIndoorBikeData(ftmsData: FtmsData) {
-        indoorBikeDataCharacteristic?.let { characteristic ->
-            try {
-                val data = ftmsData.toIndoorBikeDataBytes()
-                characteristic.value = data
-                Timber.d("Setting indoor bike data: ${data.size} bytes [${data.joinToString(",") { "%02x".format(it) }}], power=${ftmsData.instantaneousPower}, cadence=${ftmsData.instantaneousCadence}")
-                
-                val notificationResult = notifyCharacteristicChanged(characteristic)
-                Timber.d("Notification result: $notificationResult")
-            } catch (e: Exception) {
-                Timber.e(e, "Error setting indoor bike data")
-            }
-        } ?: run {
-            Timber.w("Indoor bike data characteristic is null, cannot send data")
-        }
+        ftmsService.sendIndoorBikeData(ftmsData, ::notifyCharacteristicChanged)
+    }
+    
+    fun sendCyclingPowerMeasurement(power: Int, cadence: Int? = null) {
+        cyclingPowerService.sendPowerMeasurement(power, cadence, ::notifyCharacteristicChanged)
     }
     
     fun sendFitnessMachineStatus(statusData: ByteArray) {
-        fitnessMachineStatusCharacteristic?.let { characteristic ->
-            characteristic.value = statusData
-            notifyCharacteristicChanged(characteristic)
-        }
+        ftmsService.sendFitnessMachineStatus(statusData, ::notifyCharacteristicChanged)
     }
     
     private fun notifyCharacteristicChanged(characteristic: BluetoothGattCharacteristic): Boolean {
@@ -331,7 +285,6 @@ class BleFtmsServer(
                         if (!success) {
                             Timber.w("Failed to notify device $deviceAddress")
                             allSuccess = false
-                            // Mark device for removal if notification fails consistently
                             devicesToRemove.add(device)
                         }
                     } catch (e: Exception) {
@@ -387,11 +340,15 @@ class BleFtmsServer(
                 Timber.i("Service added successfully: ${service?.uuid}")
                 service?.let {
                     when (it.uuid) {
-                        FtmsUuids.FITNESS_MACHINE_SERVICE_UUID -> {
-                            Timber.d("FTMS service added, now adding Device Information Service")
+                        BleUuids.FITNESS_MACHINE_SERVICE_UUID -> {
+                            Timber.d("FTMS service added, now adding Cycling Power Service")
+                            addCyclingPowerService()
+                        }
+                        BleUuids.CYCLING_POWER_SERVICE_UUID -> {
+                            Timber.d("Cycling Power Service added, now adding Device Information Service")
                             addDeviceInformationService()
                         }
-                        FtmsUuids.DEVICE_INFORMATION_SERVICE_UUID -> {
+                        BleUuids.DEVICE_INFORMATION_SERVICE_UUID -> {
                             Timber.d("Device Information Service added, setup complete - starting advertising")
                             startAdvertising()
                         }
@@ -400,24 +357,26 @@ class BleFtmsServer(
             } else {
                 Timber.e("Failed to add service: ${service?.uuid}, status: $status")
                 // If FTMS service failed, we can't continue
-                if (service?.uuid == FtmsUuids.FITNESS_MACHINE_SERVICE_UUID) {
+                if (service?.uuid == BleUuids.FITNESS_MACHINE_SERVICE_UUID) {
                     Timber.e("Critical: FTMS service failed to add - stopping server")
                     stopServer()
-                } else if (service?.uuid == FtmsUuids.DEVICE_INFORMATION_SERVICE_UUID) {
-                    // Device info service is optional, continue with advertising
-                    Timber.w("Device Information Service failed to add, but continuing with advertising")
-                    startAdvertising()
+                } else {
+                    // Other services are optional, continue with advertising if this is the last one
+                    if (service?.uuid == BleUuids.DEVICE_INFORMATION_SERVICE_UUID) {
+                        Timber.w("Device Information Service failed to add, but continuing with advertising")
+                        startAdvertising()
+                    }
                 }
             }
         }
         
         override fun onConnectionStateChange(device: BluetoothDevice?, status: Int, newState: Int) {
             device?.let {
-                synchronized(this@BleFtmsServer) {
+                synchronized(this@BleServerManager) {
                     val statusDescription = when (status) {
                         BluetoothGatt.GATT_SUCCESS -> "SUCCESS"
                         BluetoothGatt.GATT_FAILURE -> "FAILURE"
-                        0x13 -> "REMOTE_USER_TERMINATED" // Common disconnection reason
+                        0x13 -> "REMOTE_USER_TERMINATED"
                         0x16 -> "CONNECTION_TIMEOUT"
                         0x08 -> "CONNECTION_TERMINATED_BY_LOCAL_HOST"
                         else -> "UNKNOWN($status)"
@@ -470,36 +429,22 @@ class BleFtmsServer(
             var data: ByteArray? = null
             var status = BluetoothGatt.GATT_SUCCESS
             
-            when (characteristic?.uuid) {
-                FtmsUuids.FITNESS_MACHINE_FEATURE_UUID -> {
-                    // Return supported features for indoor bike
-                    data = ByteArray(8)
-                    val features = FtmsConstants.INDOOR_BIKE_FEATURES
-                    val targetSettings = FtmsConstants.INDOOR_BIKE_TARGET_SETTINGS
-                    
-                    // Pack features (4 bytes) + target settings (4 bytes)
-                    data[0] = (features and 0xFF).toByte()
-                    data[1] = ((features shr 8) and 0xFF).toByte()
-                    data[2] = ((features shr 16) and 0xFF).toByte()
-                    data[3] = ((features shr 24) and 0xFF).toByte()
-                    data[4] = (targetSettings and 0xFF).toByte()
-                    data[5] = ((targetSettings shr 8) and 0xFF).toByte()
-                    data[6] = ((targetSettings shr 16) and 0xFF).toByte()
-                    data[7] = ((targetSettings shr 24) and 0xFF).toByte()
+            // Try to handle with each service
+            when (characteristic?.service?.uuid) {
+                BleUuids.FITNESS_MACHINE_SERVICE_UUID -> {
+                    val result = ftmsService.handleCharacteristicRead(characteristic)
+                    data = result.first
+                    status = result.second
                 }
-                FtmsUuids.SUPPORTED_POWER_RANGE_UUID -> {
-                    // Min power (0W), Max power (2000W), Min increment (1W)
-                    data = byteArrayOf(0, 0, 0xD0.toByte(), 0x07, 1, 0)
+                BleUuids.CYCLING_POWER_SERVICE_UUID -> {
+                    val result = cyclingPowerService.handleCharacteristicRead(characteristic)
+                    data = result.first
+                    status = result.second
                 }
-                FtmsUuids.SUPPORTED_RESISTANCE_LEVEL_RANGE_UUID -> {
-                    // Min resistance (0), Max resistance (100), Min increment (1)
-                    data = byteArrayOf(0, 0, 100, 0, 1, 0)
-                }
-                FtmsUuids.MANUFACTURER_NAME_UUID -> {
-                    data = deviceName.toByteArray()
-                }
-                FtmsUuids.MODEL_NUMBER_UUID -> {
-                    data = "Peloton FTMS Bridge".toByteArray()
+                BleUuids.DEVICE_INFORMATION_SERVICE_UUID -> {
+                    val result = deviceInfoService.handleCharacteristicRead(characteristic)
+                    data = result.first
+                    status = result.second
                 }
                 else -> {
                     status = BluetoothGatt.GATT_READ_NOT_PERMITTED
@@ -530,16 +475,18 @@ class BleFtmsServer(
                 if (descriptor == null) {
                     Timber.w("Descriptor is null in write request")
                     status = BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED
-                } else if (descriptor.uuid == FtmsUuids.CLIENT_CHARACTERISTIC_CONFIG_UUID) {
+                } else if (descriptor.uuid == BleUuids.CLIENT_CHARACTERISTIC_CONFIG_UUID) {
                     val characteristic = descriptor.characteristic
                     val deviceAddress = device?.address
                     
                     if (value != null && value.size >= 2 && deviceAddress != null && characteristic != null) {
                         // Validate that this descriptor belongs to one of our characteristics
                         val isValidDescriptor = when (characteristic.uuid) {
-                            FtmsUuids.INDOOR_BIKE_DATA_UUID,
-                            FtmsUuids.FITNESS_MACHINE_STATUS_UUID,
-                            FtmsUuids.FITNESS_MACHINE_CONTROL_POINT_UUID -> true
+                            BleUuids.INDOOR_BIKE_DATA_UUID,
+                            BleUuids.FITNESS_MACHINE_STATUS_UUID,
+                            BleUuids.FITNESS_MACHINE_CONTROL_POINT_UUID,
+                            BleUuids.CYCLING_POWER_MEASUREMENT_UUID,
+                            BleUuids.CYCLING_POWER_CONTROL_POINT_UUID -> true
                             else -> false
                         }
                         
@@ -599,14 +546,12 @@ class BleFtmsServer(
         ) {
             var status = BluetoothGatt.GATT_SUCCESS
             
-            when (characteristic?.uuid) {
-                FtmsUuids.FITNESS_MACHINE_CONTROL_POINT_UUID -> {
-                    // Handle control point commands
-                    if (value != null && value.isNotEmpty()) {
-                        handleControlPointCommand(device, value[0])
-                    } else {
-                        status = BluetoothGatt.GATT_INVALID_ATTRIBUTE_LENGTH
-                    }
+            when (characteristic?.service?.uuid) {
+                BleUuids.FITNESS_MACHINE_SERVICE_UUID -> {
+                    status = ftmsService.handleCharacteristicWrite(device, characteristic, value, gattServer)
+                }
+                BleUuids.CYCLING_POWER_SERVICE_UUID -> {
+                    status = cyclingPowerService.handleCharacteristicWrite(device, characteristic, value, gattServer)
                 }
                 else -> {
                     status = BluetoothGatt.GATT_WRITE_NOT_PERMITTED
@@ -619,49 +564,6 @@ class BleFtmsServer(
                 } catch (e: SecurityException) {
                     Timber.e(e, "Security exception when sending response")
                 }
-            }
-        }
-    }
-    
-    private fun handleControlPointCommand(device: BluetoothDevice?, opCode: Byte) {
-        val response = when (opCode) {
-            FtmsConstants.FTMS_CONTROL_REQUEST_CONTROL -> {
-                Timber.d("Control requested by ${device?.address}")
-                byteArrayOf(0x80.toByte(), opCode, FtmsConstants.FTMS_RESPONSE_SUCCESS)
-            }
-            FtmsConstants.FTMS_CONTROL_START_OR_RESUME -> {
-                Timber.d("Start/Resume requested by ${device?.address}")
-                // Send status notification
-                sendFitnessMachineStatus(byteArrayOf(FtmsConstants.STATUS_STARTED_BY_EXTERNAL))
-                byteArrayOf(0x80.toByte(), opCode, FtmsConstants.FTMS_RESPONSE_SUCCESS)
-            }
-            FtmsConstants.FTMS_CONTROL_STOP_OR_PAUSE -> {
-                Timber.d("Stop/Pause requested by ${device?.address}")
-                // Send status notification
-                sendFitnessMachineStatus(byteArrayOf(FtmsConstants.STATUS_PAUSED_BY_EXTERNAL))
-                byteArrayOf(0x80.toByte(), opCode, FtmsConstants.FTMS_RESPONSE_SUCCESS)
-            }
-            FtmsConstants.FTMS_CONTROL_RESET -> {
-                Timber.d("Reset requested by ${device?.address}")
-                // Send status notification
-                sendFitnessMachineStatus(byteArrayOf(FtmsConstants.STATUS_RESET))
-                byteArrayOf(0x80.toByte(), opCode, FtmsConstants.FTMS_RESPONSE_SUCCESS)
-            }
-            else -> {
-                Timber.d("Unsupported op code: $opCode from ${device?.address}")
-                byteArrayOf(0x80.toByte(), opCode, FtmsConstants.FTMS_RESPONSE_OP_CODE_NOT_SUPPORTED)
-            }
-        }
-        
-        // Send indication response
-        fitnessMachineControlPointCharacteristic?.let { characteristic ->
-            characteristic.value = response
-            try {
-                device?.let {
-                    gattServer?.notifyCharacteristicChanged(it, characteristic, true)
-                }
-            } catch (e: SecurityException) {
-                Timber.e(e, "Security exception when sending indication")
             }
         }
     }

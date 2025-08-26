@@ -3,10 +3,10 @@ package com.spop.poverlay.ble
 import java.util.*
 
 /**
- * FTMS (Fitness Machine Service) UUIDs and constants
- * Based on the Bluetooth SIG specification for FTMS
+ * BLE Service and Characteristic UUIDs
+ * Based on Bluetooth SIG specifications for FTMS, Cycling Power Service, and Device Information Service
  */
-object FtmsUuids {
+object BleUuids {
     
     // FTMS Service UUID
     val FITNESS_MACHINE_SERVICE_UUID: UUID = UUID.fromString("00001826-0000-1000-8000-00805f9b34fb")
@@ -22,6 +22,15 @@ object FtmsUuids {
     val SUPPORTED_POWER_RANGE_UUID: UUID = UUID.fromString("00002AD8-0000-1000-8000-00805f9b34fb")
     val FITNESS_MACHINE_CONTROL_POINT_UUID: UUID = UUID.fromString("00002AD9-0000-1000-8000-00805f9b34fb")
     val FITNESS_MACHINE_STATUS_UUID: UUID = UUID.fromString("00002ADA-0000-1000-8000-00805f9b34fb")
+    
+    // Cycling Power Service UUID (0x1818)
+    val CYCLING_POWER_SERVICE_UUID: UUID = UUID.fromString("00001818-0000-1000-8000-00805f9b34fb")
+    
+    // Cycling Power Characteristics
+    val CYCLING_POWER_MEASUREMENT_UUID: UUID = UUID.fromString("00002A63-0000-1000-8000-00805f9b34fb")
+    val CYCLING_POWER_FEATURE_UUID: UUID = UUID.fromString("00002A65-0000-1000-8000-00805f9b34fb")
+    val SENSOR_LOCATION_UUID: UUID = UUID.fromString("00002A5D-0000-1000-8000-00805f9b34fb")
+    val CYCLING_POWER_CONTROL_POINT_UUID: UUID = UUID.fromString("00002A66-0000-1000-8000-00805f9b34fb")
     
     // Standard BLE UUIDs
     val CLIENT_CHARACTERISTIC_CONFIG_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")

@@ -60,7 +60,7 @@ class BleFtmsService : LifecycleEnabledService() {
     private val cadenceBuffer = mutableListOf<Float>()
     private val resistanceBuffer = mutableListOf<Float>()
     
-    private var bleFtmsServer: BleFtmsServer? = null
+    private var bleServerManager: BleServerManager? = null
     private var sensorInterface: SensorInterface? = null
     private var configurationRepository: ConfigurationRepository? = null
     
@@ -184,9 +184,9 @@ class BleFtmsService : LifecycleEnabledService() {
             return
         }
         
-        bleFtmsServer = BleFtmsServer(this, configurationRepository?.bleFtmsDeviceName?.value ?: "Grupetto FTMS")
+        bleServerManager = BleServerManager(this, configurationRepository?.bleFtmsDeviceName?.value ?: "Grupetto FTMS")
         
-        if (bleFtmsServer!!.startServer()) {
+        if (bleServerManager!!.startServer()) {
             isServiceEnabled = true
             startDataUpdates()
             updateNotification(true)
@@ -194,11 +194,11 @@ class BleFtmsService : LifecycleEnabledService() {
             
             // Send initial status
             lifecycleScope.launch {
-                bleFtmsServer?.sendFitnessMachineStatus(byteArrayOf(FtmsConstants.STATUS_STARTED_BY_EXTERNAL))
+                bleServerManager?.sendFitnessMachineStatus(byteArrayOf(0x08.toByte()))
             }
         } else {
             Timber.e("Failed to start FTMS server")
-            bleFtmsServer = null
+            bleServerManager = null
             updateNotification(false)
         }
     }
@@ -211,8 +211,8 @@ class BleFtmsService : LifecycleEnabledService() {
         
         isServiceEnabled = false
         stopDataUpdates()
-        bleFtmsServer?.stopServer()
-        bleFtmsServer = null
+        bleServerManager?.stopServer()
+        bleServerManager = null
         updateNotification(false)
         resetCounters()
         Timber.i("FTMS service stopped")
@@ -340,7 +340,7 @@ class BleFtmsService : LifecycleEnabledService() {
         Timber.d("Sending smoothed FTMS data: power=${ftmsData.instantaneousPower}W, cadence=${ftmsData.instantaneousCadence}RPM, resistance=${ftmsData.resistanceLevel}")
         
         // Send data to connected BLE devices
-        bleFtmsServer?.sendIndoorBikeData(ftmsData)
+        bleServerManager?.sendIndoorBikeData(ftmsData)
         
         lastPowerValue = power
         lastUpdateTime = currentTime
@@ -390,6 +390,15 @@ class BleFtmsService : LifecycleEnabledService() {
     }
     
     private fun updateNotification(isRunning: Boolean) {
+        // Check for notification permission on Android 13+
+        if (Build.VERSION.SDK_INT >= 33) { // TIRAMISU = API 33
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) 
+                != PackageManager.PERMISSION_GRANTED) {
+                Timber.w("POST_NOTIFICATIONS permission not granted, skipping notification update")
+                return
+            }
+        }
+        
         val notification = createNotification(isRunning)
         val notificationManager = NotificationManagerCompat.from(this)
         try {
