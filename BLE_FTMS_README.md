@@ -13,7 +13,7 @@ This integration adds Bluetooth Low Energy Fitness Machine Service (FTMS) capabi
 ## How it Works
 
 1. The `BleFtmsService` starts as a foreground service when enabled
-2. It creates a `BleFtmsServer` that sets up a Bluetooth GATT server
+2. It creates a `BleServer` that sets up a Bluetooth GATT server
 3. The server advertises the Fitness Machine Service (UUID: 0x1826)
 4. Data from the Peloton sensor interfaces is converted to FTMS format
 5. Connected apps receive notifications with updated bike data every second
@@ -21,7 +21,7 @@ This integration adds Bluetooth Low Energy Fitness Machine Service (FTMS) capabi
 ## Configuration
 
 - **Enable BLE FTMS**: Toggle in the main configuration screen
-- **Device Name**: Customize the Bluetooth device name (default: "Grupetto FTMS")
+- **Device Name**: Customize the Bluetooth device name (default: "Grupetto")
 
 ## Supported FTMS Characteristics
 
@@ -46,7 +46,7 @@ This integration adds Bluetooth Low Energy Fitness Machine Service (FTMS) capabi
 ## File Structure
 
 - `ble/BleFtmsService.kt` - Main service managing the BLE server lifecycle
-- `ble/BleFtmsServer.kt` - BLE GATT server implementation
+- `ble/BleServer.kt` - BLE GATT server implementation
 - `ble/FtmsData.kt` - Data structures and byte formatting for FTMS
 - `ble/FtmsUuids.kt` - FTMS service and characteristic UUIDs
 - `ble/BikeDataToFtmsConverter.kt` - Conversion utilities
@@ -64,7 +64,7 @@ This integration adds Bluetooth Low Energy Fitness Machine Service (FTMS) capabi
 1. Enable BLE FTMS in the Grupetto configuration
 2. Grant Bluetooth permissions when prompted
 3. Open your fitness app (Zwift, TrainerRoad, etc.)
-4. Look for "Grupetto FTMS" (or your custom device name) in the app's device list
+4. Look for "Grupetto" (or your custom device name) in the app's device list
 5. Connect to the device as a power meter, cadence sensor, and/or controllable trainer
 6. Start your workout - the app will receive real-time data from your Peloton bike
 

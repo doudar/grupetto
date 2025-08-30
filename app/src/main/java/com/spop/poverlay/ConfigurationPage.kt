@@ -41,18 +41,18 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                     viewModel.showTimerWhenMinimized.collectAsStateWithLifecycle(
                             initialValue = true
                     )
-            val bleFtmsEnabled by
-                    viewModel.bleFtmsEnabled.collectAsStateWithLifecycle(initialValue = false)
-            val bleFtmsDeviceName by
-                    viewModel.bleFtmsDeviceName.collectAsStateWithLifecycle(
-                            initialValue = "Grupetto FTMS"
+            val bleEnabled by
+                    viewModel.bleEnabled.collectAsStateWithLifecycle(initialValue = false)
+            val bleDeviceName by
+                    viewModel.bleDeviceName.collectAsStateWithLifecycle(
+                            initialValue = "Grupetto"
                     )
             StartServicePage(
                     timerShownWhenMinimized,
                     viewModel::onShowTimerWhenMinimizedClicked,
-                    bleFtmsEnabled,
-                    viewModel::onBleFtmsEnabledClicked,
-                    bleFtmsDeviceName,
+                    bleEnabled,
+                    viewModel::onbleEnabledClicked,
+                    bleDeviceName,
                     viewModel::onStartServiceClicked,
                     viewModel::onRestartClicked,
                     viewModel::onClickedRelease,
@@ -66,9 +66,9 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
 private fun StartServicePage(
         timerShownWhenMinimized: Boolean,
         onTimerShownWhenMinimizedToggled: (Boolean) -> Unit,
-        bleFtmsEnabled: Boolean,
-        onBleFtmsEnabledToggled: (Boolean) -> Unit,
-        bleFtmsDeviceName: String,
+        bleEnabled: Boolean,
+        onbleEnabledToggled: (Boolean) -> Unit,
+        bleDeviceName: String,
         onClickedStartOverlay: () -> Unit,
         onClickedRestartApp: () -> Unit,
         onClickedRelease: (Release) -> Unit,
@@ -104,24 +104,24 @@ private fun StartServicePage(
                 onCheckedChange = onTimerShownWhenMinimizedToggled
         )
     }
-    // BLE FTMS Settings
+    // BLE Settings
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
-                text = "BLE FTMS (Fitness Machine Service), Enable BLE FTMS transmission?",
+                text = "Enable BLE transmission?",
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold
         )
-        Checkbox(checked = bleFtmsEnabled, onCheckedChange = onBleFtmsEnabledToggled)
+        Checkbox(checked = bleEnabled, onCheckedChange = onbleEnabledToggled)
     }
 
-    if (bleFtmsEnabled) {
+    if (bleEnabled) {
         Row {
-            Text(text = "BLE FTMS is enabled and running!", fontSize = 14.sp, color = Color.Green)
+            Text(text = "BLE Server is enabled and running!", fontSize = 14.sp, color = Color.Green)
 
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                    text = " Look for '$bleFtmsDeviceName' in your fitness app's device list",
+                    text = " Look for '$bleDeviceName' in your fitness app's device list",
                     fontSize = 14.sp
             )
         }

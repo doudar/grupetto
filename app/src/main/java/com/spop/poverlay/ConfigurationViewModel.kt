@@ -10,7 +10,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
-import com.spop.poverlay.ble.BleFtmsService
+import com.spop.poverlay.ble.BleServer
 import com.spop.poverlay.overlay.OverlayService
 import com.spop.poverlay.releases.Release
 import com.spop.poverlay.releases.ReleaseChecker
@@ -36,11 +36,11 @@ class ConfigurationViewModel(
     val showTimerWhenMinimized
         get() = configurationRepository.showTimerWhenMinimized
 
-    val bleFtmsEnabled
-        get() = configurationRepository.bleFtmsEnabled
+    val bleEnabled
+        get() = configurationRepository.bleEnabled
 
-    val bleFtmsDeviceName
-        get() = configurationRepository.bleFtmsDeviceName
+    val bleDeviceName
+        get() = configurationRepository.bleDeviceName
 
     init {
         updatePermissionState()
@@ -58,9 +58,9 @@ class ConfigurationViewModel(
         configurationRepository.setShowTimerWhenMinimized(isChecked)
     }
 
-    fun onBleFtmsEnabledClicked(isChecked: Boolean) {
+    fun onbleEnabledClicked(isChecked: Boolean) {
         // Always update the state immediately to reflect user intent
-        configurationRepository.setBleFtmsEnabled(isChecked)
+        configurationRepository.setbleEnabled(isChecked)
         
         if (isChecked && !hasBluetoothPermissions()) {
             // Request permissions, but keep the checkbox checked to show user intent
@@ -70,21 +70,21 @@ class ConfigurationViewModel(
         }
         
         if (isChecked) {
-            startBleFtmsService()
+            startBLEServer()
         } else {
-            stopBleFtmsService()
+            stopBLEServer()
         }
     }
 
     fun onBluetoothPermissionsResult(granted: Boolean) {
         if (granted) {
             // Permissions granted - start the service (state is already set to true)
-            startBleFtmsService()
-            infoPopup.postValue("Bluetooth permissions granted. BLE FTMS service started.")
+            startBLEServer()
+            infoPopup.postValue("Bluetooth permissions granted. BLE server started.")
         } else {
             // Permissions denied - revert the checkbox state
-            configurationRepository.setBleFtmsEnabled(false)
-            infoPopup.postValue("Bluetooth permissions are required for BLE FTMS functionality.")
+            configurationRepository.setbleEnabled(false)
+            infoPopup.postValue("Bluetooth permissions are required for BLE server functionality.")
         }
     }
 
@@ -105,15 +105,15 @@ class ConfigurationViewModel(
         return permissions.toTypedArray()
     }
 
-    fun onBleFtmsDeviceNameChanged(name: String) {
-        configurationRepository.setBleFtmsDeviceName(name)
+    fun onbleDeviceNameChanged(name: String) {
+        configurationRepository.setbleDeviceName(name)
     }
 
-    private fun startBleFtmsService() {
+    private fun startBLEServer() {
         if (hasBluetoothPermissions()) {
             try {
-                val intent = Intent(getApplication(), BleFtmsService::class.java).apply {
-                    action = BleFtmsService.ACTION_START_FTMS
+                val intent = Intent(getApplication(), BleServer::class.java).apply {
+                    action = BleServer.ACTION_START
                 }
                 ContextCompat.startForegroundService(getApplication(), intent)
                 Timber.i("Started BLE FTMS service")
@@ -126,15 +126,15 @@ class ConfigurationViewModel(
         }
     }
 
-    private fun stopBleFtmsService() {
+    private fun stopBLEServer() {
         try {
-            val intent = Intent(getApplication(), BleFtmsService::class.java).apply {
-                action = BleFtmsService.ACTION_STOP_FTMS
+            val intent = Intent(getApplication(), BleServer::class.java).apply {
+                action = BleServer.ACTION_STOP
             }
             getApplication<Application>().startService(intent)
-            Timber.i("Stopped BLE FTMS service")
+            Timber.i("Stopped BLE Server")
         } catch (e: Exception) {
-            Timber.e(e, "Failed to stop BLE FTMS service")
+            Timber.e(e, "Failed to stop BLE Server")
         }
     }
 

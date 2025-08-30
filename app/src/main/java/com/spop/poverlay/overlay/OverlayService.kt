@@ -75,13 +75,13 @@ class OverlayService : LifecycleEnabledService() {
         buildDialog()
         
         // Start BLE FTMS service if enabled
-        startBleFtmsServiceIfEnabled()
+        startBLEServerIfEnabled()
     }
 
-    private fun startBleFtmsServiceIfEnabled() {
+    private fun startBLEServerIfEnabled() {
         val configRepo = ConfigurationRepository(applicationContext, this)
         lifecycleScope.launchWhenCreated {
-            configRepo.bleFtmsEnabled.collect { enabled ->
+            configRepo.bleEnabled.collect { enabled ->
                 if (enabled) {
                     try {
                         val intent = Intent(this@OverlayService, BleFtmsService::class.java).apply {

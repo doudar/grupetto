@@ -41,26 +41,14 @@ import kotlin.time.Duration.Companion.seconds
  */
 class BleFtmsService : LifecycleEnabledService() {
     
-    companion object {
-        private const val NOTIFICATION_ID = 2033
-        private const val NOTIFICATION_CHANNEL_ID = "ble_ftms_service"
-        private const val UPDATE_INTERVAL_MS = 500L // 500ms for responsive data updates
-        private const val SMOOTHING_BUFFER_SIZE = 5 // Number of samples to average
-        private const val OUTLIER_THRESHOLD = 2.0 // Standard deviations for outlier detection
-        private var lastUpdateTime = System.currentTimeMillis()
 
-        // Actions for service control
-        const val ACTION_START_FTMS = "com.spop.poverlay.ble.START_FTMS"
-        const val ACTION_STOP_FTMS = "com.spop.poverlay.ble.STOP_FTMS"
-        const val ACTION_TOGGLE_FTMS = "com.spop.poverlay.ble.TOGGLE_FTMS"
-    }
     
     // Data smoothing buffers
     private val powerBuffer = mutableListOf<Float>()
     private val cadenceBuffer = mutableListOf<Float>()
     private val resistanceBuffer = mutableListOf<Float>()
     
-    private var bleFtmsServer: BleFtmsServer? = null
+    private var BleServer: BleServer? = null
     private var sensorInterface: SensorInterface? = null
     private var configurationRepository: ConfigurationRepository? = null
     
@@ -102,7 +90,7 @@ class BleFtmsService : LifecycleEnabledService() {
             ACTION_TOGGLE_FTMS -> toggleFtmsService()
             else -> {
                 // Default behavior - check if we should auto-start
-                if (configurationRepository?.bleFtmsEnabled?.value == true) {
+                if (configurationRepository?.bleEnabled?.value == true) {
                     startFtmsService()
                 }
             }
@@ -184,9 +172,9 @@ class BleFtmsService : LifecycleEnabledService() {
             return
         }
         
-        bleFtmsServer = BleFtmsServer(this, configurationRepository?.bleFtmsDeviceName?.value ?: "Grupetto FTMS")
+        BleServer = BleServer(this, configurationRepository?.bleDeviceName?.value ?: "Grupetto")
         
-        if (bleFtmsServer!!.startServer()) {
+        if (BleServer!!.startServer()) {
             isServiceEnabled = true
             startDataUpdates()
             updateNotification(true)
@@ -194,11 +182,11 @@ class BleFtmsService : LifecycleEnabledService() {
             
             // Send initial status
             lifecycleScope.launch {
-                bleFtmsServer?.sendFitnessMachineStatus(byteArrayOf(FtmsConstants.STATUS_STARTED_BY_EXTERNAL))
+                BleServer?.sendFitnessMachineStatus(byteArrayOf(FtmsConstants.STATUS_STARTED_BY_EXTERNAL))
             }
         } else {
             Timber.e("Failed to start FTMS server")
-            bleFtmsServer = null
+            BleServer = null
             updateNotification(false)
         }
     }
@@ -211,8 +199,8 @@ class BleFtmsService : LifecycleEnabledService() {
         
         isServiceEnabled = false
         stopDataUpdates()
-        bleFtmsServer?.stopServer()
-        bleFtmsServer = null
+        BleServer?.stopServer()
+        BleServer = null
         updateNotification(false)
         resetCounters()
         Timber.i("FTMS service stopped")
@@ -340,7 +328,7 @@ class BleFtmsService : LifecycleEnabledService() {
         Timber.d("Sending smoothed FTMS data: power=${ftmsData.instantaneousPower}W, cadence=${ftmsData.instantaneousCadence}RPM, resistance=${ftmsData.resistanceLevel}")
         
         // Send data to connected BLE devices
-        bleFtmsServer?.sendIndoorBikeData(ftmsData)
+        BleServer?.sendIndoorBikeData(ftmsData)
         
         lastPowerValue = power
         lastUpdateTime = currentTime

@@ -11,8 +11,8 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
 
     enum class Preferences(val key: String) {
         ShowTimerWhenMinimized("showTimerWhenMinimized"),
-        BleFtmsEnabled("bleFtmsEnabled"),
-        BleFtmsDeviceName("bleFtmsDeviceName")
+        bleEnabled("bleEnabled"),
+        bleDeviceName("bleDeviceName")
     }
 
     companion object {
@@ -24,12 +24,12 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
     }
 
     private val mutableShowTimerWhenMinimized = MutableStateFlow(true)
-    private val mutableBleFtmsEnabled = MutableStateFlow(false)
-    private val mutableBleFtmsDeviceName = MutableStateFlow("Grupetto FTMS")
+    private val mutablebleEnabled = MutableStateFlow(false)
+    private val mutablebleDeviceName = MutableStateFlow("Grupetto")
 
     val showTimerWhenMinimized = mutableShowTimerWhenMinimized
-    val bleFtmsEnabled = mutableBleFtmsEnabled
-    val bleFtmsDeviceName = mutableBleFtmsDeviceName
+    val bleEnabled = mutablebleEnabled
+    val bleDeviceName = mutablebleDeviceName
 
     private val sharedPreferences: SharedPreferences
 
@@ -62,17 +62,17 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         }
     }
 
-    fun setBleFtmsEnabled(enabled: Boolean) {
-        mutableBleFtmsEnabled.value = enabled
+    fun setbleEnabled(enabled: Boolean) {
+        mutablebleEnabled.value = enabled
         sharedPreferences.edit {
-            putBoolean(Preferences.BleFtmsEnabled.key, enabled)
+            putBoolean(Preferences.bleEnabled.key, enabled)
         }
     }
 
-    fun setBleFtmsDeviceName(name: String) {
-        mutableBleFtmsDeviceName.value = name
+    fun setbleDeviceName(name: String) {
+        mutablebleDeviceName.value = name
         sharedPreferences.edit {
-            putString(Preferences.BleFtmsDeviceName.key, name)
+            putString(Preferences.bleDeviceName.key, name)
         }
     }
 
@@ -81,13 +81,13 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
             sharedPreferences
                 .getBoolean(Preferences.ShowTimerWhenMinimized.key, true)
 
-        mutableBleFtmsEnabled.value =
+        mutablebleEnabled.value =
             sharedPreferences
-                .getBoolean(Preferences.BleFtmsEnabled.key, false)
+                .getBoolean(Preferences.bleEnabled.key, false)
 
-        mutableBleFtmsDeviceName.value =
+        mutablebleDeviceName.value =
             sharedPreferences
-                .getString(Preferences.BleFtmsDeviceName.key, "Grupetto FTMS") ?: "Grupetto FTMS"
+                .getString(Preferences.bleDeviceName.key, "Grupetto") ?: "Grupetto"
     }
 
     override fun close() {
