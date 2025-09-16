@@ -42,6 +42,9 @@ class ConfigurationViewModel(
     val bleFtmsDeviceName
         get() = configurationRepository.bleFtmsDeviceName
 
+    val showOverlay
+        get() = configurationRepository.showOverlay
+
     private val bleServer = (application as GrupettoApplication).bleServer
 
     init {
@@ -61,6 +64,10 @@ class ConfigurationViewModel(
 
     fun onShowTimerWhenMinimizedClicked(isChecked: Boolean) {
         configurationRepository.setShowTimerWhenMinimized(isChecked)
+    }
+
+    fun onShowOverlayClicked(isChecked: Boolean) {
+        configurationRepository.setShowOverlay(isChecked)
     }
 
     fun onBleTxEnabledClicked(isChecked: Boolean) {
