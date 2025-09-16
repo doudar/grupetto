@@ -96,7 +96,7 @@ private fun StartServicePage(
             onClick = onClickedStartOverlay,
     ) {
         Text(
-                text = "Click here to start the overlay",
+                text = if (showOverlay) "Click here to start the overlay" else "Start service (BLE only)",
                 fontSize = 30.sp,
                 fontFamily = LatoFontFamily,
                 fontWeight = FontWeight.Bold,
@@ -136,6 +136,15 @@ private fun StartServicePage(
             Text(
                     text = " Look for '$bleFtmsDeviceName' in your fitness app's device list",
                     fontSize = 14.sp
+            )
+        }
+        
+        if (!showOverlay) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                    text = "ℹ️ BLE transmission is active without overlay display",
+                    fontSize = 14.sp,
+                    color = Color.Blue
             )
         }
     } else {

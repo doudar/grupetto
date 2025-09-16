@@ -86,40 +86,19 @@ class OverlayService : LifecycleEnabledService() {
     }
 
     private fun buildDialog() {
+        val configurationRepository = ConfigurationRepository(applicationContext, this)
+        
+        // Check if overlay should be shown
+        if (!configurationRepository.showOverlay.value) {
+            // Skip overlay creation when disabled - BLE is handled by the application
+            return
+        }
+
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val screenSize = Size(
             resources.displayMetrics.widthPixels.toFloat(),
             resources.displayMetrics.heightPixels.toFloat()
         )
-
-        val configurationRepository = ConfigurationRepository(applicationContext, this)
-        
-        // Check if overlay should be shown
-        if (!configurationRepository.showOverlay.value) {
-            // Start sensor interface even when overlay is disabled to keep BLE alive
-            val sensorInterface = if (IsRunningOnPeloton) {
-                if (IsBikePlus) {
-                    PelotonBikePlusSensorInterface(this).also {
-                        lifecycle.addObserver(object : DefaultLifecycleObserver {
-                            override fun onDestroy(owner: LifecycleOwner) {
-                                it.stop()
-                            }
-                        })
-                    }
-                } else {
-                    PelotonBikeSensorInterfaceV1New(this).also {
-                        lifecycle.addObserver(object : DefaultLifecycleObserver {
-                            override fun onDestroy(owner: LifecycleOwner) {
-                                it.stop()
-                            }
-                        })
-                    }
-                }
-            } else {
-                EmulatorSensorInterface
-            }
-            return
-        }
 
         val sensorInterface = if (IsRunningOnPeloton) {
             if (IsBikePlus) {
