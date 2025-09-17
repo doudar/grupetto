@@ -29,7 +29,7 @@ import com.spop.poverlay.MainActivity
 import com.spop.poverlay.R
 import com.spop.poverlay.sensor.DeadSensorDetector
 import com.spop.poverlay.sensor.interfaces.DummySensorInterface
-import com.spop.poverlay.sensor.interfaces.PelotonBikeSensorInterface
+import com.spop.poverlay.sensor.interfaces.PelotonBikeSensorInterfaceV1New
 import com.spop.poverlay.sensor.interfaces.PelotonBikePlusSensorInterface
 import com.spop.poverlay.util.IsBikePlus
 import com.spop.poverlay.util.IsRunningOnPeloton
@@ -100,7 +100,7 @@ class OverlayService : LifecycleEnabledService() {
                     })
                 }
             } else {
-                PelotonBikeSensorInterface(this).also {
+                PelotonBikeSensorInterfaceV1New(this).also {
                     lifecycle.addObserver(object : DefaultLifecycleObserver {
                         override fun onDestroy(owner: LifecycleOwner) {
                             it.stop()

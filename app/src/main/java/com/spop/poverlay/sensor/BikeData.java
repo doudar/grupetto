@@ -1,4 +1,4 @@
-package com.spop.poverlay.sensor.v2;
+package com.spop.poverlay.sensor;
 
 import android.os.Parcel;
 import android.os.Parcelable;

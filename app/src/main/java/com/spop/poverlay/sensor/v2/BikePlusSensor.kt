@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
+import com.spop.poverlay.sensor.BikeData
 
 data class BikeDataHelper(val bikeData: BikeData, val command: Command) {
     val value: Float
