@@ -13,20 +13,28 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions
 import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
 import androidx.core.text.HtmlCompat
 import androidx.lifecycle.lifecycleScope
+import com.spop.poverlay.releases.Release
 import com.spop.poverlay.releases.ReleaseChecker
 import com.spop.poverlay.ui.theme.PTONOverlayTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Date
 
 
 class MainActivity : ComponentActivity() {
@@ -131,6 +139,81 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun DefaultPreview() {
     PTONOverlayTheme {
-        // Preview placeholder - actual ConfigurationPage requires ViewModel
+        ConfigurationPagePreview()
+    }
+}
+
+@Preview(showBackground = true, name = "Permission Page")
+@Composable
+fun PermissionPagePreview() {
+    PTONOverlayTheme {
+        Column(
+            Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            PermissionPage(onClickedGrantPermission = { })
+        }
+    }
+}
+
+@Preview(showBackground = true, name = "BLE Enabled")
+@Composable
+fun ConfigurationPageBleEnabledPreview() {
+    PTONOverlayTheme {
+        val mockRelease = Release(
+            tagName = "v0.0.7",
+            friendlyName = "Latest Preview Release",
+            createdAt = Date(),
+            url = android.net.Uri.parse("https://github.com/doudar/grupetto/releases/latest")
+        )
+        
+        Column(
+            Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            StartServicePage(
+                timerShownWhenMinimized = false,
+                onTimerShownWhenMinimizedToggled = { },
+                bleTxEnabled = true,
+                onBleTxEnabledToggled = { },
+                bleFtmsDeviceName = "Grupetto FTMS",
+                onClickedStartOverlay = { },
+                onClickedRestartApp = { },
+                onClickedRelease = { },
+                latestRelease = mockRelease
+            )
+        }
+    }
+}
+
+@Composable
+fun ConfigurationPagePreview() {
+    // Mock data for preview - no permissions required
+    val mockRelease = Release(
+        tagName = "v0.0.7",
+        friendlyName = "Latest Preview Release",
+        createdAt = Date(),
+        url = android.net.Uri.parse("https://github.com/doudar/grupetto/releases/latest")
+    )
+    
+    Column(
+        Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        // Preview the main configuration page (not permission page)
+        StartServicePage(
+            timerShownWhenMinimized = true,
+            onTimerShownWhenMinimizedToggled = { },
+            bleTxEnabled = false,
+            onBleTxEnabledToggled = { },
+            bleFtmsDeviceName = "Grupetto FTMS",
+            onClickedStartOverlay = { },
+            onClickedRestartApp = { },
+            onClickedRelease = { },
+            latestRelease = mockRelease
+        )
     }
 }

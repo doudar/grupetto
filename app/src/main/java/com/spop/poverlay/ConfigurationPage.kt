@@ -63,7 +63,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
 }
 
 @Composable
-private fun StartServicePage(
+internal fun StartServicePage(
         timerShownWhenMinimized: Boolean,
         onTimerShownWhenMinimizedToggled: (Boolean) -> Unit,
         bleTxEnabled: Boolean,
@@ -189,7 +189,7 @@ private fun StartServicePage(
 }
 
 @Composable
-private fun PermissionPage(onClickedGrantPermission: () -> Unit) {
+internal fun PermissionPage(onClickedGrantPermission: () -> Unit) {
     Text(
             text = "Grupetto Needs Permission To Draw Over Other Apps",
             fontSize = 40.sp,
