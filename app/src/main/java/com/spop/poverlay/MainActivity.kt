@@ -34,11 +34,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        viewModel =
-            ConfigurationViewModel(
-                application, ConfigurationRepository(applicationContext, this),
-                ReleaseChecker()
-            )
+        val app = application as GrupettoApplication
+        viewModel = ConfigurationViewModel(
+            application,
+            ConfigurationRepository(applicationContext, this),
+            ReleaseChecker(),
+            app.bleServer,
+        )
         viewModel.finishActivity.observe(this) {
             finish()
         }

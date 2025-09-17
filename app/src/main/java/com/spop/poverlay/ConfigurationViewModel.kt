@@ -23,6 +23,7 @@ class ConfigurationViewModel(
     application: Application,
     private val configurationRepository: ConfigurationRepository,
     private val releaseChecker: ReleaseChecker,
+    private val bleServer: com.spop.poverlay.ble.BleServer,
 ) : AndroidViewModel(application) {
     val finishActivity = MutableLiveData<Unit>()
     val requestOverlayPermission = MutableLiveData<Unit>()
@@ -41,8 +42,6 @@ class ConfigurationViewModel(
 
     val bleFtmsDeviceName
         get() = configurationRepository.bleFtmsDeviceName
-
-    private val bleServer = (application as GrupettoApplication).bleServer
 
     init {
         updatePermissionState()
