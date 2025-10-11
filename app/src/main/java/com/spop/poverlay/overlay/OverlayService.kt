@@ -86,6 +86,14 @@ class OverlayService : LifecycleEnabledService() {
     }
 
     private fun buildDialog() {
+        val configurationRepository = ConfigurationRepository(applicationContext, this)
+        
+        // Check if overlay should be shown
+        if (!configurationRepository.showOverlay.value) {
+            // Skip overlay creation when disabled - BLE is handled by the application
+            return
+        }
+
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val screenSize = Size(
             resources.displayMetrics.widthPixels.toFloat(),
@@ -123,7 +131,7 @@ class OverlayService : LifecycleEnabledService() {
 
         val timerViewModel = OverlayTimerViewModel(
             application,
-            ConfigurationRepository(applicationContext, this)
+            configurationRepository
         )
         val dialogViewModel = OverlayDialogViewModel(screenSize, sensorViewModel.isMinimized)
 

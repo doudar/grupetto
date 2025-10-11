@@ -47,12 +47,16 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                     viewModel.bleFtmsDeviceName.collectAsStateWithLifecycle(
                             initialValue = "Grupetto FTMS"
                     )
+            val showOverlay by
+                    viewModel.showOverlay.collectAsStateWithLifecycle(initialValue = true)
             StartServicePage(
                     timerShownWhenMinimized,
                     viewModel::onShowTimerWhenMinimizedClicked,
                     bleTxEnabled,
                     viewModel::onBleTxEnabledClicked,
                     bleFtmsDeviceName,
+                    showOverlay,
+                    viewModel::onShowOverlayClicked,
                     viewModel::onStartServiceClicked,
                     viewModel::onRestartClicked,
                     viewModel::onClickedRelease,
@@ -69,6 +73,8 @@ private fun StartServicePage(
         bleTxEnabled: Boolean,
         onBleTxEnabledToggled: (Boolean) -> Unit,
         bleFtmsDeviceName: String,
+        showOverlay: Boolean,
+        onShowOverlayToggled: (Boolean) -> Unit,
         onClickedStartOverlay: () -> Unit,
         onClickedRestartApp: () -> Unit,
         onClickedRelease: (Release) -> Unit,
@@ -90,7 +96,7 @@ private fun StartServicePage(
             onClick = onClickedStartOverlay,
     ) {
         Text(
-                text = "Click here to start the overlay",
+                text = if (showOverlay) "Click here to start the overlay" else "Start service (BLE only)",
                 fontSize = 30.sp,
                 fontFamily = LatoFontFamily,
                 fontWeight = FontWeight.Bold,
@@ -102,6 +108,13 @@ private fun StartServicePage(
         Checkbox(
                 checked = timerShownWhenMinimized,
                 onCheckedChange = onTimerShownWhenMinimizedToggled
+        )
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(text = "Show overlay on screen?", fontSize = 20.sp)
+        Checkbox(
+                checked = showOverlay,
+                onCheckedChange = onShowOverlayToggled
         )
     }
     // BLE FTMS Settings
@@ -123,6 +136,15 @@ private fun StartServicePage(
             Text(
                     text = " Look for '$bleFtmsDeviceName' in your fitness app's device list",
                     fontSize = 14.sp
+            )
+        }
+        
+        if (!showOverlay) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                    text = "ℹ️ BLE transmission is active without overlay display",
+                    fontSize = 14.sp,
+                    color = Color.Blue
             )
         }
     } else {
