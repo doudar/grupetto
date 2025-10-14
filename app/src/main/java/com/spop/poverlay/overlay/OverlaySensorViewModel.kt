@@ -98,6 +98,15 @@ class OverlaySensorViewModel(
     val resistanceValue = sensorInterface.resistance
         .map { "%.0f".format(it) }
 
+    val heartRateValue = sensorInterface.heartRate
+        .map { bpm ->
+            if (bpm.isFinite() && bpm > 0f) {
+                "%.0f".format(bpm)
+            } else {
+                SensorValuePlaceholderText
+            }
+        }
+
     val speedValue = combine(
         sensorInterface.speed, useMph
     ) { speed, isMph ->

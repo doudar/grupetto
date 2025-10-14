@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlin.math.sin
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Used to generate fake data on the emulator
@@ -18,6 +19,8 @@ class DummySensorInterface : SensorInterface {
         get() = dummyValueFlow(150f)
     override val resistance: Flow<Float>
         get() = dummyValueFlow(110f)
+    override val heartRate: Flow<Float>
+        get() = heartRateFlow()
 
     private fun intervalPowerFlow() = flow {
         while (true) {
@@ -54,6 +57,16 @@ class DummySensorInterface : SensorInterface {
         for(value in sineValues){
             delay(100.milliseconds)
             emit(value.toFloat())
+        }
+    }
+
+    private fun heartRateFlow() = flow {
+        val pattern = listOf(110f, 118f, 125f, 135f, 142f, 150f, 145f, 138f, 130f, 120f)
+        while (true) {
+            for (value in pattern) {
+                emit(value)
+                delay(1.seconds)
+            }
         }
     }
 }

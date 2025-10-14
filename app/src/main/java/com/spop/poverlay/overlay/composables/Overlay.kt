@@ -61,6 +61,7 @@ fun Overlay(
     val speed by sensorViewModel.speedValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
     val speedLabel by sensorViewModel.speedLabel.collectAsStateWithLifecycle(initialValue = "")
     val calories by sensorViewModel.caloriesValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
+    val heartRate by sensorViewModel.heartRateValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
     val timerLabel by timerViewModel.timerLabel.collectAsStateWithLifecycle(initialValue = "")
     val isTimerPaused by timerViewModel.timerPaused.collectAsStateWithLifecycle(initialValue = false)
     val errorMessage by sensorViewModel.errorMessage.collectAsStateWithLifecycle(initialValue = null)
@@ -138,6 +139,7 @@ fun Overlay(
             cadenceLabel = rpm,
             speedLabel = speed,
             resistanceLabel = resistance,
+            heartRateLabel = heartRate,
             onTap = { timerViewModel.onTimerTap() },
             onLongPress = { timerViewModel.onTimerLongPress() },
             onLayout = onTimerLayout
@@ -191,6 +193,7 @@ fun Overlay(
                 pauseChart = isCurrentlyAnimating,
                 powerGraph = powerGraph,
                 resistance = resistance,
+                heartRate = heartRate,
                 speed = speed,
                 speedLabel = speedLabel,
                 calories = calories,

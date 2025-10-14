@@ -31,7 +31,9 @@ import com.spop.poverlay.MainActivity
 import com.spop.poverlay.R
 
 import com.spop.poverlay.sensor.DeadSensorDetector
+import com.spop.poverlay.sensor.heartrate.HeartRateMonitor
 import com.spop.poverlay.sensor.interfaces.DummySensorInterface
+import com.spop.poverlay.sensor.interfaces.HeartRateAugmentedSensorInterface
 import com.spop.poverlay.sensor.interfaces.PelotonBikeSensorInterfaceV1New
 import com.spop.poverlay.sensor.interfaces.PelotonBikePlusSensorInterface
 import com.spop.poverlay.util.IsBikePlus
@@ -124,16 +126,36 @@ class OverlayService : LifecycleEnabledService() {
             EmulatorSensorInterface
         }
 
+        val heartRateMonitor = HeartRateMonitor(this)
+        lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onResume(owner: LifecycleOwner) {
+                heartRateMonitor.start()
+            }
+
+            override fun onPause(owner: LifecycleOwner) {
+                heartRateMonitor.stop()
+            }
+
+            override fun onDestroy(owner: LifecycleOwner) {
+                heartRateMonitor.close()
+            }
+        })
+
+        val sensorWithHeartRate = HeartRateAugmentedSensorInterface(
+            sensorInterface,
+            heartRateMonitor.heartRate
+        )
+
         val timerViewModel = OverlayTimerViewModel(
             application,
             ConfigurationRepository(applicationContext, this),
-            sensorInterface.power
+            sensorWithHeartRate.power
         )
 
         val sensorViewModel = OverlaySensorViewModel(
             application,
-            sensorInterface,
-            DeadSensorDetector(sensorInterface, this.coroutineContext),
+            sensorWithHeartRate,
+            DeadSensorDetector(sensorWithHeartRate, this.coroutineContext),
             timerViewModel
         )
 
