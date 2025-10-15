@@ -29,6 +29,7 @@ fun OverlayMainContent(
     speed: String,
     speedLabel: String,
     calories: String,
+    showCalories: Boolean,
     pauseChart : Boolean,
     onSpeedClicked : ()->Unit,
     onChartClicked : ()->Unit
@@ -82,7 +83,9 @@ fun OverlayMainContent(
             StatCard("Heart Rate", heartRate, "bpm", statCardModifier)
         }
 
-        StatCard("Calories", calories, "kcal", statCardModifier)
+        if (showCalories) {
+            StatCard("Calories", calories, "kcal", statCardModifier)
+        }
 
     }
 }

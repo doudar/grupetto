@@ -47,6 +47,7 @@ fun Overlay(
     sensorViewModel: OverlaySensorViewModel,
     timerViewModel: OverlayTimerViewModel,
     showHeartRateFlow: StateFlow<Boolean>,
+    showCaloriesFlow: StateFlow<Boolean>,
     height: Dp,
     locationState: State<OverlayLocation>,
     horizontalDragCallback: (Float) -> Float,
@@ -65,6 +66,7 @@ fun Overlay(
     val calories by sensorViewModel.caloriesValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
     val heartRate by sensorViewModel.heartRateValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
     val showHeartRate by showHeartRateFlow.collectAsStateWithLifecycle(initialValue = showHeartRateFlow.value)
+    val showCalories by showCaloriesFlow.collectAsStateWithLifecycle(initialValue = showCaloriesFlow.value)
     val timerLabel by timerViewModel.timerLabel.collectAsStateWithLifecycle(initialValue = "")
     val isTimerPaused by timerViewModel.timerPaused.collectAsStateWithLifecycle(initialValue = false)
     val errorMessage by sensorViewModel.errorMessage.collectAsStateWithLifecycle(initialValue = null)
@@ -136,6 +138,7 @@ fun Overlay(
             timerPaused = isTimerPaused,
             showTimerWhenMinimized = showTimerWhenMinimized,
             showHeartRate = showHeartRate,
+            showCalories = showCalories,
             location = location,
             powerLabel = power,
             contentAlpha = timerAlpha,
@@ -143,6 +146,7 @@ fun Overlay(
             cadenceLabel = rpm,
             speedLabel = speed,
             resistanceLabel = resistance,
+            caloriesLabel = calories,
             heartRateLabel = heartRate,
             onTap = { timerViewModel.onTimerTap() },
             onLongPress = { timerViewModel.onTimerLongPress() },
@@ -202,6 +206,7 @@ fun Overlay(
                 speed = speed,
                 speedLabel = speedLabel,
                 calories = calories,
+                showCalories = showCalories,
                 onSpeedClicked = { sensorViewModel.onClickedSpeed() },
                 onChartClicked = { sensorViewModel.onOverlayPressed() }
             )

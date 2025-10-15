@@ -55,6 +55,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                 viewModel.bleFtmsDeviceName.collectAsStateWithLifecycle(initialValue = "Grupetto FTMS")
             val showHeartRate by
                 viewModel.showHeartRate.collectAsStateWithLifecycle(initialValue = viewModel.showHeartRate.value)
+            val showCalories by
+                viewModel.showCalories.collectAsStateWithLifecycle(initialValue = viewModel.showCalories.value)
             val heartRateRememberedDevices by
                 viewModel.heartRateDevices.collectAsStateWithLifecycle(initialValue = emptyList())
             val heartRateAvailableDevices by
@@ -78,6 +80,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                 bleFtmsDeviceName = bleFtmsDeviceName,
                 showHeartRate = showHeartRate,
                 onShowHeartRateToggled = viewModel::onShowHeartRateClicked,
+                showCalories = showCalories,
+                onShowCaloriesToggled = viewModel::onShowCaloriesClicked,
                 heartRateConnectionState = heartRateConnectionState,
                 heartRateConnectedDevice = heartRateConnectedDevice,
                 heartRateRememberedDevices = heartRateRememberedDevices,
@@ -104,6 +108,8 @@ private fun StartServicePage(
     bleFtmsDeviceName: String,
     showHeartRate: Boolean,
     onShowHeartRateToggled: (Boolean) -> Unit,
+    showCalories: Boolean,
+    onShowCaloriesToggled: (Boolean) -> Unit,
     heartRateConnectionState: HeartRateConnectionState,
     heartRateConnectedDevice: HeartRateDevice?,
     heartRateRememberedDevices: List<HeartRateDevice>,
@@ -219,6 +225,15 @@ private fun StartServicePage(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = "Show calories on overlay?",
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Checkbox(checked = showCalories, onCheckedChange = onShowCaloriesToggled)
     }
 
     if (showHeartRatePicker) {
@@ -521,6 +536,8 @@ private fun StartServicePagePreview() {
             bleFtmsDeviceName = "Grupetto FTMS",
             showHeartRate = true,
             onShowHeartRateToggled = {},
+            showCalories = true,
+            onShowCaloriesToggled = {},
             heartRateConnectionState = HeartRateConnectionState.Connected,
             heartRateConnectedDevice = HeartRateDevice(name = "Polar H10", address = "00:11:22:33:44:55"),
             heartRateRememberedDevices = listOf(

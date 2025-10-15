@@ -19,6 +19,7 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         BleFtmsDeviceName("bleFtmsDeviceName"),
         SerialNumber("serialNumber"),
         ShowHeartRate("showHeartRate"),
+        ShowCalories("showCalories"),
         HeartRateDevices("heartRateDevices")
     }
 
@@ -35,6 +36,7 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
     private val mutableBleFtmsDeviceName = MutableStateFlow("Grupetto FTMS")
     private val mutableSerialNumber = MutableStateFlow("")
     private val mutableShowHeartRate = MutableStateFlow(false)
+    private val mutableShowCalories = MutableStateFlow(true)
     private val mutableHeartRateDevices = MutableStateFlow<List<HeartRateDevice>>(emptyList())
 
     val showTimerWhenMinimized = mutableShowTimerWhenMinimized
@@ -42,6 +44,7 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
     val bleFtmsDeviceName = mutableBleFtmsDeviceName
     val serialNumber = mutableSerialNumber
     val showHeartRate = mutableShowHeartRate
+    val showCalories = mutableShowCalories
     val heartRateDevices = mutableHeartRateDevices
 
     private val sharedPreferences: SharedPreferences
@@ -93,6 +96,13 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         mutableShowHeartRate.value = show
         sharedPreferences.edit {
             putBoolean(Preferences.ShowHeartRate.key, show)
+        }
+    }
+
+    fun setShowCalories(show: Boolean) {
+        mutableShowCalories.value = show
+        sharedPreferences.edit {
+            putBoolean(Preferences.ShowCalories.key, show)
         }
     }
 
@@ -153,6 +163,10 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
             sharedPreferences
                 .getBoolean(Preferences.ShowHeartRate.key, false)
 
+        mutableShowCalories.value =
+            sharedPreferences
+                .getBoolean(Preferences.ShowCalories.key, true)
+
         mutableHeartRateDevices.value =
             decodeHeartRateDevices(
                 sharedPreferences.getString(Preferences.HeartRateDevices.key, null)
@@ -190,7 +204,7 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
                     val name = if (obj.isNull("name")) {
                         null
                     } else {
-                        obj.optString("name", null)
+                        obj.optString("name", "").ifBlank { null }
                     }
                     add(HeartRateDevice(name = name, address = address))
                 }

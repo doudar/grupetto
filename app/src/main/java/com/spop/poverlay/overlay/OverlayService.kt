@@ -223,6 +223,7 @@ class OverlayService : LifecycleEnabledService() {
                     sensorViewModel,
                     timerViewModel,
                     configurationRepository.showHeartRate,
+                    configurationRepository.showCalories,
                     OverlayHeightDp,
                     dialogViewModel.dialogLocation.collectAsState(),
                     dialogViewModel::processHorizontalDrag,

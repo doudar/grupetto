@@ -46,6 +46,9 @@ class ConfigurationViewModel(
     val showHeartRate
         get() = configurationRepository.showHeartRate
 
+    val showCalories
+        get() = configurationRepository.showCalories
+
     val heartRateDevices
         get() = configurationRepository.heartRateDevices
 
@@ -140,6 +143,10 @@ class ConfigurationViewModel(
             configurationRepository.setShowHeartRate(false)
             pendingEnableHeartRate = false
         }
+    }
+
+    fun onShowCaloriesClicked(isChecked: Boolean) {
+        configurationRepository.setShowCalories(isChecked)
     }
 
     fun onConnectHeartRateDevice(device: HeartRateDevice) {

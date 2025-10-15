@@ -32,11 +32,13 @@ fun OverlayMinimizedContent(
     isMinimized: Boolean,
     showTimerWhenMinimized: Boolean,
     showHeartRate: Boolean,
+    showCalories: Boolean,
     location: OverlayLocation,
     powerLabel: String,
     cadenceLabel: String,
     speedLabel: String,
     resistanceLabel: String,
+    caloriesLabel: String,
     heartRateLabel: String,
     contentAlpha: Float,
     timerLabel: String,
@@ -146,6 +148,14 @@ fun OverlayMinimizedContent(
                     modifier = Modifier.width(58.dp),
                     timerLabel = heartRateLabel,
                     iconDrawable = R.drawable.ic_heart_rate
+                )
+            }
+            if (showCalories) {
+                Spacer(modifier = Modifier.width(4.dp))
+                OverlayTimerField(
+                    modifier = Modifier.width(62.dp),
+                    timerLabel = caloriesLabel,
+                    iconDrawable = R.drawable.ic_calories
                 )
             }
         }
