@@ -31,6 +31,7 @@ import com.spop.poverlay.overlay.OverlayLocation
 fun OverlayMinimizedContent(
     isMinimized: Boolean,
     showTimerWhenMinimized: Boolean,
+    showHeartRate: Boolean,
     location: OverlayLocation,
     powerLabel: String,
     cadenceLabel: String,
@@ -139,12 +140,14 @@ fun OverlayMinimizedContent(
                 timerLabel = resistanceLabel,
                 iconDrawable = R.drawable.ic_resistance
             )
-            Spacer(modifier = Modifier.width(4.dp))
-            OverlayTimerField(
-                modifier = Modifier.width(58.dp),
-                timerLabel = heartRateLabel,
-                iconDrawable = R.drawable.ic_heart_rate
-            )
+            if (showHeartRate) {
+                Spacer(modifier = Modifier.width(4.dp))
+                OverlayTimerField(
+                    modifier = Modifier.width(58.dp),
+                    timerLabel = heartRateLabel,
+                    iconDrawable = R.drawable.ic_heart_rate
+                )
+            }
         }
     }
 }

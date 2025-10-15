@@ -1,8 +1,6 @@
 package com.spop.poverlay
 
 import android.app.Application
-import android.bluetooth.BluetoothManager
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -15,7 +13,10 @@ import androidx.lifecycle.viewModelScope
 import com.spop.poverlay.overlay.OverlayService
 import com.spop.poverlay.releases.Release
 import com.spop.poverlay.releases.ReleaseChecker
+import com.spop.poverlay.sensor.heartrate.HeartRateDevice
+import com.spop.poverlay.sensor.heartrate.HeartRateMonitor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import timber.log.Timber
 
@@ -42,12 +43,63 @@ class ConfigurationViewModel(
     val bleFtmsDeviceName
         get() = configurationRepository.bleFtmsDeviceName
 
+    val showHeartRate
+        get() = configurationRepository.showHeartRate
+
+    val heartRateDevices
+        get() = configurationRepository.heartRateDevices
+
+    val heartRateAvailableDevices
+        get() = heartRateMonitor.availableDevices
+
+    val heartRateConnectedDevice
+        get() = heartRateMonitor.connectedDevice
+
+    val heartRateConnectionState
+        get() = heartRateMonitor.connectionState
+
     private val bleServer = (application as GrupettoApplication).bleServer
+    private val heartRateMonitor = HeartRateMonitor(application.applicationContext)
+
+    private var pendingEnableHeartRate = false
 
     init {
         updatePermissionState()
         if (bleTxEnabled.value && hasBluetoothPermissions()) {
             bleServer.start()
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            configurationRepository.heartRateDevices.collectLatest { devices ->
+                heartRateMonitor.setPreferredDevices(devices)
+            }
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            heartRateMonitor.connectedDevice.collectLatest { device ->
+                device?.let { configurationRepository.upsertHeartRateDevice(it) }
+            }
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            configurationRepository.showHeartRate.collectLatest { enabled ->
+                if (enabled) {
+                    if (hasBluetoothPermissions()) {
+                        heartRateMonitor.start()
+                        if (heartRateMonitor.connectedDevice.value == null) {
+                            configurationRepository.heartRateDevices.value.firstOrNull()?.let { device ->
+                                heartRateMonitor.connect(device.address)
+                            }
+                        }
+                    } else {
+                        pendingEnableHeartRate = true
+                        requestBluetoothPermissions.postValue(getRequiredBluetoothPermissions())
+                    }
+                } else {
+                    pendingEnableHeartRate = false
+                    heartRateMonitor.stop()
+                }
+            }
         }
     }
 
@@ -76,13 +128,73 @@ class ConfigurationViewModel(
         }
     }
 
+    fun onShowHeartRateClicked(isChecked: Boolean) {
+        if (isChecked) {
+            if (hasBluetoothPermissions()) {
+                configurationRepository.setShowHeartRate(true)
+            } else {
+                pendingEnableHeartRate = true
+                requestBluetoothPermissions.value = getRequiredBluetoothPermissions()
+            }
+        } else {
+            configurationRepository.setShowHeartRate(false)
+            pendingEnableHeartRate = false
+        }
+    }
+
+    fun onConnectHeartRateDevice(device: HeartRateDevice) {
+        configurationRepository.upsertHeartRateDevice(device)
+        heartRateMonitor.connect(device.address)
+    }
+
+    fun onDisconnectHeartRateDevice() {
+        heartRateMonitor.disconnect()
+    }
+
+    fun onForgetHeartRateDevice(device: HeartRateDevice) {
+        configurationRepository.removeHeartRateDevice(device.address)
+        heartRateMonitor.forgetDevice(device.address)
+    }
+
+    fun onRefreshHeartRateDiscovery() {
+        heartRateMonitor.refreshDiscovery()
+    }
+
     fun onBluetoothPermissionsResult(granted: Boolean) {
         if (granted) {
-            bleServer.start()
-            infoPopup.postValue("Bluetooth permissions granted. BLE service started.")
+            if (bleTxEnabled.value) {
+                bleServer.start()
+            }
+            if (pendingEnableHeartRate) {
+                configurationRepository.setShowHeartRate(true)
+            }
+            pendingEnableHeartRate = false
+            val grantedServices = buildList {
+                if (bleTxEnabled.value) {
+                    add("BLE broadcast")
+                }
+                if (configurationRepository.showHeartRate.value) {
+                    add("heart-rate monitoring")
+                }
+            }
+            if (grantedServices.isNotEmpty()) {
+                infoPopup.postValue(
+                    "Bluetooth permissions granted. ${grantedServices.joinToString(" and ")} active."
+                )
+            }
         } else {
             configurationRepository.setBleTxEnabled(false)
-            infoPopup.postValue("Bluetooth permissions are required for BLE functionality.")
+            val disabled = mutableListOf<String>()
+            disabled.add("BLE broadcast")
+            if (configurationRepository.showHeartRate.value || pendingEnableHeartRate) {
+                configurationRepository.setShowHeartRate(false)
+                heartRateMonitor.stop()
+                disabled.add("heart-rate monitoring")
+            }
+            pendingEnableHeartRate = false
+            infoPopup.postValue(
+                "Bluetooth permissions are required for ${disabled.joinToString(" and ")}"
+            )
         }
     }
 
@@ -173,7 +285,7 @@ class ConfigurationViewModel(
     }
 
     fun onAppResumed() {
-        if (bleTxEnabled.value && !hasBluetoothPermissions()) {
+        if ((bleTxEnabled.value || configurationRepository.showHeartRate.value) && !hasBluetoothPermissions()) {
             val permissions = getRequiredBluetoothPermissions()
             requestBluetoothPermissions.value = permissions
         }
@@ -189,4 +301,8 @@ class ConfigurationViewModel(
         infoPopup.postValue(prompt)
     }
 
+    override fun onCleared() {
+        super.onCleared()
+        heartRateMonitor.close()
+    }
 }

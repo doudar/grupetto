@@ -27,6 +27,7 @@ import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spop.poverlay.overlay.composables.OverlayMainContent
 import com.spop.poverlay.overlay.composables.OverlayMinimizedContent
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.onEach
 import timber.log.Timber
@@ -45,6 +46,7 @@ const val SensorValuePlaceholderText = "-"
 fun Overlay(
     sensorViewModel: OverlaySensorViewModel,
     timerViewModel: OverlayTimerViewModel,
+    showHeartRateFlow: StateFlow<Boolean>,
     height: Dp,
     locationState: State<OverlayLocation>,
     horizontalDragCallback: (Float) -> Float,
@@ -62,6 +64,7 @@ fun Overlay(
     val speedLabel by sensorViewModel.speedLabel.collectAsStateWithLifecycle(initialValue = "")
     val calories by sensorViewModel.caloriesValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
     val heartRate by sensorViewModel.heartRateValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
+    val showHeartRate by showHeartRateFlow.collectAsStateWithLifecycle(initialValue = showHeartRateFlow.value)
     val timerLabel by timerViewModel.timerLabel.collectAsStateWithLifecycle(initialValue = "")
     val isTimerPaused by timerViewModel.timerPaused.collectAsStateWithLifecycle(initialValue = false)
     val errorMessage by sensorViewModel.errorMessage.collectAsStateWithLifecycle(initialValue = null)
@@ -132,6 +135,7 @@ fun Overlay(
             isMinimized = minimized,
             timerPaused = isTimerPaused,
             showTimerWhenMinimized = showTimerWhenMinimized,
+            showHeartRate = showHeartRate,
             location = location,
             powerLabel = power,
             contentAlpha = timerAlpha,
@@ -193,6 +197,7 @@ fun Overlay(
                 pauseChart = isCurrentlyAnimating,
                 powerGraph = powerGraph,
                 resistance = resistance,
+                showHeartRate = showHeartRate,
                 heartRate = heartRate,
                 speed = speed,
                 speedLabel = speedLabel,

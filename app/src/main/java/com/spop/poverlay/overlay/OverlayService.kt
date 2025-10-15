@@ -40,6 +40,7 @@ import com.spop.poverlay.util.IsBikePlus
 import com.spop.poverlay.util.IsRunningOnPeloton
 import com.spop.poverlay.util.LifecycleEnabledService
 import com.spop.poverlay.util.disableAnimations
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import timber.log.Timber
 import java.util.*
@@ -126,20 +127,35 @@ class OverlayService : LifecycleEnabledService() {
             EmulatorSensorInterface
         }
 
+        val configurationRepository = ConfigurationRepository(applicationContext, this)
+
         val heartRateMonitor = HeartRateMonitor(this)
         lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onResume(owner: LifecycleOwner) {
-                heartRateMonitor.start()
-            }
-
             override fun onPause(owner: LifecycleOwner) {
                 heartRateMonitor.stop()
             }
 
             override fun onDestroy(owner: LifecycleOwner) {
                 heartRateMonitor.close()
+                configurationRepository.close()
             }
         })
+
+        lifecycleScope.launchWhenStarted {
+            configurationRepository.heartRateDevices.collectLatest { devices ->
+                heartRateMonitor.setPreferredDevices(devices)
+            }
+        }
+
+        lifecycleScope.launchWhenStarted {
+            configurationRepository.showHeartRate.collectLatest { enabled ->
+                if (enabled) {
+                    heartRateMonitor.start()
+                } else {
+                    heartRateMonitor.stop()
+                }
+            }
+        }
 
         val sensorWithHeartRate = HeartRateAugmentedSensorInterface(
             sensorInterface,
@@ -148,7 +164,7 @@ class OverlayService : LifecycleEnabledService() {
 
         val timerViewModel = OverlayTimerViewModel(
             application,
-            ConfigurationRepository(applicationContext, this),
+            configurationRepository,
             sensorWithHeartRate.power
         )
 
@@ -206,6 +222,7 @@ class OverlayService : LifecycleEnabledService() {
                 Overlay(
                     sensorViewModel,
                     timerViewModel,
+                    configurationRepository.showHeartRate,
                     OverlayHeightDp,
                     dialogViewModel.dialogLocation.collectAsState(),
                     dialogViewModel::processHorizontalDrag,

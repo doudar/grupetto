@@ -24,6 +24,7 @@ fun OverlayMainContent(
     rpm: String,
     powerGraph: List<Float>,
     resistance: String,
+    showHeartRate: Boolean,
     heartRate: String,
     speed: String,
     speedLabel: String,
@@ -77,7 +78,9 @@ fun OverlayMainContent(
             onSpeedClicked()
         })
 
-        StatCard("Heart Rate", heartRate, "bpm", statCardModifier)
+        if (showHeartRate) {
+            StatCard("Heart Rate", heartRate, "bpm", statCardModifier)
+        }
 
         StatCard("Calories", calories, "kcal", statCardModifier)
 
