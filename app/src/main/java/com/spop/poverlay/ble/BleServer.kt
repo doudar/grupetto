@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import timber.log.Timber
+import android.provider.Settings
+import com.spop.poverlay.dircon.DirConServer
 import kotlin.math.abs
 
 // Listener for sensor data updates
@@ -73,6 +75,14 @@ abstract class BaseBleService(val server: BleServer) : SensorDataListener {
     ) {
         server.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, descriptor.value)
     }
+
+    // Optional hook for local (non-BLE) writes, e.g., DirCon protocol
+    open fun onLocalCharacteristicWrite(
+        characteristic: BluetoothGattCharacteristic,
+        value: ByteArray
+    ) {
+        // default no-op
+    }
 }
 
 class BleServer(
@@ -89,6 +99,9 @@ class BleServer(
     private val registeredServices = mutableListOf<BaseBleService>()
     private val servicesToRegister = LinkedList<BaseBleService>()
     private var currentlyRegisteringService: BaseBleService? = null
+
+    // DirCon integration
+    private var dirConServer: DirConServer? = null
 
     //ADD OR EDIT SERVICES HERE
     private fun setupServices() {
@@ -124,11 +137,46 @@ class BleServer(
         }
     }
 
+    // Expose GATT services read-only to DirCon
+    fun getGattServices(): List<BluetoothGattService> {
+        return gattServer?.services?.toList() ?: emptyList()
+    }
+
+    // Find a characteristic by UUID across all services
+    fun findCharacteristicByUuid(characteristicUuid: UUID): BluetoothGattCharacteristic? {
+        val services = gattServer?.services ?: return null
+        services.forEach { svc ->
+            svc.characteristics?.forEach { ch ->
+                if (ch.uuid == characteristicUuid) return ch
+            }
+        }
+        return null
+    }
+
+    // Perform a local write (e.g., from DirCon) and invoke service hook
+    fun performLocalWrite(characteristicUuid: UUID, value: ByteArray): Boolean {
+        val ch = findCharacteristicByUuid(characteristicUuid) ?: return false
+        // setValue returns boolean; still call service hook regardless
+        ch.setValue(value)
+        // Call owning service hook if available
+        val svc = findServiceForCharacteristic(ch.service.uuid)
+        try {
+            svc?.onLocalCharacteristicWrite(ch, value)
+        } catch (t: Throwable) {
+            Timber.w(t, "onLocalCharacteristicWrite threw for ${characteristicUuid}")
+        }
+        return true
+    }
+
     private fun registerNextService() {
         if (servicesToRegister.isEmpty()) {
             currentlyRegisteringService = null
             startAdvertising()
             startSensorDataUpdates()
+            // Start DirCon after services are ready
+            if (dirConServer == null) dirConServer = com.spop.poverlay.dircon.DirConServer(context, this)
+            dirConServer?.start()
+            return
         } else {
             currentlyRegisteringService = servicesToRegister.pop()
             try {
@@ -151,6 +199,8 @@ class BleServer(
             registeredServices.clear()
             servicesToRegister.clear()
             currentlyRegisteringService = null
+            dirConServer?.stop()
+            dirConServer = null
         } catch (e: SecurityException) {
             Timber.e(e, "Missing bluetooth permissions")
         }
