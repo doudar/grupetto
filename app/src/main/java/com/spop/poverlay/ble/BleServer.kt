@@ -274,11 +274,20 @@ class BleServer(
     private val advertisingCallback =
             object : AdvertiseCallback() {
                 override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
-                    Timber.i("BLE advertising started")
+                    val mode = if (localMode) "LOCAL" else "REMOTE"
+                    Timber.i("BLE advertising started successfully in $mode mode. Device should now be discoverable.")
                 }
 
                 override fun onStartFailure(errorCode: Int) {
-                    Timber.e("BLE advertising failed: $errorCode")
+                    val errorMsg = when (errorCode) {
+                        ADVERTISE_FAILED_DATA_TOO_LARGE -> "Advertise data too large"
+                        ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> "Too many advertisers"
+                        ADVERTISE_FAILED_ALREADY_STARTED -> "Already started"
+                        ADVERTISE_FAILED_INTERNAL_ERROR -> "Internal error"
+                        ADVERTISE_FAILED_FEATURE_UNSUPPORTED -> "Feature unsupported"
+                        else -> "Unknown error code: $errorCode"
+                    }
+                    Timber.e("BLE advertising failed: $errorMsg")
                 }
             }
 
@@ -302,9 +311,12 @@ class BleServer(
     }
 
     override fun onConnectionStateChange(device: BluetoothDevice?, status: Int, newState: Int) {
+        val deviceInfo = device?.let { "${it.name} (${it.address})" } ?: "Unknown device"
         if (newState == BluetoothProfile.STATE_CONNECTED) {
+            Timber.i("BLE device connected: $deviceInfo in ${if (localMode) "LOCAL" else "REMOTE"} mode")
             device?.let { registeredServices.forEach { it.onConnected(device) } }
         } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+            Timber.i("BLE device disconnected: $deviceInfo")
             device?.let { registeredServices.forEach { it.onDisconnected(device) } }
         }
     }
