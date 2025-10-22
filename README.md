@@ -97,6 +97,43 @@ After following those steps, the APK for grupetto can be found on the Releases t
 <img width="270" alt="Shows Timer Operation" src="https://user-images.githubusercontent.com/17497673/192137306-66e1d0c9-12a5-49d3-8b2b-6fc2ee4c8d61.gif">
 </p>
 
+## Using Grupetto with Local Apps (Zwift, MyWhoosh, etc.)
+
+By default, grupetto broadcasts sensor data via Bluetooth LE (BLE) for **remote devices** like laptops, tablets, or phones running fitness apps. However, if you have fitness apps like Zwift or MyWhoosh **installed locally on your Peloton** (using methods like DCRainMaker's guide), you need to enable **Local Mode** to allow these apps to detect the power meter.
+
+### Why is Local Mode needed?
+
+When apps run on the same device as grupetto, they may have difficulty discovering the BLE power meter because:
+- The Bluetooth adapter is optimized for remote connections by default
+- Local BLE discovery can be limited on some Android devices
+- The advertising parameters need to be adjusted for same-device connections
+
+### How to Enable Local Mode:
+
+1. Open the grupetto app
+2. Make sure "Enable BLE TX (Transmission)?" is checked
+3. Check the box for "Enable Local Mode (for apps on this device)?"
+4. You should see a green message confirming local mode is enabled
+5. Start the overlay
+6. Open Zwift, MyWhoosh, or your fitness app and search for sensors
+7. Look for "Grupetto FTMS" or similar in the power meter/cadence sensor list
+
+### Important Notes:
+
+- **Use Local Mode** when running fitness apps directly on the Peloton tablet
+- **Disable Local Mode** when connecting from a laptop, phone, or other external device
+- You may need to restart your fitness app after enabling Local Mode
+- If Zwift/MyWhoosh still can't find the sensor, try:
+  - Restarting the BLE TX (toggle it off and on)
+  - Force-closing and reopening your fitness app
+  - Restarting the grupetto overlay
+
+### Simultaneous Use:
+
+Note that you typically cannot use both remote AND local connections simultaneously. Choose the mode that matches your setup:
+- **Local Mode ON**: For apps on the Peloton itself
+- **Local Mode OFF**: For laptops, phones, tablets, or other external devices
+
 # Implementation
 
 ## Getting access to sensor data

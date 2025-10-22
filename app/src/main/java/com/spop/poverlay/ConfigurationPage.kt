@@ -47,12 +47,16 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                     viewModel.bleFtmsDeviceName.collectAsStateWithLifecycle(
                             initialValue = "Grupetto FTMS"
                     )
+            val bleLocalMode by
+                    viewModel.bleLocalMode.collectAsStateWithLifecycle(initialValue = false)
             StartServicePage(
                     timerShownWhenMinimized,
                     viewModel::onShowTimerWhenMinimizedClicked,
                     bleTxEnabled,
                     viewModel::onBleTxEnabledClicked,
                     bleFtmsDeviceName,
+                    bleLocalMode,
+                    viewModel::onBleLocalModeClicked,
                     viewModel::onStartServiceClicked,
                     viewModel::onRestartClicked,
                     viewModel::onClickedRelease,
@@ -69,6 +73,8 @@ private fun StartServicePage(
         bleTxEnabled: Boolean,
         onBleTxEnabledToggled: (Boolean) -> Unit,
         bleFtmsDeviceName: String,
+        bleLocalMode: Boolean,
+        onBleLocalModeToggled: (Boolean) -> Unit,
         onClickedStartOverlay: () -> Unit,
         onClickedRestartApp: () -> Unit,
         onClickedRelease: (Release) -> Unit,
@@ -123,6 +129,34 @@ private fun StartServicePage(
             Text(
                     text = " Look for '$bleFtmsDeviceName' in your fitness app's device list",
                     fontSize = 14.sp
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        // Local Mode Toggle
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                    text = "Enable Local Mode (for apps on this device)?",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold
+            )
+            Checkbox(checked = bleLocalMode, onCheckedChange = onBleLocalModeToggled)
+        }
+        
+        if (bleLocalMode) {
+            Text(
+                    text = "✓ Local mode enabled: Apps like Zwift/MyWhoosh running on this Peloton should now detect the power meter",
+                    fontSize = 14.sp,
+                    color = Color(0xFF4CAF50),
+                    modifier = Modifier.padding(start = 8.dp)
+            )
+        } else {
+            Text(
+                    text = "💡 Enable Local Mode if you want to use Zwift/MyWhoosh installed on this Peloton. Keep disabled for remote connections (laptop/phone).",
+                    fontSize = 14.sp,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(start = 8.dp)
             )
         }
     } else {

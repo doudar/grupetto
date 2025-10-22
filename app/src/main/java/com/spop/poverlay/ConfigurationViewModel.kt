@@ -42,11 +42,15 @@ class ConfigurationViewModel(
     val bleFtmsDeviceName
         get() = configurationRepository.bleFtmsDeviceName
 
+    val bleLocalMode
+        get() = configurationRepository.bleLocalMode
+
     private val bleServer = (application as GrupettoApplication).bleServer
 
     init {
         updatePermissionState()
         if (bleTxEnabled.value && hasBluetoothPermissions()) {
+            bleServer.setLocalMode(bleLocalMode.value)
             bleServer.start()
         }
     }
@@ -74,6 +78,17 @@ class ConfigurationViewModel(
         } else {
             bleServer.stop()
         }
+    }
+
+    fun onBleLocalModeClicked(isChecked: Boolean) {
+        configurationRepository.setBleLocalMode(isChecked)
+        (getApplication() as GrupettoApplication).updateBleLocalMode(isChecked)
+        val message = if (isChecked) {
+            "Local mode enabled. BLE advertising optimized for same-device connections. Local apps like Zwift should now be able to discover the power meter."
+        } else {
+            "Local mode disabled. BLE advertising optimized for remote connections (laptops, etc.)."
+        }
+        infoPopup.postValue(message)
     }
 
     fun onBluetoothPermissionsResult(granted: Boolean) {

@@ -13,6 +13,7 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         ShowTimerWhenMinimized("showTimerWhenMinimized"),
         BleTxEnabled("bleTxEnabled"),
     BleFtmsDeviceName("bleFtmsDeviceName"),
+    BleLocalMode("bleLocalMode"),
     SerialNumber("serialNumber")
     }
 
@@ -27,11 +28,13 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
     private val mutableShowTimerWhenMinimized = MutableStateFlow(true)
     private val mutableBleTxEnabled = MutableStateFlow(true)
     private val mutableBleFtmsDeviceName = MutableStateFlow("Grupetto FTMS")
+    private val mutableBleLocalMode = MutableStateFlow(false)
     private val mutableSerialNumber = MutableStateFlow("")
 
     val showTimerWhenMinimized = mutableShowTimerWhenMinimized
     val bleTxEnabled = mutableBleTxEnabled
     val bleFtmsDeviceName = mutableBleFtmsDeviceName
+    val bleLocalMode = mutableBleLocalMode
     val serialNumber = mutableSerialNumber
 
     private val sharedPreferences: SharedPreferences
@@ -79,6 +82,13 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         }
     }
 
+    fun setBleLocalMode(enabled: Boolean) {
+        mutableBleLocalMode.value = enabled
+        sharedPreferences.edit {
+            putBoolean(Preferences.BleLocalMode.key, enabled)
+        }
+    }
+
     fun setSerialNumber(serial: String) {
         val normalized = serial.trim().uppercase()
         mutableSerialNumber.value = normalized
@@ -104,6 +114,10 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         mutableBleFtmsDeviceName.value =
             sharedPreferences
                 .getString(Preferences.BleFtmsDeviceName.key, "Grupetto FTMS") ?: "Grupetto FTMS"
+
+        mutableBleLocalMode.value =
+            sharedPreferences
+                .getBoolean(Preferences.BleLocalMode.key, false)
 
         // Ensure a serial number exists and keep it in memory
         val existingSerial = sharedPreferences.getString(Preferences.SerialNumber.key, null)

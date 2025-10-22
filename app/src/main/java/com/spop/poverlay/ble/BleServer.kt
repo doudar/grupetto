@@ -78,7 +78,8 @@ abstract class BaseBleService(val server: BleServer) : SensorDataListener {
 class BleServer(
         private val context: Context,
         private val bluetoothManager: BluetoothManager,
-        private val sensorInterface: SensorInterface
+        private val sensorInterface: SensorInterface,
+        private var localMode: Boolean = false
 ) : BluetoothGattServerCallback(), CoroutineScope {
 
     override val coroutineContext = SupervisorJob() + Dispatchers.IO
@@ -101,6 +102,24 @@ class BleServer(
                 )
         )
         registerNextService()
+    }
+
+    /**
+     * Enable or disable local mode.
+     * Local mode optimizes BLE advertising for connections from apps on the same device.
+     * When enabled, advertising uses parameters that make it easier for local apps
+     * to discover and connect to the GATT server.
+     */
+    fun setLocalMode(enabled: Boolean) {
+        if (localMode != enabled) {
+            localMode = enabled
+            if (advertiser != null) {
+                // Restart advertising with new settings
+                stopAdvertising()
+                startAdvertising()
+            }
+            Timber.i("BLE local mode ${if (enabled) "enabled" else "disabled"}")
+        }
     }
 
     fun start() {
@@ -185,28 +204,47 @@ class BleServer(
     private fun startAdvertising() {
         val serviceUuids = registeredServices.map { ParcelUuid(it.service.uuid) }
         try {
+            // In local mode, use balanced mode instead of low latency to improve compatibility
+            // with local scanning. Also ensure the device name is included for easier discovery.
+            val advertiseMode = if (localMode) {
+                AdvertiseSettings.ADVERTISE_MODE_BALANCED
+            } else {
+                AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY
+            }
+            
             val settings =
                     AdvertiseSettings.Builder()
-                            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+                            .setAdvertiseMode(advertiseMode)
                             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
                             .setConnectable(true)
                             .build()
 
             // Primary advertising data: keep it lean (just service UUIDs) to avoid 31-byte limit
             val advDataBuilder = AdvertiseData.Builder()
-            for (uuid in serviceUuids) {
-                advDataBuilder.addServiceUuid(uuid)
+            
+            // In local mode, prioritize device name in primary advertisement for easier discovery
+            if (localMode) {
+                advDataBuilder.setIncludeDeviceName(true)
+                // Add only the most important service UUID (Cycling Power) to stay under size limit
+                val cyclingPowerUuid = ParcelUuid(java.util.UUID.fromString("00001818-0000-1000-8000-00805f9b34fb"))
+                advDataBuilder.addServiceUuid(cyclingPowerUuid)
+            } else {
+                for (uuid in serviceUuids) {
+                    advDataBuilder.addServiceUuid(uuid)
+                }
             }
 
             // Scan response: include device name and manufacturer specific data
             val scanResponseBuilder = AdvertiseData.Builder()
-                .setIncludeDeviceName(true)
+            if (!localMode) {
+                scanResponseBuilder.setIncludeDeviceName(true)
+            }
 
             // Manufacturer data (use a test/manufacturer ID; replace with your assigned company ID if available)
             val manufacturerId = 0xFFFF // 16-bit Company Identifier (testing)
             val sn = serialNumber()
             // Keep payload concise to fit scan response size constraints
-            val manufacturerData = "GRUP-$sn".toByteArray(Charsets.UTF_8)
+            val manufacturerData = "GRUP-$sn${if (localMode) "-LOCAL" else ""}".toByteArray(Charsets.UTF_8)
             scanResponseBuilder.addManufacturerData(manufacturerId, manufacturerData)
 
             advertiser?.startAdvertising(
@@ -215,6 +253,8 @@ class BleServer(
                 scanResponseBuilder.build(),
                 advertisingCallback
             )
+            
+            Timber.i("BLE advertising started in ${if (localMode) "LOCAL" else "REMOTE"} mode")
         } catch (e: SecurityException) {
             Timber.e(e, "Missing bluetooth permissions")
         } catch (e: IllegalArgumentException) {

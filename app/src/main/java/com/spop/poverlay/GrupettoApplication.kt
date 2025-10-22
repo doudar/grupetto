@@ -14,6 +14,7 @@ import timber.log.Timber
 class GrupettoApplication : Application() {
     lateinit var bleServer: BleServer
         private set
+    private lateinit var configRepository: ConfigurationRepository
 
     override fun onCreate() {
         super.onCreate()
@@ -24,6 +25,15 @@ class GrupettoApplication : Application() {
         val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val sensorInterface = createSensorInterface()
         bleServer = BleServer(this, bluetoothManager, sensorInterface)
+    }
+
+    /**
+     * Update BLE local mode setting. Should be called when the configuration changes.
+     */
+    fun updateBleLocalMode(enabled: Boolean) {
+        if (::bleServer.isInitialized) {
+            bleServer.setLocalMode(enabled)
+        }
     }
 
     private fun createSensorInterface(): SensorInterface {
