@@ -109,6 +109,17 @@ class BleServer(
             Timber.e("Bluetooth adapter is null")
             return
         }
+        
+        // Set the Bluetooth adapter name to "Grupetto"
+        try {
+            bluetoothAdapter.name = "Grupetto"
+            Timber.d("Bluetooth adapter name set to Grupetto")
+        } catch (e: SecurityException) {
+            Timber.e(e, "Missing bluetooth permissions to set adapter name")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to set Bluetooth adapter name")
+        }
+        
         val localAdvertiser = bluetoothAdapter.bluetoothLeAdvertiser
         if (localAdvertiser == null) {
             Timber.e("Failed to create advertiser")
