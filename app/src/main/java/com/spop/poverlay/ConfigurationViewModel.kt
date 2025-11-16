@@ -42,9 +42,6 @@ class ConfigurationViewModel(
     val bleFtmsDeviceName
         get() = configurationRepository.bleFtmsDeviceName
 
-    val watchdogEnabled
-        get() = configurationRepository.watchdogEnabled
-
     private val bleServer = (application as GrupettoApplication).bleServer
 
     init {
@@ -64,10 +61,6 @@ class ConfigurationViewModel(
 
     fun onShowTimerWhenMinimizedClicked(isChecked: Boolean) {
         configurationRepository.setShowTimerWhenMinimized(isChecked)
-    }
-
-    fun onWatchdogEnabledClicked(isChecked: Boolean) {
-        configurationRepository.setWatchdogEnabled(isChecked)
     }
 
     fun onBleTxEnabledClicked(isChecked: Boolean) {

@@ -125,11 +125,9 @@ class OverlayService : LifecycleEnabledService() {
             EmulatorSensorInterface
         }
 
-        val configRepository = ConfigurationRepository(applicationContext, this)
-        
         val timerViewModel = OverlayTimerViewModel(
             application,
-            configRepository,
+            ConfigurationRepository(applicationContext, this),
             sensorInterface.power
         )
 
@@ -142,23 +140,21 @@ class OverlayService : LifecycleEnabledService() {
 
         val dialogViewModel = OverlayDialogViewModel(screenSize, sensorViewModel.isMinimized)
 
-        // Initialize and start watchdog if enabled
-        if (configRepository.watchdogEnabled.value) {
-            val watchdog = CadenceWatchdog(sensorInterface, this.coroutineContext)
-            watchdog.start()
-            
-            lifecycle.addObserver(object : DefaultLifecycleObserver {
-                override fun onDestroy(owner: LifecycleOwner) {
-                    watchdog.stop()
-                }
-            })
-            
-            // Handle watchdog restart trigger
-            lifecycleScope.launchWhenStarted {
-                watchdog.restartTriggered.collect {
-                    Timber.w("Watchdog triggered restart - no cadence detected for 1 hour")
-                    restartToOverlay()
-                }
+        // Initialize and start watchdog (always enabled)
+        val watchdog = CadenceWatchdog(sensorInterface, this.coroutineContext)
+        watchdog.start()
+        
+        lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onDestroy(owner: LifecycleOwner) {
+                watchdog.stop()
+            }
+        })
+        
+        // Handle watchdog restart trigger
+        lifecycleScope.launchWhenStarted {
+            watchdog.restartTriggered.collect {
+                Timber.w("Watchdog triggered restart - no cadence detected for 1 hour")
+                restartToOverlay()
             }
         }
 
