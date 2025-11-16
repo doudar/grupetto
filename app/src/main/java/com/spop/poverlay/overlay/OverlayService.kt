@@ -154,7 +154,7 @@ class OverlayService : LifecycleEnabledService() {
             })
             
             // Handle watchdog restart trigger
-            lifecycleScope.launchWhenResumed {
+            lifecycleScope.launchWhenStarted {
                 watchdog.restartTriggered.collect {
                     Timber.w("Watchdog triggered restart - no cadence detected for 1 hour")
                     restartToOverlay()
