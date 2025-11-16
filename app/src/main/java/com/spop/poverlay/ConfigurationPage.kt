@@ -47,12 +47,16 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                     viewModel.bleFtmsDeviceName.collectAsStateWithLifecycle(
                             initialValue = "Grupetto FTMS"
                     )
+            val watchdogEnabled by
+                    viewModel.watchdogEnabled.collectAsStateWithLifecycle(initialValue = true)
             StartServicePage(
                     timerShownWhenMinimized,
                     viewModel::onShowTimerWhenMinimizedClicked,
                     bleTxEnabled,
                     viewModel::onBleTxEnabledClicked,
                     bleFtmsDeviceName,
+                    watchdogEnabled,
+                    viewModel::onWatchdogEnabledClicked,
                     viewModel::onStartServiceClicked,
                     viewModel::onRestartClicked,
                     viewModel::onClickedRelease,
@@ -69,6 +73,8 @@ private fun StartServicePage(
         bleTxEnabled: Boolean,
         onBleTxEnabledToggled: (Boolean) -> Unit,
         bleFtmsDeviceName: String,
+        watchdogEnabled: Boolean,
+        onWatchdogEnabledToggled: (Boolean) -> Unit,
         onClickedStartOverlay: () -> Unit,
         onClickedRestartApp: () -> Unit,
         onClickedRelease: (Release) -> Unit,
@@ -130,6 +136,36 @@ private fun StartServicePage(
 
         Text(
                 text = "💡 Enable to broadcast bike data to apps like Zwift, TrainerRoad, etc.",
+                fontSize = 14.sp,
+                color = Color.Gray
+        )
+    }
+
+    Spacer(modifier = Modifier.height(16.dp))
+    
+    // Watchdog Settings
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+                text = "Enable Auto-Restart Watchdog?",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold
+        )
+        Checkbox(checked = watchdogEnabled, onCheckedChange = onWatchdogEnabledToggled)
+    }
+
+    if (watchdogEnabled) {
+        Row {
+            Text(
+                    text = "Watchdog will restart Grupetto if no cadence detected for 1 hour",
+                    fontSize = 14.sp,
+                    color = Color.Green
+            )
+        }
+    } else {
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+                text = "💡 Enable to automatically restart if BLE becomes unresponsive",
                 fontSize = 14.sp,
                 color = Color.Gray
         )

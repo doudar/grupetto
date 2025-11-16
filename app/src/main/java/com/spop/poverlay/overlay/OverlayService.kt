@@ -30,6 +30,7 @@ import com.spop.poverlay.ConfigurationRepository
 import com.spop.poverlay.MainActivity
 import com.spop.poverlay.R
 
+import com.spop.poverlay.sensor.CadenceWatchdog
 import com.spop.poverlay.sensor.DeadSensorDetector
 import com.spop.poverlay.sensor.interfaces.DummySensorInterface
 import com.spop.poverlay.sensor.interfaces.PelotonBikeSensorInterfaceV1New
@@ -124,9 +125,11 @@ class OverlayService : LifecycleEnabledService() {
             EmulatorSensorInterface
         }
 
+        val configRepository = ConfigurationRepository(applicationContext, this)
+        
         val timerViewModel = OverlayTimerViewModel(
             application,
-            ConfigurationRepository(applicationContext, this),
+            configRepository,
             sensorInterface.power
         )
 
@@ -138,6 +141,26 @@ class OverlayService : LifecycleEnabledService() {
         )
 
         val dialogViewModel = OverlayDialogViewModel(screenSize, sensorViewModel.isMinimized)
+
+        // Initialize and start watchdog if enabled
+        if (configRepository.watchdogEnabled.value) {
+            val watchdog = CadenceWatchdog(sensorInterface, this.coroutineContext)
+            watchdog.start()
+            
+            lifecycle.addObserver(object : DefaultLifecycleObserver {
+                override fun onDestroy(owner: LifecycleOwner) {
+                    watchdog.stop()
+                }
+            })
+            
+            // Handle watchdog restart trigger
+            lifecycleScope.launchWhenResumed {
+                watchdog.restartTriggered.collect {
+                    Timber.w("Watchdog triggered restart - no cadence detected for 1 hour")
+                    restartToOverlay()
+                }
+            }
+        }
 
         val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -257,6 +280,22 @@ class OverlayService : LifecycleEnabledService() {
         if (v.parent is View) {
             disableClipOnParents(v.parent as View)
         }
+    }
+
+    private fun restartToOverlay() {
+        Timber.i("Restarting Grupetto to overlay due to watchdog trigger")
+        
+        // Stop the current service
+        stopSelf()
+        
+        // Start the overlay service again
+        val restartIntent = Intent(this, OverlayService::class.java)
+        ContextCompat.startForegroundService(this, restartIntent)
+        
+        // Exit the process to ensure clean restart
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            Runtime.getRuntime().exit(0)
+        }, 500)
     }
 
     private fun prepareNotification(notificationManager: NotificationManagerCompat): Notification {

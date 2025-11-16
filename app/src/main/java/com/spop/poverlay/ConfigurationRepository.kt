@@ -13,7 +13,8 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         ShowTimerWhenMinimized("showTimerWhenMinimized"),
         BleTxEnabled("bleTxEnabled"),
     BleFtmsDeviceName("bleFtmsDeviceName"),
-    SerialNumber("serialNumber")
+    SerialNumber("serialNumber"),
+    WatchdogEnabled("watchdogEnabled")
     }
 
     companion object {
@@ -28,11 +29,13 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
     private val mutableBleTxEnabled = MutableStateFlow(true)
     private val mutableBleFtmsDeviceName = MutableStateFlow("Grupetto FTMS")
     private val mutableSerialNumber = MutableStateFlow("")
+    private val mutableWatchdogEnabled = MutableStateFlow(true)
 
     val showTimerWhenMinimized = mutableShowTimerWhenMinimized
     val bleTxEnabled = mutableBleTxEnabled
     val bleFtmsDeviceName = mutableBleFtmsDeviceName
     val serialNumber = mutableSerialNumber
+    val watchdogEnabled = mutableWatchdogEnabled
 
     private val sharedPreferences: SharedPreferences
 
@@ -87,6 +90,13 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         }
     }
 
+    fun setWatchdogEnabled(enabled: Boolean) {
+        mutableWatchdogEnabled.value = enabled
+        sharedPreferences.edit {
+            putBoolean(Preferences.WatchdogEnabled.key, enabled)
+        }
+    }
+
     private fun generateSerialHex(): String {
         val value = kotlin.random.Random.nextInt(0x10000)
         return value.toString(16).padStart(4, '0').uppercase()
@@ -113,6 +123,10 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
             sn
         } else existingSerial
         mutableSerialNumber.value = ensuredSerial
+
+        mutableWatchdogEnabled.value =
+            sharedPreferences
+                .getBoolean(Preferences.WatchdogEnabled.key, true)
     }
 
     override fun close() {
