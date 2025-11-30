@@ -9,8 +9,10 @@ import com.spop.poverlay.util.tickerFlow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Duration
+import kotlin.time.ExperimentalTime
 
+@OptIn(ExperimentalTime::class)
 open class OverlayTimerViewModel(
     application: Application,
     private val configurationRepository: ConfigurationRepository,
@@ -30,12 +32,12 @@ open class OverlayTimerViewModel(
     // Expose elapsed seconds for calories calculation
     val elapsedSeconds = timerEnabled.flatMapLatest {
         if (it) {
-            tickerFlow(period = 1.seconds)
+            tickerFlow(period = Duration.seconds(1))
                 .filter { !mutableTimerPaused.value }
                 .runningFold(0L) { acc, _ -> acc + 1L }
         } else {
             flow {
-                emit(0L)
+                emit("‒ ‒:‒ ‒")
             }
         }
     }
@@ -85,5 +87,10 @@ open class OverlayTimerViewModel(
     private fun stopTimer() {
         timerEnabled.value = false
         mutableTimerPaused.value = false
+    }
+}
+
+    private fun toggleTimer() {
+        mutableTimerPaused.value = !mutableTimerPaused.value
     }
 }

@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
+
 package com.spop.poverlay.overlay
 
 import android.app.Application
@@ -11,13 +13,16 @@ import com.spop.poverlay.sensor.interfaces.SensorInterface
 import com.spop.poverlay.util.smoothSensorValue
 import com.spop.poverlay.util.tickerFlow
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration
+import kotlin.time.ExperimentalTime
 
 private const val MphToKph = 1.60934
 
@@ -48,7 +53,7 @@ class OverlaySensorViewModel(
 
     companion object {
         // The sensor does not necessarily return new value this quickly
-        val GraphUpdatePeriod = 200.milliseconds
+        val GraphUpdatePeriod = Duration.milliseconds(200)
 
         // Max number of points before data starts to shift
         const val GraphMaxDataPoints = 300
@@ -168,14 +173,16 @@ class OverlaySensorViewModel(
             combine(
                 sensorInterface.power.smoothSensorValue(),
                 tickerFlow(GraphUpdatePeriod)
-            ) { sensorValue, _ -> sensorValue }.collect { value ->
-                withContext(Dispatchers.Main) {
-                    powerGraph.add(value)
-                    if (powerGraph.size > GraphMaxDataPoints) {
-                        powerGraph.removeFirst()
+            ) { sensorValue, _ -> sensorValue }.collect(object : FlowCollector<Float> {
+                override suspend fun emit(value: Float) {
+                    withContext(Dispatchers.Main) {
+                        powerGraph.add(value)
+                        if (powerGraph.size > GraphMaxDataPoints) {
+                            powerGraph.removeFirst()
+                        }
                     }
                 }
-            }
+            })
         }
     }
 
@@ -185,18 +192,22 @@ class OverlaySensorViewModel(
         setupCaloriesAccumulation()
         
         viewModelScope.launch(Dispatchers.IO) {
-            deadSensorDetector.deadSensorDetected.collect {
-                onDeadSensor()
-            }
+            deadSensorDetector.deadSensorDetected.collect(object : FlowCollector<Unit> {
+                override suspend fun emit(value: Unit) {
+                    onDeadSensor()
+                }
+            })
         }
 
         viewModelScope.launch(Dispatchers.IO) {
-            errorMessage.collect {
-                // Leave minimized state if we're showing an error message
-                if (it != null && mutableIsMinimized.value) {
-                    mutableIsMinimized.value = false
+            errorMessage.collect(object : FlowCollector<String?> {
+                override suspend fun emit(value: String?) {
+                    // Leave minimized state if we're showing an error message
+                    if (value != null && mutableIsMinimized.value) {
+                        mutableIsMinimized.value = false
+                    }
                 }
-            }
+            })
         }
     }
 }

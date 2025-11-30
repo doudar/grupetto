@@ -4,13 +4,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlin.math.sin
-import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration
+import kotlin.time.ExperimentalTime
 
 /**
  * Used to generate fake data on the emulator
  * Power pattern: Ramps up to 80W, holds for 10s, ramps down, pauses for 10s, repeats
  * This simulates interval training for testing auto-start/stop timer
  */
+@OptIn(ExperimentalTime::class)
 class DummySensorInterface : SensorInterface {
     override val power: Flow<Float>
         get() = intervalPowerFlow()
@@ -52,7 +54,7 @@ class DummySensorInterface : SensorInterface {
             (sin(Math.toRadians(it.toDouble())) + 1) * (magnitude / 2)
         }
         for(value in sineValues){
-            delay(100.milliseconds)
+            delay(Duration.milliseconds(100))
             emit(value.toFloat())
         }
     }
