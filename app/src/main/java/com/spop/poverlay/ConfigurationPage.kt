@@ -76,7 +76,14 @@ private fun StartServicePage(
         fontStyle = FontStyle.Italic,
         fontWeight = FontWeight.Bold
     )
-    Spacer(modifier = Modifier.height(180.dp))
+    Spacer(modifier = Modifier.height(20.dp))
+    Text(
+        text = "Nov 2025 Update with colored metrics, charts, and max",
+        fontSize = 18.sp,
+        fontStyle = FontStyle.Italic,
+        color = Color.Gray
+    )
+    Spacer(modifier = Modifier.height(140.dp))
     Button(
         onClick = onClickedStartOverlay,
     ) {

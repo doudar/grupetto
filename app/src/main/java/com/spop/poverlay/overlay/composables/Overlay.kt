@@ -8,7 +8,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntOffsetAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Button
@@ -58,7 +57,8 @@ fun Overlay(
 ) {
     val power by sensorViewModel.powerValue.collectAsState(initial = SensorValuePlaceholderText)
 
-    val powerGraph = remember { sensorViewModel.powerGraph }
+    val selectedMetric by sensorViewModel.selectedMetric.collectAsState(initial = MetricType.POWER)
+    val currentGraph = remember(selectedMetric) { sensorViewModel.getGraphForMetric(selectedMetric) }
     val rpm by sensorViewModel.rpmValue.collectAsState(initial = SensorValuePlaceholderText)
     val resistance by sensorViewModel.resistanceValue.collectAsState(initial = SensorValuePlaceholderText)
     val speed by sensorViewModel.speedValue.collectAsState(initial = SensorValuePlaceholderText)
@@ -66,6 +66,12 @@ fun Overlay(
     val timerLabel by timerViewModel.timerLabel.collectAsState(initial = "")
     val isTimerPaused by timerViewModel.timerPaused.collectAsState(initial = false)
     val errorMessage by sensorViewModel.errorMessage.collectAsState(initial = null)
+
+    // Max values
+    val maxPower by sensorViewModel.maxPower.collectAsState()
+    val maxCadence by sensorViewModel.maxCadence.collectAsState()
+    val maxResistance by sensorViewModel.maxResistance.collectAsState()
+    val maxSpeed by sensorViewModel.maxSpeed.collectAsState()
 
     var isCurrentlyAnimating by remember { mutableStateOf(false) }
 
@@ -144,6 +150,7 @@ fun Overlay(
             resistanceLabel = resistance,
             onTap = { timerViewModel.onTimerTap() },
             onLongPress = { timerViewModel.onTimerLongPress() },
+            onMinimizeToggle = { sensorViewModel.onOverlayPressed() },
             onLayout = onTimerLayout
         )
     }
@@ -171,10 +178,6 @@ fun Overlay(
                 }, onDragEnd = {
                     verticalDragOffset = 0f
                 })
-            }
-            .pointerInput(Unit) {
-                detectTapGestures(onTap = { sensorViewModel.onOverlayPressed() },
-                    onLongPress = { sensorViewModel.onOverlayDoubleTap() })
             }) {
 
 
@@ -192,11 +195,17 @@ fun Overlay(
                 power = power,
                 rpm = rpm,
                 pauseChart = isCurrentlyAnimating,
-                powerGraph = powerGraph,
+                currentGraph = currentGraph,
+                selectedMetric = selectedMetric,
                 resistance = resistance,
                 speed = speed,
                 speedLabel = speedLabel,
-                onSpeedClicked = { sensorViewModel.onClickedSpeed() },
+                maxPower = "%.0f".format(maxPower),
+                maxCadence = "%.0f".format(maxCadence),
+                maxResistance = "%.0f".format(maxResistance),
+                maxSpeed = "%.1f".format(maxSpeed),
+                onMetricSelected = { sensorViewModel.onMetricSelected(it) },
+                onSpeedUnitClicked = { sensorViewModel.onClickedSpeedUnit() },
                 onChartClicked = { sensorViewModel.onOverlayPressed() }
             )
         }
