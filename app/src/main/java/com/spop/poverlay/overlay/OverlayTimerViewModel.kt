@@ -6,8 +6,10 @@ import androidx.lifecycle.AndroidViewModel
 import com.spop.poverlay.ConfigurationRepository
 import com.spop.poverlay.util.tickerFlow
 import kotlinx.coroutines.flow.*
-import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Duration
+import kotlin.time.ExperimentalTime
 
+@OptIn(ExperimentalTime::class)
 open class OverlayTimerViewModel(
     application: Application,
     private val configurationRepository: ConfigurationRepository
@@ -19,7 +21,7 @@ open class OverlayTimerViewModel(
     val timerPaused = mutableTimerPaused.asSharedFlow()
     val timerLabel = timerEnabled.flatMapLatest {
         if (it) {
-            tickerFlow(period = 1.seconds)
+            tickerFlow(period = Duration.seconds(1))
                 .filter { !mutableTimerPaused.value }
                 .runningFold(0L) { acc, _ -> acc + 1L }
                 .map { seconds ->
@@ -27,7 +29,7 @@ open class OverlayTimerViewModel(
                 }
         } else {
             flow {
-                emit("‒ ‒:‒ ‒")
+                emit("‒ ‒:‒ ‒")
             }
         }
     }
