@@ -26,6 +26,14 @@ import kotlin.time.ExperimentalTime
 
 private const val MphToKph = 1.60934
 
+enum class MetricType {
+    POWER, CADENCE, RESISTANCE, SPEED
+}
+
+enum class MetricType {
+    POWER, CADENCE, RESISTANCE, SPEED
+}
+
 /**
  * Calorie calculation constants using Gross Mechanical Efficiency (GME) method:
  * 
@@ -58,6 +66,8 @@ class OverlaySensorViewModel(
         // Max number of points before data starts to shift
         const val GraphMaxDataPoints = 300
 
+        // Reset max values after all metrics are zero for this duration
+        val MaxResetTimeout = Duration.minutes(5)
     }
 
 
@@ -68,6 +78,8 @@ class OverlaySensorViewModel(
     private val mutableErrorMessage = MutableStateFlow<String?>(null)
     val errorMessage = mutableErrorMessage.asStateFlow()
 
+    private val mutableSelectedMetric = MutableStateFlow(MetricType.POWER)
+    val selectedMetric = mutableSelectedMetric.asStateFlow()
 
     fun onDismissErrorPressed() {
         mutableErrorMessage.tryEmit(null)
@@ -84,6 +96,12 @@ class OverlaySensorViewModel(
         }
     }
 
+    fun onMetricSelected(metric: MetricType) {
+        viewModelScope.launch {
+            mutableSelectedMetric.emit(metric)
+        }
+    }
+
     private fun onDeadSensor() {
         mutableErrorMessage
             .tryEmit(
@@ -94,6 +112,45 @@ class OverlaySensorViewModel(
     }
 
     private var useMph = MutableStateFlow(true)
+
+    // Max value tracking
+    private val mutableMaxPower = MutableStateFlow(0f)
+    private val mutableMaxCadence = MutableStateFlow(0f)
+    private val mutableMaxResistance = MutableStateFlow(0f)
+    private val mutableMaxSpeed = MutableStateFlow(0f)
+    private var lastNonZeroTime = System.currentTimeMillis()
+
+    val maxPower = mutableMaxPower.asStateFlow()
+    val maxCadence = mutableMaxCadence.asStateFlow()
+    val maxResistance = mutableMaxResistance.asStateFlow()
+    val maxSpeed = mutableMaxSpeed.asStateFlow()
+
+    private fun updateMaxValues(power: Float, cadence: Float, resistance: Float, speed: Float) {
+        val currentTime = System.currentTimeMillis()
+
+        // Check if all values are essentially zero
+        val allZero = power < 1f && cadence < 1f && resistance < 1f && speed < 0.1f
+
+        if (allZero) {
+            // Check if we've been at zero for longer than the timeout
+            if (currentTime - lastNonZeroTime > MaxResetTimeout.inWholeMilliseconds) {
+                // Reset all max values
+                mutableMaxPower.value = 0f
+                mutableMaxCadence.value = 0f
+                mutableMaxResistance.value = 0f
+                mutableMaxSpeed.value = 0f
+            }
+        } else {
+            // Update last non-zero time
+            lastNonZeroTime = currentTime
+
+            // Update max values
+            if (power > mutableMaxPower.value) mutableMaxPower.value = power
+            if (cadence > mutableMaxCadence.value) mutableMaxCadence.value = cadence
+            if (resistance > mutableMaxResistance.value) mutableMaxResistance.value = resistance
+            if (speed > mutableMaxSpeed.value) mutableMaxSpeed.value = speed
+        }
+    }
 
     val powerValue = sensorInterface.power
         .map { "%.0f".format(it) }
@@ -121,7 +178,7 @@ class OverlaySensorViewModel(
         }
     }
 
-    fun onClickedSpeed() {
+    fun onClickedSpeedUnit() {
         viewModelScope.launch {
             useMph.emit(!useMph.value)
         }
@@ -165,11 +222,22 @@ class OverlaySensorViewModel(
     }
 
     val powerGraph = mutableStateListOf<Float>()
+    val cadenceGraph = mutableStateListOf<Float>()
+    val resistanceGraph = mutableStateListOf<Float>()
+    val speedGraph = mutableStateListOf<Float>()
 
+    fun getGraphForMetric(metric: MetricType): List<Float> {
+        return when (metric) {
+            MetricType.POWER -> powerGraph
+            MetricType.CADENCE -> cadenceGraph
+            MetricType.RESISTANCE -> resistanceGraph
+            MetricType.SPEED -> speedGraph
+        }
+    }
 
-    private fun setupPowerGraphData() {
+    private fun setupGraphData() {
+        // Power graph
         viewModelScope.launch(Dispatchers.IO) {
-            //Sensor value is read every tick and added to graph
             combine(
                 sensorInterface.power.smoothSensorValue(),
                 tickerFlow(GraphUpdatePeriod)
@@ -184,13 +252,84 @@ class OverlaySensorViewModel(
                 }
             })
         }
+
+        // Cadence graph
+        viewModelScope.launch(Dispatchers.IO) {
+            combine(
+                sensorInterface.cadence.smoothSensorValue(),
+                tickerFlow(GraphUpdatePeriod)
+            ) { sensorValue, _ -> sensorValue }.collect(object : FlowCollector<Float> {
+                override suspend fun emit(value: Float) {
+                    withContext(Dispatchers.Main) {
+                        cadenceGraph.add(value)
+                        if (cadenceGraph.size > GraphMaxDataPoints) {
+                            cadenceGraph.removeFirst()
+                        }
+                    }
+                }
+            })
+        }
+
+        // Resistance graph
+        viewModelScope.launch(Dispatchers.IO) {
+            combine(
+                sensorInterface.resistance.smoothSensorValue(),
+                tickerFlow(GraphUpdatePeriod)
+            ) { sensorValue, _ -> sensorValue }.collect(object : FlowCollector<Float> {
+                override suspend fun emit(value: Float) {
+                    withContext(Dispatchers.Main) {
+                        resistanceGraph.add(value)
+                        if (resistanceGraph.size > GraphMaxDataPoints) {
+                            resistanceGraph.removeFirst()
+                        }
+                    }
+                }
+            })
+        }
+
+        // Speed graph
+        viewModelScope.launch(Dispatchers.IO) {
+            combine(
+                sensorInterface.speed.smoothSensorValue(),
+                tickerFlow(GraphUpdatePeriod)
+            ) { sensorValue, _ -> sensorValue }.collect(object : FlowCollector<Float> {
+                override suspend fun emit(value: Float) {
+                    withContext(Dispatchers.Main) {
+                        speedGraph.add(value)
+                        if (speedGraph.size > GraphMaxDataPoints) {
+                            speedGraph.removeFirst()
+                        }
+                    }
+                }
+            })
+        }
+    }
+
+    private fun setupMaxTracking() {
+        viewModelScope.launch(Dispatchers.IO) {
+            combine(
+                sensorInterface.power,
+                sensorInterface.cadence,
+                sensorInterface.resistance,
+                sensorInterface.speed
+            ) { power, cadence, resistance, speed ->
+                arrayOf(power, cadence, resistance, speed)
+            }.collect(object : FlowCollector<Array<Float>> {
+                override suspend fun emit(value: Array<Float>) {
+                    withContext(Dispatchers.Main) {
+                        updateMaxValues(value[0], value[1], value[2], value[3])
+                    }
+                }
+            })
+        }
     }
 
     // Happens last to ensure initialization order is correct
     init {
-        setupPowerGraphData()
+        setupGraphData()
         setupCaloriesAccumulation()
         
+        setupMaxTracking()
         viewModelScope.launch(Dispatchers.IO) {
             deadSensorDetector.deadSensorDetected.collect(object : FlowCollector<Unit> {
                 override suspend fun emit(value: Unit) {

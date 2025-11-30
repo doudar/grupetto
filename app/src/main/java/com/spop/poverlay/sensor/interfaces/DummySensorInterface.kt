@@ -19,7 +19,7 @@ class DummySensorInterface : SensorInterface {
     override val cadence: Flow<Float>
         get() = dummyValueFlow(150f)
     override val resistance: Flow<Float>
-        get() = dummyValueFlow(110f)
+        get() = dummyValueFlow(100f)
 
     private fun intervalPowerFlow() = flow {
         while (true) {
