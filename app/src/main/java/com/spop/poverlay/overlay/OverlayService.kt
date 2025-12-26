@@ -127,6 +127,9 @@ class OverlayService : LifecycleEnabledService() {
             application,
             ConfigurationRepository(applicationContext, this)
         )
+        // Wire up timer to auto-start/pause based on movement
+        timerViewModel.observeMovement(sensorViewModel.isMoving, sensorViewModel.sessionReset)
+
         val dialogViewModel = OverlayDialogViewModel(screenSize, sensorViewModel.isMinimized)
 
         val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
