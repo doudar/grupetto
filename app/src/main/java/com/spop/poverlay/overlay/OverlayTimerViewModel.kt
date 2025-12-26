@@ -25,72 +25,76 @@ open class OverlayTimerViewModel(
     
     val showTimerWhenMinimized
         get() = configurationRepository.showTimerWhenMinimized
-    private val timerEnabled = MutableStateFlow(false)
-    private val mutableTimerPaused = MutableStateFlow(false)
-    val timerPaused = mutableTimerPaused.asSharedFlow()
-    
-    // Expose elapsed seconds for calories calculation
-    val elapsedSeconds = timerEnabled.flatMapLatest {
-        if (it) {
-            tickerFlow(period = Duration.seconds(1))
-                .filter { !mutableTimerPaused.value }
-                .runningFold(0L) { acc, _ -> acc + 1L }
-        } else {
-            flow {
-                emit("‒ ‒:‒ ‒")
-            }
-        }
-    }
-    
-    val timerLabel = elapsedSeconds.map { seconds ->
-        if (timerEnabled.value) {
+
+    // Accumulated seconds (persists across pause/resume)
+    private var accumulatedSeconds = 0L
+    private val mutableAccumulatedSeconds = MutableStateFlow(0L)
+
+    // Timer is running when moving
+    private val mutableTimerRunning = MutableStateFlow(false)
+    val timerPaused = mutableTimerRunning.map { !it }.stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        true
+    )
+
+    // Timer has started at least once this session
+    private val mutableTimerStarted = MutableStateFlow(false)
+
+    val timerLabel = combine(mutableTimerStarted, mutableAccumulatedSeconds) { started, seconds ->
+        if (started) {
             DateUtils.formatElapsedTime(seconds)
         } else {
             "‒ ‒:‒ ‒"
         }
-    }
-    
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, "‒ ‒:‒ ‒")
+
     init {
-        // Auto-start/stop timer based on power output
-        viewModelScope.launch(Dispatchers.IO) {
-            powerFlow.collect { power ->
-                if (power > POWER_THRESHOLD) {
-                    // User is pedaling - ensure timer is running
-                    if (!timerEnabled.value) {
-                        timerEnabled.value = true
-                    }
-                    if (mutableTimerPaused.value) {
-                        mutableTimerPaused.value = false
-                    }
-                } else {
-                    // Power is zero - pause the timer
-                    if (timerEnabled.value && !mutableTimerPaused.value) {
-                        mutableTimerPaused.value = true
-                    }
+        // Tick every second when timer is running
+        viewModelScope.launch {
+            tickerFlow(period = Duration.seconds(1)).collect {
+                if (mutableTimerRunning.value) {
+                    accumulatedSeconds++
+                    mutableAccumulatedSeconds.value = accumulatedSeconds
                 }
             }
         }
     }
 
+    /**
+     * Called by OverlayService to observe movement state
+     */
+    fun observeMovement(isMoving: StateFlow<Boolean>, sessionReset: StateFlow<Long>) {
+        viewModelScope.launch {
+            isMoving.collect { moving ->
+                if (moving) {
+                    // Start/resume timer when movement starts
+                    mutableTimerStarted.value = true
+                    mutableTimerRunning.value = true
+                } else {
+                    // Pause timer when movement stops
+                    mutableTimerRunning.value = false
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            sessionReset.drop(1).collect {
+                // Reset timer on session reset (5-minute inactivity)
+                resetTimer()
+            }
+        }
+    }
+
     fun onTimerTap() {
-        // Allow manual pause/resume override
-        if (timerEnabled.value) {
-            mutableTimerPaused.value = !mutableTimerPaused.value
+        // Manual tap toggles pause/resume
+        if (mutableTimerStarted.value) {
+            mutableTimerRunning.value = !mutableTimerRunning.value
         }
     }
 
     fun onTimerLongPress() {
-        // Long press to reset timer to zero
-        stopTimer()
-    }
-
-    private fun stopTimer() {
-        timerEnabled.value = false
-        mutableTimerPaused.value = false
-    }
-}
-
-    private fun toggleTimer() {
-        mutableTimerPaused.value = !mutableTimerPaused.value
+        // Long press resets the timer
+        resetTimer()
     }
 }

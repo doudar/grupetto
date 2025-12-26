@@ -29,6 +29,8 @@ fun StatCard(
     modifier: Modifier,
     iconDrawable: Int? = null,
     maxValue: String? = null,
+    totalValue: String? = null,
+    totalUnit: String? = null,
     color: Color = Color.White,
     onClick: () -> Unit = {},
     onUnitClick: (() -> Unit)? = null
@@ -60,38 +62,55 @@ fun StatCard(
         Text(
             text = value,
             color = color,
-            fontSize = 48.sp,
+            fontSize = 32.sp,
             fontWeight = FontWeight.Bold
         )
+        // Total and max row
         Row(
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (onUnitClick != null) {
+            if (totalValue != null && totalUnit != null) {
                 Text(
-                    text = unit,
-                    fontSize = 14.sp,
-                    color = color,
-                    fontWeight = FontWeight.Light,
-                    textDecoration = TextDecoration.Underline,
-                    modifier = Modifier.clickable { onUnitClick() }
+                    text = "$totalValue $totalUnit",
+                    color = Color.Gray,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Normal
                 )
-            } else {
-                Text(
-                    text = unit,
-                    fontSize = 14.sp,
-                    color = color,
-                    fontWeight = FontWeight.Light
-                )
+                if (maxValue != null && maxValue != "0") {
+                    Text(
+                        text = " | ",
+                        color = Color.Gray,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Light
+                    )
+                }
             }
             if (maxValue != null && maxValue != "0") {
-                Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "($maxValue)",
+                    text = maxValue,
                     color = Color.Gray,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Light
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Normal
                 )
             }
+        }
+        // Unit row
+        if (onUnitClick != null) {
+            Text(
+                text = unit,
+                fontSize = 14.sp,
+                color = color,
+                fontWeight = FontWeight.Light,
+                textDecoration = TextDecoration.Underline,
+                modifier = Modifier.clickable { onUnitClick() }
+            )
+        } else {
+            Text(
+                text = unit,
+                fontSize = 14.sp,
+                color = color,
+                fontWeight = FontWeight.Light
+            )
         }
     }
 }

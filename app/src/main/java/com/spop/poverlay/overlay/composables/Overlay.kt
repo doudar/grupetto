@@ -74,6 +74,12 @@ fun Overlay(
     val maxResistance by sensorViewModel.maxResistance.collectAsState()
     val maxSpeed by sensorViewModel.maxSpeed.collectAsState()
 
+    // Session totals and averages
+    val totalEnergy by sensorViewModel.totalEnergy.collectAsState()
+    val totalDistance by sensorViewModel.totalDistance.collectAsState()
+    val avgCadence by sensorViewModel.avgCadence.collectAsState()
+    val avgResistance by sensorViewModel.avgResistance.collectAsState()
+
     var isCurrentlyAnimating by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -87,7 +93,7 @@ fun Overlay(
     }
 
     val minimized by sensorViewModel.isMinimized.collectAsState(initial = false)
-    val location by remember { locationState }
+    val location by locationState
     val size = remember { mutableStateOf(IntSize.Zero) }
 
 
@@ -206,6 +212,11 @@ fun Overlay(
                 maxCadence = "%.0f".format(maxCadence),
                 maxResistance = "%.0f".format(maxResistance),
                 maxSpeed = "%.1f".format(maxSpeed),
+                totalEnergy = "%.0f".format(totalEnergy),
+                totalDistance = if (speedLabel == "mph") "%.2f".format(totalDistance) else "%.2f".format(totalDistance * 1.60934f),
+                distanceUnit = if (speedLabel == "mph") "mi" else "km",
+                avgCadence = "%.0f".format(avgCadence),
+                avgResistance = "%.0f".format(avgResistance),
                 onMetricSelected = { sensorViewModel.onMetricSelected(it) },
                 onSpeedUnitClicked = { sensorViewModel.onClickedSpeedUnit() },
                 onChartClicked = { sensorViewModel.onOverlayPressed() }

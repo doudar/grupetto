@@ -41,6 +41,11 @@ fun OverlayMainContent(
     maxCadence: String,
     maxResistance: String,
     maxSpeed: String,
+    totalEnergy: String,
+    totalDistance: String,
+    distanceUnit: String,
+    avgCadence: String,
+    avgResistance: String,
     onMetricSelected: (MetricType) -> Unit,
     onSpeedUnitClicked: () -> Unit,
     onChartClicked: () -> Unit
@@ -82,6 +87,8 @@ fun OverlayMainContent(
             modifier = statCardModifier,
             iconDrawable = R.drawable.ic_power,
             maxValue = maxPower,
+            totalValue = totalEnergy,
+            totalUnit = "kJ",
             color = MetricPowerColor,
             onClick = { onMetricSelected(MetricType.POWER) }
         )
@@ -93,6 +100,8 @@ fun OverlayMainContent(
             modifier = statCardModifier,
             iconDrawable = R.drawable.ic_cadence,
             maxValue = maxCadence,
+            totalValue = avgCadence,
+            totalUnit = "avg",
             color = MetricCadenceColor,
             onClick = { onMetricSelected(MetricType.CADENCE) }
         )
@@ -144,6 +153,8 @@ fun OverlayMainContent(
             modifier = statCardModifier,
             iconDrawable = R.drawable.ic_resistance,
             maxValue = maxResistance,
+            totalValue = avgResistance,
+            totalUnit = "avg",
             color = MetricResistanceColor,
             onClick = { onMetricSelected(MetricType.RESISTANCE) }
         )
@@ -155,6 +166,8 @@ fun OverlayMainContent(
             modifier = statCardModifier,
             iconDrawable = R.drawable.ic_speed,
             maxValue = maxSpeed,
+            totalValue = totalDistance,
+            totalUnit = distanceUnit,
             color = MetricSpeedColor,
             onClick = { onMetricSelected(MetricType.SPEED) },
             onUnitClick = onSpeedUnitClicked
