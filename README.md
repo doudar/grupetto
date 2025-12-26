@@ -3,7 +3,7 @@
 > **This is a fork of [selalipop/grupetto](https://github.com/selalipop/grupetto).** For installation instructions, detailed usage, and technical implementation details, please see the [original repository](https://github.com/selalipop/grupetto).
 
 <p align="center">
-<img width="500" alt="Grupetto Overlay Demo" src="grupetto_updated.gif">
+<img width="500" alt="Grupetto Overlay Demo" src="grupetto_v2.gif">
 </p>
 
 ## Nov 2025 Updates
