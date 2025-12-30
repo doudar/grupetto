@@ -25,11 +25,13 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.spop.poverlay.overlay.composables.OverlayFullScreenContent
 import com.spop.poverlay.overlay.composables.OverlayMainContent
 import com.spop.poverlay.overlay.composables.OverlayMinimizedContent
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.onEach
 import timber.log.Timber
+import java.util.Locale
 
 const val VisibilityChangeDurationMs = 150
 val OverlayCornerRadius = 25.dp
@@ -54,15 +56,56 @@ fun Overlay(
     onTimerLayout: (IntSize) -> Unit
 ) {
     val power by sensorViewModel.powerValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
-
+    val heartRateGraphLarge = remember { sensorViewModel.heartRateGraph }
+    val powerGraphLarge = remember { sensorViewModel.powerGraphlarge }
     val powerGraph = remember { sensorViewModel.powerGraph }
+    val cadenceGraph = remember { sensorViewModel.cadenceGraph }
     val rpm by sensorViewModel.rpmValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
     val resistance by sensorViewModel.resistanceValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
     val speed by sensorViewModel.speedValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
     val speedLabel by sensorViewModel.speedLabel.collectAsStateWithLifecycle(initialValue = "")
-    val timerLabel by timerViewModel.timerLabel.collectAsStateWithLifecycle(initialValue = "")
+    val heartRate by sensorViewModel.heartRate.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
+
+    val activityAvgHeartRate by sensorViewModel.activityAvgHeartRate.collectAsStateWithLifecycle(
+        initialValue = 0
+    )
+    val activityAvgPower by sensorViewModel.activityAvgPower.collectAsStateWithLifecycle(
+        initialValue = 0
+    )
+    val activityCalories by sensorViewModel.activityCalories.collectAsStateWithLifecycle(
+        initialValue = 0
+    )
+    val activityAvgCadence by sensorViewModel.activityAvgCadence.collectAsStateWithLifecycle(
+        initialValue = 0L
+    )
+    val activityAvgSpeed by sensorViewModel.activityAvgSpeed.collectAsStateWithLifecycle(
+        initialValue = 0.0
+    )
+    val activityDistance by sensorViewModel.activityDistance.collectAsStateWithLifecycle(
+        initialValue = 0.0
+    )
+    val activityMaxSpeed by sensorViewModel.activityMaxSpeed.collectAsStateWithLifecycle(
+        initialValue = 0.0
+    )
+    val activityDurationTime by sensorViewModel.activityDurationTime.collectAsStateWithLifecycle(
+        initialValue = "-"
+    )
+    val activityMaxPower by sensorViewModel.activityMaxPower.collectAsStateWithLifecycle(
+        initialValue = 0.0
+    )
+    val activityMaxCadence by sensorViewModel.activityMaxCadence.collectAsStateWithLifecycle(
+        initialValue = 0L
+    )
+    val activityMaxHeartRate by sensorViewModel.activityMaxHeartRate.collectAsStateWithLifecycle(
+        initialValue = 0
+    )
+
+
     val isTimerPaused by timerViewModel.timerPaused.collectAsStateWithLifecycle(initialValue = false)
     val errorMessage by sensorViewModel.errorMessage.collectAsStateWithLifecycle(initialValue = null)
+    val overlayState by sensorViewModel.overlayState.collectAsStateWithLifecycle(initialValue = OverlayState.FullScreen)
+    val recordingState by sensorViewModel.recordingState.collectAsStateWithLifecycle(initialValue = RecordingState.Stopped)
+
 
     var isCurrentlyAnimating by remember { mutableStateOf(false) }
 
@@ -113,10 +156,61 @@ fun Overlay(
         OverlayLocation.Top -> RoundedCornerShape(
             bottomStart = OverlayCornerRadius, bottomEnd = OverlayCornerRadius
         )
+
         OverlayLocation.Bottom -> RoundedCornerShape(
             topStart = OverlayCornerRadius, topEnd = OverlayCornerRadius
         )
     }
+
+
+    val fullScreen = @Composable {
+
+        OverlayFullScreenContent(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 0.dp)
+                .padding(bottom = 0.dp),
+
+            power = power,
+            rpm = rpm,
+            powerGraph = powerGraphLarge,
+            cadenceGraph = cadenceGraph,
+            heartrateGraph = heartRateGraphLarge,
+            resistance = resistance,
+            speed = speed,
+            speedLabel = speedLabel,
+            heartRate = heartRate,
+            activityAvgHeartRate = activityAvgHeartRate.toString(),
+            activityAvgPower = activityAvgPower.toString(),
+            activityAvgCadence = activityAvgCadence.toString(),
+            activityAvgSpeed = String.format(Locale.ROOT, "%.1f", activityAvgSpeed),
+            activityDistance = String.format(Locale.ROOT, "%.1f", activityDistance),
+ activityCalories = activityCalories.toString(),
+            activityMaxPower = activityMaxPower.toString(),
+            activityMaxCadence = activityMaxCadence.toString(),
+            activityMaxHeartRate = activityMaxHeartRate.toString(),
+            activityMaxSpeed = activityMaxSpeed.toString(),
+            pauseChart = isCurrentlyAnimating,
+            recordingState = recordingState,
+            activityDurationTime = activityDurationTime,
+
+            onSpeedClicked = { sensorViewModel.onClickedSpeed() },
+            onChartClicked = { sensorViewModel.onOverlayPressed() },
+            onRecordClicked = { sensorViewModel.onRecordClicked() },
+            onStopConfirm = { sensorViewModel.onStopConfirm() },
+            onDoubleTap = { sensorViewModel.onOverlayDoubleTap() },
+            onStopCancel = { sensorViewModel.onStopCancel() },
+            onStopClicked = { sensorViewModel.onStopClicked() },
+            onExitToHomeScreen = { sensorViewModel.onExitToHomeScreen() },
+            onIncreaseResistance = { sensorViewModel.onIncreaseResistance() },
+            onDecreaseResistance = { sensorViewModel.onDecreaseResistance() },
+            batteryPCT = sensorViewModel.heartRateBatteryLevel.value.toString()
+        )
+
+
+    }
+
+
     val timer = @Composable {
         val showTimerWhenMinimizedFlow = remember {
             timerViewModel.showTimerWhenMinimized.onEach {
@@ -133,45 +227,48 @@ fun Overlay(
             location = location,
             powerLabel = power,
             contentAlpha = timerAlpha,
-            timerLabel = timerLabel,
+            timerLabel = activityDurationTime,
             cadenceLabel = rpm,
             speedLabel = speed,
             resistanceLabel = resistance,
+            heartRateLabel = heartRate,
             onTap = { timerViewModel.onTimerTap() },
             onLongPress = { timerViewModel.onTimerLongPress() },
             onLayout = onTimerLayout
         )
     }
     val mainContent = @Composable {
-        Box(modifier = Modifier
-            .requiredHeight(height)
-            .wrapContentWidth(unbounded = true)
-            .onSizeChanged {
-                if (it.width != size.value.width || it.height != size.value.height) {
-                    size.value = it
-                    onLayout(size.value)
+        Box(
+            modifier = Modifier
+                .requiredHeight(height)
+                .wrapContentWidth(unbounded = true)
+                .onSizeChanged {
+                    if (it.width != size.value.width || it.height != size.value.height) {
+                        size.value = it
+                        onLayout(size.value)
+                    }
                 }
-            }
-            .background(
-                color = BackgroundColorDefault,
-                shape = backgroundShape,
-            )
-            .pointerInput(Unit) {
-                detectDragGestures(onDrag = { change, offset ->
-                    change.consume()
-                    horizontalDragOffset += offset.x
-                    horizontalDragOffset = horizontalDragCallback(horizontalDragOffset)
+                .background(
+                    color = BackgroundColorDefault,
+                    shape = backgroundShape,
+                )
+                .pointerInput(Unit) {
+                    detectDragGestures(onDrag = { change, offset ->
+                        change.consume()
+                        horizontalDragOffset += offset.x
+                        horizontalDragOffset = horizontalDragCallback(horizontalDragOffset)
 
-                    verticalDragOffset += offset.y
-                    verticalDragOffset = verticalDragCallback(verticalDragOffset)
-                }, onDragEnd = {
-                    verticalDragOffset = 0f
-                })
-            }
-            .pointerInput(Unit) {
-                detectTapGestures(onTap = { sensorViewModel.onOverlayPressed() },
-                    onLongPress = { sensorViewModel.onOverlayDoubleTap() })
-            }) {
+                        verticalDragOffset += offset.y
+                        verticalDragOffset = verticalDragCallback(verticalDragOffset)
+                    }, onDragEnd = {
+                        verticalDragOffset = 0f
+                    })
+                }
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { sensorViewModel.onOverlayPressed() },
+                        onLongPress = { sensorViewModel.onOverlayDoubleTap() })
+                }) {
 
 
             val rowAlignment = when (location) {
@@ -192,53 +289,122 @@ fun Overlay(
                 resistance = resistance,
                 speed = speed,
                 speedLabel = speedLabel,
+                heartRate = heartRate,
                 onSpeedClicked = { sensorViewModel.onClickedSpeed() },
-                onChartClicked = { sensorViewModel.onOverlayPressed() }
+                onChartClicked = { sensorViewModel.onOverlayPressed() },
+                averagePower = activityAvgPower.toFloat()
+
             )
         }
     }
 
 
-    Box(
-        modifier = Modifier
-            .wrapContentSize(unbounded = true)
-    ) {
-        errorMessage?.let {
-            Snackbar(
-                action = {
-                    Button(onClick = { sensorViewModel.onDismissErrorPressed() }) {
-                        Text("Dismiss")
-                    }
-                },
-                containerColor = Color.White,
+
+    when (overlayState) {
+        OverlayState.FullScreen -> {
+
+
+            fullScreen()
+
+        }
+
+        OverlayState.Minimized -> {
+            Box(
                 modifier = Modifier
-                    .padding(8.dp)
-                    .zIndex(1f)
+                    .wrapContentSize(unbounded = true)
             ) {
-                Text(it, color = Color.Black)
-            }
-            return@Box
-        }
-        Column(
-            modifier = Modifier
-                .wrapContentSize()
-                .offset { visibilityOffset },
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-
-            when (location) {
-                OverlayLocation.Top -> {
-                    mainContent()
-
-                    timer()
+                errorMessage?.let {
+                    Snackbar(
+                        action = {
+                            Button(onClick = { sensorViewModel.onDismissErrorPressed() }) {
+                                Text("Dismiss")
+                            }
+                        },
+                        containerColor = Color.White,
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .zIndex(1f)
+                    ) {
+                        Text(it, color = Color.Black)
+                    }
+                    return@Box
                 }
-                OverlayLocation.Bottom -> {
-                    timer()
-                    mainContent()
+                Column(
+                    modifier = Modifier
+                        .wrapContentSize()
+                        .offset { visibilityOffset },
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
 
+
+                    when (location) {
+                        OverlayLocation.Top -> {
+
+                            mainContent()
+
+                            timer()
+                        }
+
+                        OverlayLocation.Bottom -> {
+                            timer()
+                            mainContent()
+
+                        }
+                    }
+                }
+            }
+
+        }
+
+        OverlayState.Main -> {
+            Box(
+                modifier = Modifier
+                    .wrapContentSize(unbounded = true)
+            ) {
+                errorMessage?.let {
+                    Snackbar(
+                        action = {
+                            Button(onClick = { sensorViewModel.onDismissErrorPressed() }) {
+                                Text("Dismiss")
+                            }
+                        },
+                        containerColor = Color.White,
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .zIndex(1f)
+                    ) {
+                        Text(it, color = Color.Black)
+                    }
+                    return@Box
+                }
+                Column(
+                    modifier = Modifier
+                        .wrapContentSize()
+                        .offset { visibilityOffset },
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+
+
+                    when (location) {
+                        OverlayLocation.Top -> {
+
+                            mainContent()
+
+                            timer()
+                        }
+
+                        OverlayLocation.Bottom -> {
+                            timer()
+                            mainContent()
+
+                        }
+                    }
                 }
             }
         }
+
+
     }
+
 
 }

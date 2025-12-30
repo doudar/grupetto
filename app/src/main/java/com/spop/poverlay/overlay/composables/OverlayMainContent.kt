@@ -26,9 +26,11 @@ fun OverlayMainContent(
     resistance: String,
     speed: String,
     speedLabel: String,
+    heartRate: String,
     pauseChart : Boolean,
     onSpeedClicked : ()->Unit,
-    onChartClicked : ()->Unit
+    onChartClicked : ()->Unit,
+    averagePower: Float
 ) {
     var shrinkChart by remember { mutableStateOf(false) }
     Row(
@@ -55,6 +57,7 @@ fun OverlayMainContent(
             data = powerGraph,
             maxValue = 250f,
             pauseChart = pauseChart,
+            average = averagePower,
             modifier = Modifier
                 .requiredWidth(chartWidth)
                 .requiredHeight(100.dp)
@@ -66,16 +69,15 @@ fun OverlayMainContent(
                         onLongPress = { shrinkChart = !shrinkChart }
                     )
                 },
-            fillColor = Color(android.graphics.Color.parseColor("#FF3348")),
-            lineColor = Color(android.graphics.Color.parseColor("#D9182B")),
+            fillColor = Color(android.graphics.Color.parseColor("#33FF48")), // Greenish fill
+            lineColor = Color(android.graphics.Color.parseColor("#18D92B")), // Greenish line
         )
         StatCard("Resistance", resistance, "", statCardModifier)
 
         StatCard("Speed", speed, speedLabel, statCardModifier.clickable {
             onSpeedClicked()
         })
-
+        
+        StatCard("Heart Rate", heartRate, "bpm", statCardModifier)
     }
 }
-
-

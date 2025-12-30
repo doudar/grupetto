@@ -7,6 +7,27 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="onepeloton.permission.SUBSCRIPTION_TYPE_ACCESS" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <application android:requestLegacyExternalStorage="true"  />
+
+
+
+
+    <uses-feature android:name="android.hardware.bluetooth" android:required="true"/>
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE"
+        />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+
+
+
 
     <application
         android:name=".GrupettoApplication"
@@ -32,6 +53,34 @@
                 android:name="android.app.lib_name"
                 android:value="" />
         </activity>
+
+        <activity
+            android:name=".HeartRateDeviceListActivity"
+            android:exported="false"
+            android:theme="@style/Theme.PTONOverlay"
+            android:label="Select Heart Rate Monitor"/>
+
+        <activity
+            android:name=".HistoryActivity"
+            android:exported="false"
+            android:theme="@style/Theme.PTONOverlay"
+            android:label="History"/>
+
+        <activity
+            android:name=".HistoryActivityDetail"
+            android:exported="false"
+            android:theme="@style/Theme.PTONOverlay"
+            android:label="Activity Details"/>
+        <activity
+            android:name=".UserListActivity"
+            android:exported="false"
+            android:theme="@style/Theme.PTONOverlay"
+            android:label="Select User"/>
+        <activity
+            android:name=".UserConfigurationActivity"
+            android:exported="false"
+            android:theme="@style/Theme.PTONOverlay"
+            android:label="Select User"/>
 
         <service
             android:name=".overlay.OverlayService"

@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.ServiceCompat.stopForeground
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
@@ -36,9 +37,11 @@ import com.spop.poverlay.util.IsRunningOnPeloton
 import com.spop.poverlay.util.LifecycleEnabledService
 import com.spop.poverlay.util.disableAnimations
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import timber.log.Timber
 import java.util.*
 import kotlin.math.roundToInt
+
 
 
 class OverlayService : LifecycleEnabledService() {
@@ -63,12 +66,25 @@ class OverlayService : LifecycleEnabledService() {
         val EmulatorSensorInterface by lazy { DummySensorInterface() }
     }
 
+    override fun onDestroy() {
+
+    }
+
+
+
 
     override fun onCreate() {
         super.onCreate()
 
         val notificationManager = NotificationManagerCompat.from(this)
         startForeground(OverlayServiceId, prepareNotification(notificationManager))
+
+
+       // bleViewModel = BleViewModel(this)
+       // bleViewModel.StartService(this, getApplication())
+
+
+
 
         buildDialog()
     }
@@ -116,14 +132,22 @@ class OverlayService : LifecycleEnabledService() {
         val sensorViewModel = OverlaySensorViewModel(
             application,
             sensorInterface,
-            DeadSensorDetector(sensorInterface, this.coroutineContext)
+            DeadSensorDetector(sensorInterface, this.coroutineContext),
+            onExit = { exit() }
         )
+
 
         val timerViewModel = OverlayTimerViewModel(
             application,
             ConfigurationRepository(applicationContext, this)
         )
-        val dialogViewModel = OverlayDialogViewModel(screenSize, sensorViewModel.isMinimized)
+
+
+        val dialogViewModel = OverlayDialogViewModel(
+            screenSize,
+            sensorViewModel.isMinimized,
+            sensorViewModel.overlayState
+        )
 
         val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -143,6 +167,7 @@ class OverlayService : LifecycleEnabledService() {
             layoutFlag,
             defaultFlags,
             PixelFormat.TRANSLUCENT
+
         ).apply {
             disableAnimations()
         }
@@ -198,32 +223,44 @@ class OverlayService : LifecycleEnabledService() {
                 dialogViewModel.partialOverlayFlags,
                 dialogViewModel.touchTargetHeight,
                 dialogViewModel.dialogSizeParams,
-                dialogViewModel.minimizedDialogSizeParams
+                dialogViewModel.minimizedDialogSizeParams,
+                sensorViewModel.overlayState
             ) { values ->
                 val origin = values[0] as Offset
                 val gravity = values[1] as Int
                 val overlayFlags = values[2] as Int
                 val touchTargetHeight = values[3] as Float
-                val (width, height)  = values[4] as Pair<Int,Int>
-                val (mWidth, mHeight)  = values[5] as Pair<Int,Int>
+                val (width, height) = values[4] as Pair<Int, Int>
+                val (mWidth, mHeight) = values[5] as Pair<Int, Int>
+                val overlayState = values[6] as OverlayState
+
                 overlayParams.x = origin.x.roundToInt()
                 overlayParams.y = origin.y.roundToInt()
                 overlayParams.flags = DefaultOverlayFlags or overlayFlags
-                overlayParams.gravity = gravity
-                overlayParams.width = width
-                overlayParams.height = if(sensorViewModel.isMinimized.value){
-                    mHeight
-                }else{
-                    height
+                overlayParams.gravity = when (overlayState) {
+                    OverlayState.Main -> gravity
+                    OverlayState.Minimized -> gravity
+                    OverlayState.FullScreen -> 49
                 }
+                overlayParams.width = if (overlayState == OverlayState.FullScreen) {
+                    screenSize.width.toInt()
+                } else {
+                    width
+                }
+                overlayParams.height = when (overlayState) {
+                    OverlayState.Main -> height
+                    OverlayState.Minimized -> mHeight
+                    OverlayState.FullScreen -> screenSize.height.toInt()
+                }
+
                 touchTargetParams.x = origin.x.roundToInt()
                 touchTargetParams.y = origin.y.roundToInt()
                 touchTargetParams.gravity = gravity
                 touchTargetParams.width = mWidth
                 touchTargetParams.height = touchTargetHeight.roundToInt()
-                touchTargetView.visibility = if(touchTargetHeight > 0f){
+                touchTargetView.visibility = if (touchTargetHeight > 0f) {
                     View.VISIBLE
-                }else{
+                } else {
                     View.GONE
                 }
                 disableClipOnParents(overlayView)
@@ -231,6 +268,21 @@ class OverlayService : LifecycleEnabledService() {
                 wm.updateViewLayout(touchTargetView, touchTargetParams)
             }.collect {}
         }
+    }
+
+
+    public fun exit() {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
+        stopForeground(true)
+        this.stopSelf()
+        stopForeground(true)
+        this.stopSelf()
+        stopForeground(true)
+        this.stopSelf()
+        System.exit(0)
     }
 
     fun disableClipOnParents(v: View) {
@@ -292,4 +344,3 @@ class OverlayService : LifecycleEnabledService() {
         return notificationBuilder.build()
     }
 }
-

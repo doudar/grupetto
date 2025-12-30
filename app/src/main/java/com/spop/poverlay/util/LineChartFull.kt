@@ -13,10 +13,10 @@ import com.yabu.livechart.model.DataPoint
 import com.yabu.livechart.model.Dataset
 import com.yabu.livechart.view.LiveChart
 import com.yabu.livechart.view.LiveChartStyle
-import com.yabu.livechart.view.LiveChartView
 
 @Composable
-fun LineChart(
+fun LineChartFull(
+
     data: Collection<Number>,
     maxValue: Float,
     modifier: Modifier,
@@ -24,10 +24,12 @@ fun LineChart(
     fillColor: Color = Color.LightGray,
     lineColor: Color = Color.DarkGray,
     minValue: Float = 0f,
-    average: Float = 0f
+    average: Float = 0f,
+
+
 ) {
     val graph = remember { data }
-    var lcs: LiveChartStyle = LiveChartStyle()
+    var lcs :LiveChartStyle = LiveChartStyle()
     val a: LiveChartAttributes
 
 
@@ -48,8 +50,10 @@ fun LineChart(
                 baselineColor = android.graphics.Color.LTGRAY
                 pathStrokeWidth = 4f
                 baselineStrokeWidth = 2f
+
                 mainCornerRadius = 40f
                 secondColor = android.graphics.Color.TRANSPARENT
+
 
 
             }).disableTouchOverlay()
@@ -61,25 +65,14 @@ fun LineChart(
                     view.setDataset(Dataset(graph.mapIndexed { index, value ->
                         //Start values at 1f to keep line visible at all times
                         DataPoint(index.toFloat(), value.toFloat())
-                    }.toMutableList())).setSecondDataset(
-                        //There's no way to set explicit bounds with this graphing library
-                        //This hidden dataset forces the graph to cover the given bounds
-                        Dataset(
-                            mutableListOf(
-                                DataPoint(0f, average),
-                                DataPoint(
-                                    OverlaySensorViewModel.GraphMaxDataPoints.toFloat(),
-                                    maxValue
-                                )
-                            )
-                        )
-                    )
+                    }.toMutableList())).drawYBounds()
+                        // Draws a customizable base line from the first point of the dataset or manually set a data point
                         .drawBaseline()
                         .setBaselineManually(average)
                         .drawFill(withGradient = true)
                         .drawDataset()
-                } catch (E: Exception) {
                 }
+                catch (e: Exception) {}
             }
         }
 

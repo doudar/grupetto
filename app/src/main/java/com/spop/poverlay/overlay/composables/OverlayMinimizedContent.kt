@@ -36,6 +36,7 @@ fun OverlayMinimizedContent(
     cadenceLabel: String,
     speedLabel: String,
     resistanceLabel: String,
+    heartRateLabel: String,
     contentAlpha: Float,
     timerLabel: String,
     timerPaused: Boolean,
@@ -106,7 +107,7 @@ fun OverlayMinimizedContent(
 
             OverlayTimerField(
                 modifier = Modifier
-                    .width(80.dp)
+                    .width(90.dp)
                     .alpha(timerAlpha),
                 timerLabel = timerLabel,
                 iconDrawable = R.drawable.ic_timer
@@ -138,6 +139,14 @@ fun OverlayMinimizedContent(
                 timerLabel = resistanceLabel,
                 iconDrawable = R.drawable.ic_resistance
             )
+            if (heartRateLabel != "-") {
+                Spacer(modifier = Modifier.width(4.dp))
+                OverlayTimerField(
+                    modifier = Modifier.width(58.dp),
+                    timerLabel = heartRateLabel,
+                    iconDrawable = R.drawable.ic_heart
+                )
+            }
         }
     }
 }

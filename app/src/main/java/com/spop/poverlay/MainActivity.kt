@@ -20,6 +20,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.core.text.HtmlCompat
 import androidx.lifecycle.lifecycleScope
+import com.spop.poverlay.DataBase.DBHelper
+import com.spop.poverlay.DataBase.GlobalVariables
+
 import com.spop.poverlay.releases.ReleaseChecker
 import com.spop.poverlay.ui.theme.PTONOverlayTheme
 import kotlinx.coroutines.CoroutineScope
@@ -31,8 +34,39 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private lateinit var viewModel: ConfigurationViewModel
 
+
+
+    public override fun onResume() {
+        super.onResume()
+
+        viewModel.onResume()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val dbHelper = DBHelper(this)
+        val userCount = dbHelper.getUserCount()
+        val gv = GlobalVariables(this)
+
+        if (userCount == 0) {
+            val newUserId = dbHelper.insertUser("Default User", "", "")
+            val intent = Intent(this, UserConfigurationActivity::class.java).apply {
+                putExtra("USER_ID", newUserId.toInt())
+            }
+            startActivity(intent)
+        } else if (userCount == 1) {
+            val user = dbHelper.getUser(1) // Assuming ID 1 for single user setup
+            if (user != null) {
+                gv.UserIDSet(user.id)
+                gv.HRDeviceAddressSet(user.bleId ?: "")
+                gv.HRDeviceNameSet(user.bleName ?: "")
+            }
+        } else {
+            val intent = Intent(this, UserListActivity::class.java)
+            startActivity(intent)
+        }
+
         viewModel =
             ConfigurationViewModel(
                 application, ConfigurationRepository(applicationContext, this),
@@ -46,6 +80,12 @@ class MainActivity : ComponentActivity() {
         }
         viewModel.requestRestart.observe(this) {
             restartGrupetto()
+        }
+        viewModel.openHistory.observe(this) {
+            startActivity(Intent(this, HistoryActivity::class.java))
+        }
+        viewModel.openUserList.observe(this) {
+            startActivity(Intent(this, UserListActivity::class.java))
         }
         viewModel.infoPopup.observe(this) {
             Toast.makeText(

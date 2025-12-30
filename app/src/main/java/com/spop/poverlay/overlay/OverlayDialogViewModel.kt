@@ -14,7 +14,8 @@ import kotlin.math.ceil
 @Suppress("LiftReturnOrAssignment")
 class OverlayDialogViewModel(
     private val screenSize: Size,
-    private val isMinimized : StateFlow<Boolean>
+    private val isMinimized : StateFlow<Boolean>,
+    private val overlayState: StateFlow<OverlayState>
     ) {
     companion object {
         // If the overlay is dragged within this range of pixels from the center of the screen
@@ -63,6 +64,9 @@ class OverlayDialogViewModel(
     // - If the gesture is on screen, move the view to follow the gesture
     // - If the gesture would move the view offscreen, clamp it to screen bounds
     fun processHorizontalDrag(distance: Float): Float {
+        if(overlayState.value == OverlayState.FullScreen){
+            return 0f
+        }
         when {
             HorizontalDragSnapRange.contains(distance) -> {
                 // View is near the center of the screen, snap to center
@@ -99,6 +103,9 @@ class OverlayDialogViewModel(
     // - Reset the progress to 0 and move the view once drag is halfway across screen
     // - Keep the current progress otherwise
     fun processVerticalDrag(distance: Float): Float {
+        if(overlayState.value == OverlayState.FullScreen){
+            return 0f
+        }
         if (abs(distance) > screenSize.height * OverlayService.VerticalMoveDragThreshold) {
             val newLocation = verticalToggleOverlayLocation(dialogLocation.value)
             dialogLocation.value = newLocation
