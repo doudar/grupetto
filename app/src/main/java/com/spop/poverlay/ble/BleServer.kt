@@ -5,7 +5,10 @@ import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
 import android.bluetooth.le.BluetoothLeAdvertiser
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.ParcelUuid
 import androidx.core.content.edit
 import com.spop.poverlay.sensor.interfaces.SensorInterface
@@ -83,12 +86,29 @@ class BleServer(
 
     override val coroutineContext = SupervisorJob() + Dispatchers.IO
     private var sensorDataJob: Job? = null
+    private var watchdogJob: Job? = null
 
     private var gattServer: BluetoothGattServer? = null
     private var advertiser: BluetoothLeAdvertiser? = null
     private val registeredServices = mutableListOf<BaseBleService>()
     private val servicesToRegister = LinkedList<BaseBleService>()
     private var currentlyRegisteringService: BaseBleService? = null
+    
+    // Advertising state tracking
+    private var isAdvertising = false
+    private var lastAdvertisingStartTime = 0L
+    private var lastAdvertisingFailureCode: Int? = null
+    private var isServerStarted = false
+    
+    // Bluetooth adapter state receiver
+    private val bluetoothStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+                val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+                handleBluetoothStateChange(state)
+            }
+        }
+    }
 
     //ADD OR EDIT SERVICES HERE
     private fun setupServices() {
@@ -129,7 +149,15 @@ class BleServer(
 
         try {
             gattServer = bluetoothManager.openGattServer(context, this)
+            isServerStarted = true
+            
+            // Register Bluetooth state change receiver
+            val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+            context.registerReceiver(bluetoothStateReceiver, filter)
+            Timber.d("Registered Bluetooth state change receiver")
+            
             setupServices()
+            startWatchdog()
         } catch (e: SecurityException) {
             Timber.e(e, "Missing bluetooth permissions")
         }
@@ -154,14 +182,30 @@ class BleServer(
 
     fun stop() {
         try {
+            isServerStarted = false
+            stopWatchdog()
             stopSensorDataUpdates()
             stopAdvertising()
+            
+            // Unregister Bluetooth state change receiver
+            try {
+                context.unregisterReceiver(bluetoothStateReceiver)
+                Timber.d("Unregistered Bluetooth state change receiver")
+            } catch (e: IllegalArgumentException) {
+                // Receiver was not registered, ignore
+            }
+            
             gattServer?.clearServices()
             gattServer?.close()
             gattServer = null
             registeredServices.clear()
             servicesToRegister.clear()
             currentlyRegisteringService = null
+            
+            // Reset state tracking
+            isAdvertising = false
+            lastAdvertisingStartTime = 0L
+            lastAdvertisingFailureCode = null
         } catch (e: SecurityException) {
             Timber.e(e, "Missing bluetooth permissions")
         }
@@ -190,6 +234,132 @@ class BleServer(
             gattServer?.sendResponse(device, requestId, status, offset, value)
         } catch (e: SecurityException) {
             Timber.e(e, "Missing bluetooth permissions")
+        }
+    }
+    
+    private fun handleBluetoothStateChange(state: Int) {
+        when (state) {
+            BluetoothAdapter.STATE_OFF -> {
+                Timber.w("Bluetooth turned off, stopping advertising")
+                isAdvertising = false
+                // Don't call stopAdvertising() as Bluetooth is already off
+            }
+            BluetoothAdapter.STATE_ON -> {
+                Timber.i("Bluetooth turned on, attempting to restart advertising")
+                if (isServerStarted) {
+                    restartGattAndAdvertising("Bluetooth turned on")
+                }
+            }
+            BluetoothAdapter.STATE_TURNING_OFF -> {
+                Timber.d("Bluetooth turning off")
+                isAdvertising = false
+            }
+            BluetoothAdapter.STATE_TURNING_ON -> {
+                Timber.d("Bluetooth turning on")
+            }
+        }
+    }
+    
+    private fun startWatchdog() {
+        stopWatchdog()
+        watchdogJob = launch {
+            // Wait a bit before starting watchdog to allow initial setup
+            delay(60_000) // 1 minute initial delay
+            
+            while (isActive && isServerStarted) {
+                try {
+                    checkAndRestartAdvertising()
+                } catch (e: Exception) {
+                    Timber.e(e, "Error in advertising watchdog")
+                }
+                // Check every 2 minutes
+                delay(120_000)
+            }
+        }
+        Timber.d("Started advertising watchdog")
+    }
+    
+    private fun stopWatchdog() {
+        watchdogJob?.cancel()
+        watchdogJob = null
+        Timber.d("Stopped advertising watchdog")
+    }
+    
+    private fun checkAndRestartAdvertising() {
+        val bluetoothAdapter = bluetoothManager.adapter
+        
+        if (bluetoothAdapter == null) {
+            Timber.w("Watchdog: Bluetooth adapter is null")
+            return
+        }
+        
+        if (!bluetoothAdapter.isEnabled) {
+            Timber.d("Watchdog: Bluetooth is disabled, waiting for it to be enabled")
+            isAdvertising = false
+            return
+        }
+        
+        // Check if we should be advertising but aren't
+        if (!isAdvertising && registeredServices.isNotEmpty()) {
+            val timeSinceLastStart = System.currentTimeMillis() - lastAdvertisingStartTime
+            val reason = if (lastAdvertisingStartTime == 0L) {
+                "never started"
+            } else if (lastAdvertisingFailureCode != null) {
+                "last failed with code $lastAdvertisingFailureCode"
+            } else {
+                "stopped (${timeSinceLastStart / 1000}s ago)"
+            }
+            Timber.w("Watchdog: Advertising is not active, reason: $reason. Restarting...")
+            restartGattAndAdvertising("Watchdog detected inactive advertising")
+        } else if (isAdvertising) {
+            val timeSinceStart = System.currentTimeMillis() - lastAdvertisingStartTime
+            Timber.d("Watchdog: Advertising active for ${timeSinceStart / 1000}s")
+        }
+    }
+    
+    private fun restartGattAndAdvertising(reason: String) {
+        Timber.i("Restarting GATT and advertising: $reason")
+        
+        try {
+            // Stop current advertising
+            stopAdvertising()
+            
+            // Close and reopen GATT server
+            gattServer?.clearServices()
+            gattServer?.close()
+            gattServer = null
+            
+            val bluetoothAdapter = bluetoothManager.adapter
+            if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
+                Timber.e("Cannot restart: Bluetooth not available")
+                return
+            }
+            
+            advertiser = bluetoothAdapter.bluetoothLeAdvertiser
+            if (advertiser == null) {
+                Timber.e("Cannot restart: Failed to get advertiser")
+                return
+            }
+            
+            gattServer = bluetoothManager.openGattServer(context, this)
+            if (gattServer == null) {
+                Timber.e("Cannot restart: Failed to open GATT server")
+                return
+            }
+            
+            // Re-register all services
+            val savedServices = registeredServices.toList()
+            registeredServices.clear()
+            servicesToRegister.clear()
+            servicesToRegister.addAll(savedServices)
+            currentlyRegisteringService = null
+            
+            registerNextService()
+            
+        } catch (e: SecurityException) {
+            Timber.e(e, "Missing bluetooth permissions during restart")
+        } catch (e: Exception) {
+            Timber.e(e, "Error during GATT and advertising restart")
         }
     }
 
@@ -237,6 +407,8 @@ class BleServer(
     private fun stopAdvertising() {
         try {
             advertiser?.stopAdvertising(advertisingCallback)
+            isAdvertising = false
+            Timber.d("Stopped advertising")
         } catch (e: SecurityException) {
             Timber.e(e, "Missing bluetooth permissions")
         }
@@ -245,11 +417,24 @@ class BleServer(
     private val advertisingCallback =
             object : AdvertiseCallback() {
                 override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
-                    Timber.i("BLE advertising started")
+                    isAdvertising = true
+                    lastAdvertisingStartTime = System.currentTimeMillis()
+                    lastAdvertisingFailureCode = null
+                    Timber.i("BLE advertising started successfully")
                 }
 
                 override fun onStartFailure(errorCode: Int) {
-                    Timber.e("BLE advertising failed: $errorCode")
+                    isAdvertising = false
+                    lastAdvertisingFailureCode = errorCode
+                    val errorMessage = when (errorCode) {
+                        ADVERTISE_FAILED_DATA_TOO_LARGE -> "Data too large"
+                        ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> "Too many advertisers"
+                        ADVERTISE_FAILED_ALREADY_STARTED -> "Already started"
+                        ADVERTISE_FAILED_INTERNAL_ERROR -> "Internal error"
+                        ADVERTISE_FAILED_FEATURE_UNSUPPORTED -> "Feature unsupported"
+                        else -> "Unknown error"
+                    }
+                    Timber.e("BLE advertising failed: $errorCode ($errorMessage)")
                 }
             }
 
