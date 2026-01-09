@@ -30,10 +30,6 @@ enum class MetricType {
     POWER, CADENCE, RESISTANCE, SPEED
 }
 
-enum class MetricType {
-    POWER, CADENCE, RESISTANCE, SPEED
-}
-
 /**
  * Calorie calculation constants using Gross Mechanical Efficiency (GME) method:
  * 
@@ -328,7 +324,6 @@ class OverlaySensorViewModel(
     init {
         setupGraphData()
         setupCaloriesAccumulation()
-        
         setupMaxTracking()
         viewModelScope.launch(Dispatchers.IO) {
             deadSensorDetector.deadSensorDetected.collect(object : FlowCollector<Unit> {
