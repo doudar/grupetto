@@ -29,6 +29,7 @@ open class OverlayTimerViewModel(
     // Accumulated seconds (persists across pause/resume)
     private var accumulatedSeconds = 0L
     private val mutableAccumulatedSeconds = MutableStateFlow(0L)
+    val elapsedSeconds = mutableAccumulatedSeconds.asStateFlow()
 
     // Timer is running when moving
     private val mutableTimerRunning = MutableStateFlow(false)
@@ -96,5 +97,12 @@ open class OverlayTimerViewModel(
     fun onTimerLongPress() {
         // Long press resets the timer
         resetTimer()
+    }
+
+    private fun resetTimer() {
+        accumulatedSeconds = 0L
+        mutableAccumulatedSeconds.value = 0L
+        mutableTimerRunning.value = false
+        mutableTimerStarted.value = false
     }
 }

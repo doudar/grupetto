@@ -1,4 +1,4 @@
-@file:OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
+@file:OptIn(kotlinx.coroutines.InternalCoroutinesApi::class, kotlin.time.ExperimentalTime::class)
 
 package com.spop.poverlay.overlay
 
@@ -22,7 +22,8 @@ import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration
-import kotlin.time.ExperimentalTime
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.minutes
 
 private const val MphToKph = 1.60934
 
@@ -57,13 +58,13 @@ class OverlaySensorViewModel(
 
     companion object {
         // The sensor does not necessarily return new value this quickly
-        val GraphUpdatePeriod = Duration.milliseconds(400)
+        val GraphUpdatePeriod = 400.milliseconds
 
         // Max number of points before data starts to shift
         const val GraphMaxDataPoints = 300
 
         // Reset max values after all metrics are zero for this duration
-        val MaxResetTimeout = Duration.minutes(5)
+        val MaxResetTimeout = 5.minutes
     }
 
 

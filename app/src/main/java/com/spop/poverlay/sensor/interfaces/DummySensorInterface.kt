@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.flow
 import kotlin.math.sin
 import kotlin.time.Duration
 import kotlin.time.ExperimentalTime
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Used to generate fake data on the emulator
@@ -54,7 +55,7 @@ class DummySensorInterface : SensorInterface {
             (sin(Math.toRadians(it.toDouble())) + 1) * (magnitude / 2)
         }
         for(value in sineValues){
-            delay(Duration.milliseconds(100))
+                delay(100.milliseconds)
             emit(value.toFloat())
         }
     }

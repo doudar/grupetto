@@ -6,9 +6,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -176,7 +176,7 @@ private fun StartServicePage(
     Spacer(modifier = Modifier.height(40.dp))
     Button(
             onClick = onClickedRestartApp,
-            colors = ButtonDefaults.buttonColors(containerColor = ErrorColor),
+            colors = ButtonDefaults.buttonColors(backgroundColor = ErrorColor),
     ) {
         Text(
                 text = "Restart Grupetto",

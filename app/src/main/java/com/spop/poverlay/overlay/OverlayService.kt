@@ -24,8 +24,11 @@ import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import com.spop.poverlay.ConfigurationRepository
 import com.spop.poverlay.MainActivity
@@ -139,11 +142,6 @@ class OverlayService : LifecycleEnabledService() {
             sensorInterface,
             DeadSensorDetector(sensorInterface, this.coroutineContext),
             timerViewModel
-        )
-
-        val timerViewModel = OverlayTimerViewModel(
-            application,
-            ConfigurationRepository(applicationContext, this)
         )
         // Wire up timer to auto-start/pause based on movement
         timerViewModel.observeMovement(sensorViewModel.isMoving, sensorViewModel.sessionReset)
