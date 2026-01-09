@@ -100,6 +100,12 @@ class BleServer(
     private var lastAdvertisingFailureCode: Int? = null
     private var isServerStarted = false
     
+    // Watchdog configuration
+    companion object {
+        private const val WATCHDOG_INITIAL_DELAY_MS = 60_000L // 1 minute
+        private const val WATCHDOG_CHECK_INTERVAL_MS = 120_000L // 2 minutes
+    }
+    
     // Bluetooth adapter state receiver
     private val bluetoothStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -192,7 +198,8 @@ class BleServer(
                 context.unregisterReceiver(bluetoothStateReceiver)
                 Timber.d("Unregistered Bluetooth state change receiver")
             } catch (e: IllegalArgumentException) {
-                // Receiver was not registered, ignore
+                // Receiver was not registered, this is normal if stop() called without start()
+                Timber.d("Bluetooth state receiver was not registered (normal if not started)")
             }
             
             gattServer?.clearServices()
@@ -264,7 +271,7 @@ class BleServer(
         stopWatchdog()
         watchdogJob = launch {
             // Wait a bit before starting watchdog to allow initial setup
-            delay(60_000) // 1 minute initial delay
+            delay(WATCHDOG_INITIAL_DELAY_MS)
             
             while (isActive && isServerStarted) {
                 try {
@@ -273,7 +280,7 @@ class BleServer(
                     Timber.e(e, "Error in advertising watchdog")
                 }
                 // Check every 2 minutes
-                delay(120_000)
+                delay(WATCHDOG_CHECK_INTERVAL_MS)
             }
         }
         Timber.d("Started advertising watchdog")
@@ -427,11 +434,11 @@ class BleServer(
                     isAdvertising = false
                     lastAdvertisingFailureCode = errorCode
                     val errorMessage = when (errorCode) {
-                        ADVERTISE_FAILED_DATA_TOO_LARGE -> "Data too large"
-                        ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> "Too many advertisers"
-                        ADVERTISE_FAILED_ALREADY_STARTED -> "Already started"
-                        ADVERTISE_FAILED_INTERNAL_ERROR -> "Internal error"
-                        ADVERTISE_FAILED_FEATURE_UNSUPPORTED -> "Feature unsupported"
+                        AdvertiseCallback.ADVERTISE_FAILED_DATA_TOO_LARGE -> "Data too large"
+                        AdvertiseCallback.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> "Too many advertisers"
+                        AdvertiseCallback.ADVERTISE_FAILED_ALREADY_STARTED -> "Already started"
+                        AdvertiseCallback.ADVERTISE_FAILED_INTERNAL_ERROR -> "Internal error"
+                        AdvertiseCallback.ADVERTISE_FAILED_FEATURE_UNSUPPORTED -> "Feature unsupported"
                         else -> "Unknown error"
                     }
                     Timber.e("BLE advertising failed: $errorCode ($errorMessage)")
