@@ -2,7 +2,7 @@ package com.spop.poverlay.overlay.composables
 
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.Text
+//import androidx.compose.material.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -18,6 +18,7 @@ import com.spop.poverlay.overlay.PowerChartShrunkWidth
 import com.spop.poverlay.overlay.StatCard
 import com.spop.poverlay.overlay.StatCardWidth
 import com.spop.poverlay.ui.theme.MetricCadenceColor
+import com.spop.poverlay.ui.theme.MetricCalorieColor
 import com.spop.poverlay.ui.theme.MetricPowerColor
 import com.spop.poverlay.ui.theme.MetricResistanceColor
 import com.spop.poverlay.ui.theme.MetricSpeedColor
@@ -127,12 +128,12 @@ fun OverlayMainContent(
                     )
                 }
         ) {
-            Text(
+           /* Text(
                 text = chartLabel,
                 color = chartColor,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold
-            )
+            )*/
             LineChart(
                 data = currentGraph,
                 maxValue = chartMaxValue,
@@ -172,11 +173,7 @@ fun OverlayMainContent(
             onClick = { onMetricSelected(MetricType.SPEED) },
             onUnitClick = onSpeedUnitClicked
         )
-
-        StatCard("Calories", calories, "kcal", statCardModifier)
-
-        StatCard("Calories", calories, "kcal", statCardModifier)
-
+        StatCard("Calories", calories, color = MetricCalorieColor, unit = "kcal",maxValue = "", modifier = statCardModifier, iconDrawable = R.drawable.ic_calories)
     }
 }
 

@@ -16,3 +16,4 @@ val MetricPowerColor = Color(0xFFFFEB3B)      // Yellow
 val MetricCadenceColor = Color(0xFF4CAF50)    // Green
 val MetricSpeedColor = Color(0xFF2196F3)      // Blue
 val MetricResistanceColor = Color(0xFFD9182B) // Red
+val MetricCalorieColor = Color(color = 0xFFC0C0C0)    // light grey

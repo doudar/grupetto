@@ -524,7 +524,7 @@ class BleServer(
     // speedKmh must be in km/h; convert to m/s for wheel RPM calculation
     var speedMps = speedKmh?.let { it / 3.6f }
     if (speedMps != null && speedMps > 0f) {
-        speedMps = speedMps.div(2)
+        //speedMps = speedMps.div(2)
         val wheelRpm = (speedMps / wheelSizeMeters) * 60f
         if (wheelRpm > 0f) {
             val wheelRevPeriodTicks = (60.0 * 1024.0) / wheelRpm
