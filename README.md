@@ -6,7 +6,7 @@
 **grupetto** is an app that creates a system-wide overlay with live statistics about your ride, and transmits the metrics as a BLE power meter.
 
 <p align="center">
-<img width="500" alt="Dougmeister" src="https://user-images.githubusercontent.com/17497673/192136344-e649bfd8-1d8b-452c-ab5f-9aff84118e25.gif">
+<img width="500" alt="Grupetto Overlay Demo" src="grupetto_v2.gif">
 </p>
 
 You can use it to watch media from sources like Netflix and Youtube while viewing your current 

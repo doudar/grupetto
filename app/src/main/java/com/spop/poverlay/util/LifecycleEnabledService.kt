@@ -2,7 +2,10 @@ package com.spop.poverlay.util
 
 import android.app.Service
 import android.view.View
-import androidx.lifecycle.*
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.ViewTreeLifecycleOwner
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
@@ -16,39 +19,31 @@ import kotlin.coroutines.CoroutineContext
  * Allows a service to act as a LifecycleOwner
  * Mainly intended for use with WindowManager
  */
-abstract class LifecycleEnabledService : Service(), LifecycleOwner, ViewModelStoreOwner,
-    SavedStateRegistryOwner, CoroutineScope {
+abstract class LifecycleEnabledService : Service(), LifecycleOwner, SavedStateRegistryOwner, CoroutineScope {
 
     private val coroutineScope = CoroutineScope(Dispatchers.IO)
 
     override val coroutineContext: CoroutineContext
         get() = coroutineScope.coroutineContext
-    /**
-     * Must be called on views before this service will provide lifecycle access
-     */
-    protected fun View.lifecycleViaService() {
-        ViewTreeLifecycleOwner.set(this, this@LifecycleEnabledService)
-        ViewTreeViewModelStoreOwner.set(this, this@LifecycleEnabledService)
-        setViewTreeSavedStateRegistryOwner(this@LifecycleEnabledService)
-    }
-
-    private val serviceViewModelStore = ViewModelStore()
-    override fun getViewModelStore(): ViewModelStore = serviceViewModelStore
-
-    private val serviceSavedStateRegistry by lazy {
+    
+    private val savedStateRegistryController: SavedStateRegistryController by lazy {
         SavedStateRegistryController.create(this)
     }
 
     override val savedStateRegistry: SavedStateRegistry
-        get() = serviceSavedStateRegistry.savedStateRegistry
+        get() = savedStateRegistryController.savedStateRegistry
+
+    protected fun View.lifecycleViaService() {
+        ViewTreeLifecycleOwner.set(this, this@LifecycleEnabledService)
+        setViewTreeSavedStateRegistryOwner(this@LifecycleEnabledService)
+    }
 
     private val lifecycleRegistry: LifecycleRegistry by lazy {
         LifecycleRegistry(this)
     }
 
-    override fun getLifecycle(): Lifecycle {
-        return lifecycleRegistry
-    }
+    // Provide LifecycleOwner implementation explicitly to avoid override issues
+    override fun getLifecycle(): Lifecycle = lifecycleRegistry
 
 
     private fun handleLifecycleEvent(event: Lifecycle.Event) =
@@ -56,7 +51,7 @@ abstract class LifecycleEnabledService : Service(), LifecycleOwner, ViewModelSto
 
     override fun onCreate() {
         super.onCreate()
-        serviceSavedStateRegistry.performRestore(null)
+        savedStateRegistryController.performRestore(null)
         handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         handleLifecycleEvent(Lifecycle.Event.ON_START)
         handleLifecycleEvent(Lifecycle.Event.ON_RESUME)

@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
+
 package com.spop.poverlay.overlay
 
 import androidx.compose.animation.core.LinearEasing
@@ -6,13 +8,13 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntOffsetAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.Snackbar
-import androidx.compose.material3.Text
+import androidx.compose.material.Button
+import androidx.compose.material.Snackbar
+import androidx.compose.material.Text
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -24,9 +26,10 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spop.poverlay.overlay.composables.OverlayMainContent
 import com.spop.poverlay.overlay.composables.OverlayMinimizedContent
+import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.onEach
 import timber.log.Timber
@@ -53,30 +56,45 @@ fun Overlay(
     onLayout: (IntSize) -> Unit,
     onTimerLayout: (IntSize) -> Unit
 ) {
-    val power by sensorViewModel.powerValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
+    val power by sensorViewModel.powerValue.collectAsState(initial = SensorValuePlaceholderText)
 
-    val powerGraph = remember { sensorViewModel.powerGraph }
-    val rpm by sensorViewModel.rpmValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
-    val resistance by sensorViewModel.resistanceValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
-    val speed by sensorViewModel.speedValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
-    val speedLabel by sensorViewModel.speedLabel.collectAsStateWithLifecycle(initialValue = "")
+    val selectedMetric by sensorViewModel.selectedMetric.collectAsState(initial = MetricType.POWER)
+    val currentGraph = remember(selectedMetric) { sensorViewModel.getGraphForMetric(selectedMetric) }
+    val rpm by sensorViewModel.rpmValue.collectAsState(initial = SensorValuePlaceholderText)
+    val resistance by sensorViewModel.resistanceValue.collectAsState(initial = SensorValuePlaceholderText)
+    val speed by sensorViewModel.speedValue.collectAsState(initial = SensorValuePlaceholderText)
+    val speedLabel by sensorViewModel.speedLabel.collectAsState(initial = "")
     val calories by sensorViewModel.caloriesValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
-    val timerLabel by timerViewModel.timerLabel.collectAsStateWithLifecycle(initialValue = "")
-    val isTimerPaused by timerViewModel.timerPaused.collectAsStateWithLifecycle(initialValue = false)
-    val errorMessage by sensorViewModel.errorMessage.collectAsStateWithLifecycle(initialValue = null)
+    val timerLabel by timerViewModel.timerLabel.collectAsState(initial = "")
+    val isTimerPaused by timerViewModel.timerPaused.collectAsState(initial = false)
+    val errorMessage by sensorViewModel.errorMessage.collectAsState(initial = null)
+
+    // Max values
+    val maxPower by sensorViewModel.maxPower.collectAsState()
+    val maxCadence by sensorViewModel.maxCadence.collectAsState()
+    val maxResistance by sensorViewModel.maxResistance.collectAsState()
+    val maxSpeed by sensorViewModel.maxSpeed.collectAsState()
+
+    // Session totals and averages
+    val totalEnergy by sensorViewModel.totalEnergy.collectAsState()
+    val totalDistance by sensorViewModel.totalDistance.collectAsState()
+    val avgCadence by sensorViewModel.avgCadence.collectAsState()
+    val avgResistance by sensorViewModel.avgResistance.collectAsState()
 
     var isCurrentlyAnimating by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         sensorViewModel.isMinimized
             .drop(1) // Ignore the initial value since animations only happen after new updates
-            .collect {
-                isCurrentlyAnimating = true
-            }
+            .collect(object : FlowCollector<Boolean> {
+                override suspend fun emit(value: Boolean) {
+                    isCurrentlyAnimating = true
+                }
+            })
     }
 
-    val minimized by sensorViewModel.isMinimized.collectAsStateWithLifecycle(initialValue = false)
-    val location by remember { locationState }
+    val minimized by sensorViewModel.isMinimized.collectAsState(initial = false)
+    val location by locationState
     val size = remember { mutableStateOf(IntSize.Zero) }
 
 
@@ -125,7 +143,7 @@ fun Overlay(
             }
         }
         val showTimerWhenMinimized by showTimerWhenMinimizedFlow
-            .collectAsStateWithLifecycle(initialValue = true)
+            .collectAsState(initial = true)
 
         OverlayMinimizedContent(
             isMinimized = minimized,
@@ -140,6 +158,7 @@ fun Overlay(
             resistanceLabel = resistance,
             onTap = { timerViewModel.onTimerTap() },
             onLongPress = { timerViewModel.onTimerLongPress() },
+            onMinimizeToggle = { sensorViewModel.onOverlayPressed() },
             onLayout = onTimerLayout
         )
     }
@@ -158,8 +177,7 @@ fun Overlay(
                 shape = backgroundShape,
             )
             .pointerInput(Unit) {
-                detectDragGestures(onDrag = { change, offset ->
-                    change.consume()
+                detectDragGestures(onDrag = { _, offset ->
                     horizontalDragOffset += offset.x
                     horizontalDragOffset = horizontalDragCallback(horizontalDragOffset)
 
@@ -168,10 +186,6 @@ fun Overlay(
                 }, onDragEnd = {
                     verticalDragOffset = 0f
                 })
-            }
-            .pointerInput(Unit) {
-                detectTapGestures(onTap = { sensorViewModel.onOverlayPressed() },
-                    onLongPress = { sensorViewModel.onOverlayDoubleTap() })
             }) {
 
 
@@ -189,12 +203,23 @@ fun Overlay(
                 power = power,
                 rpm = rpm,
                 pauseChart = isCurrentlyAnimating,
-                powerGraph = powerGraph,
+                currentGraph = currentGraph,
+                selectedMetric = selectedMetric,
                 resistance = resistance,
                 speed = speed,
                 speedLabel = speedLabel,
                 calories = calories,
-                onSpeedClicked = { sensorViewModel.onClickedSpeed() },
+                maxPower = "%.0f".format(maxPower),
+                maxCadence = "%.0f".format(maxCadence),
+                maxResistance = "%.0f".format(maxResistance),
+                maxSpeed = "%.1f".format(maxSpeed),
+                totalEnergy = "%.0f".format(totalEnergy),
+                totalDistance = if (speedLabel == "mph") "%.2f".format(totalDistance) else "%.2f".format(totalDistance * 1.60934f),
+                distanceUnit = if (speedLabel == "mph") "mi" else "km",
+                avgCadence = "%.0f".format(avgCadence),
+                avgResistance = "%.0f".format(avgResistance),
+                onMetricSelected = { sensorViewModel.onMetricSelected(it) },
+                onSpeedUnitClicked = { sensorViewModel.onClickedSpeedUnit() },
                 onChartClicked = { sensorViewModel.onOverlayPressed() }
             )
         }
@@ -212,7 +237,7 @@ fun Overlay(
                         Text("Dismiss")
                     }
                 },
-                containerColor = Color.White,
+                backgroundColor = Color.White,
                 modifier = Modifier
                     .padding(8.dp)
                     .zIndex(1f)
