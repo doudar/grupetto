@@ -5,7 +5,10 @@ import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
 import android.bluetooth.le.BluetoothLeAdvertiser
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.ParcelUuid
 import androidx.core.content.edit
 import com.spop.poverlay.sensor.interfaces.SensorInterface
@@ -35,6 +38,8 @@ interface SensorDataListener {
 abstract class BaseBleService(val server: BleServer) : SensorDataListener {
     abstract val service: BluetoothGattService
     protected val connectedDevices = mutableSetOf<BluetoothDevice>()
+
+    fun hasConnectedDevices(): Boolean = connectedDevices.isNotEmpty()
 
     open fun onConnected(device: BluetoothDevice) {
         connectedDevices.add(device)
@@ -92,12 +97,35 @@ class BleServer(
 
     override val coroutineContext = SupervisorJob() + Dispatchers.IO
     private var sensorDataJob: Job? = null
+    private var watchdogJob: Job? = null
 
     private var gattServer: BluetoothGattServer? = null
     private var advertiser: BluetoothLeAdvertiser? = null
     private val registeredServices = mutableListOf<BaseBleService>()
     private val servicesToRegister = LinkedList<BaseBleService>()
     private var currentlyRegisteringService: BaseBleService? = null
+    
+    // Advertising state tracking
+    private var isAdvertising = false
+    private var lastAdvertisingStartTime = 0L
+    private var lastAdvertisingFailureCode: Int? = null
+    private var isServerStarted = false
+    
+    // Watchdog configuration
+    companion object {
+        private const val WATCHDOG_INITIAL_DELAY_MS = 60_000L // 1 minute
+        private const val WATCHDOG_CHECK_INTERVAL_MS = 120_000L // 2 minutes
+    }
+    
+    // Bluetooth adapter state receiver
+    private val bluetoothStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+                val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+                handleBluetoothStateChange(state)
+            }
+        }
+    }
 
     //ADD OR EDIT SERVICES HERE
     private fun setupServices() {
@@ -138,7 +166,15 @@ class BleServer(
 
         try {
             gattServer = bluetoothManager.openGattServer(context, this)
+            isServerStarted = true
+            
+            // Register Bluetooth state change receiver
+            val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+            context.registerReceiver(bluetoothStateReceiver, filter)
+            Timber.d("Registered Bluetooth state change receiver")
+            
             setupServices()
+            startWatchdog()
         } catch (e: SecurityException) {
             Timber.e(e, "Missing bluetooth permissions")
         }
@@ -163,14 +199,31 @@ class BleServer(
 
     fun stop() {
         try {
+            isServerStarted = false
+            stopWatchdog()
             stopSensorDataUpdates()
             stopAdvertising()
+            
+            // Unregister Bluetooth state change receiver
+            try {
+                context.unregisterReceiver(bluetoothStateReceiver)
+                Timber.d("Unregistered Bluetooth state change receiver")
+            } catch (e: IllegalArgumentException) {
+                // Receiver was not registered, this is normal if stop() called without start()
+                Timber.d("Bluetooth state receiver was not registered (normal if not started)")
+            }
+            
             gattServer?.clearServices()
             gattServer?.close()
             gattServer = null
             registeredServices.clear()
             servicesToRegister.clear()
             currentlyRegisteringService = null
+            
+            // Reset state tracking
+            isAdvertising = false
+            lastAdvertisingStartTime = 0L
+            lastAdvertisingFailureCode = null
         } catch (e: SecurityException) {
             Timber.e(e, "Missing bluetooth permissions")
         }
@@ -199,6 +252,156 @@ class BleServer(
             gattServer?.sendResponse(device, requestId, status, offset, value)
         } catch (e: SecurityException) {
             Timber.e(e, "Missing bluetooth permissions")
+        }
+    }
+    
+    private fun handleBluetoothStateChange(state: Int) {
+        when (state) {
+            BluetoothAdapter.STATE_OFF -> {
+                Timber.w("Bluetooth turned off, stopping advertising")
+                isAdvertising = false
+                // Don't call stopAdvertising() as Bluetooth is already off
+            }
+            BluetoothAdapter.STATE_ON -> {
+                Timber.i("Bluetooth turned on, attempting to restart advertising")
+                if (isServerStarted) {
+                    restartGattAndAdvertising("Bluetooth turned on")
+                }
+            }
+            BluetoothAdapter.STATE_TURNING_OFF -> {
+                Timber.d("Bluetooth turning off")
+                isAdvertising = false
+            }
+            BluetoothAdapter.STATE_TURNING_ON -> {
+                Timber.d("Bluetooth turning on")
+            }
+        }
+    }
+    
+    private fun startWatchdog() {
+        stopWatchdog()
+        watchdogJob = launch {
+            // Wait a bit before starting watchdog to allow initial setup
+            delay(WATCHDOG_INITIAL_DELAY_MS)
+            
+            while (isActive && isServerStarted) {
+                try {
+                    checkAndRestartAdvertising()
+                } catch (e: Exception) {
+                    Timber.e(e, "Error in advertising watchdog")
+                }
+                // Check every 2 minutes
+                delay(WATCHDOG_CHECK_INTERVAL_MS)
+            }
+        }
+        Timber.d("Started advertising watchdog")
+    }
+    
+    private fun stopWatchdog() {
+        watchdogJob?.cancel()
+        watchdogJob = null
+        Timber.d("Stopped advertising watchdog")
+    }
+    
+    private fun hasConnectedDevices(): Boolean {
+        return registeredServices.any { it.hasConnectedDevices() }
+    }
+    
+    private fun checkAndRestartAdvertising() {
+        val bluetoothAdapter = bluetoothManager.adapter
+        
+        if (bluetoothAdapter == null) {
+            Timber.w("Watchdog: Bluetooth adapter is null")
+            return
+        }
+        
+        if (!bluetoothAdapter.isEnabled) {
+            Timber.d("Watchdog: Bluetooth is disabled, waiting for it to be enabled")
+            isAdvertising = false
+            return
+        }
+        
+        // Check if we should be advertising but aren't
+        if (!isAdvertising && registeredServices.isNotEmpty()) {
+            // With multi-client support, advertising should be active even with connected devices
+            // Only skip if we very recently had a connection state change (give it time to restart)
+            val timeSinceLastStart = System.currentTimeMillis() - lastAdvertisingStartTime
+            
+            if (hasConnectedDevices() && timeSinceLastStart < 5000) {
+                // Recent connection, advertising is being restarted automatically
+                Timber.d("Watchdog: Recent connection detected, waiting for automatic advertising restart")
+                return
+            }
+            
+            val reason = if (lastAdvertisingStartTime == 0L) {
+                "never started"
+            } else if (lastAdvertisingFailureCode != null) {
+                "last failed with code $lastAdvertisingFailureCode"
+            } else if (hasConnectedDevices()) {
+                "stopped despite connected clients (${timeSinceLastStart / 1000}s ago)"
+            } else {
+                "stopped (${timeSinceLastStart / 1000}s ago)"
+            }
+            
+            Timber.w("Watchdog: Advertising is not active, reason: $reason. Restarting...")
+            
+            // If we have connected devices, just restart advertising (don't reset GATT server)
+            if (hasConnectedDevices()) {
+                Timber.i("Restarting advertising only (preserving connections)")
+                startAdvertising()
+            } else {
+                // No connections, safe to do full restart
+                restartGattAndAdvertising("Watchdog detected inactive advertising")
+            }
+        } else if (isAdvertising) {
+            val timeSinceStart = System.currentTimeMillis() - lastAdvertisingStartTime
+            Timber.d("Watchdog: Advertising active for ${timeSinceStart / 1000}s")
+        }
+    }
+    
+    private fun restartGattAndAdvertising(reason: String) {
+        Timber.i("Restarting GATT and advertising: $reason")
+        
+        try {
+            // Stop current advertising
+            stopAdvertising()
+            
+            // Close and reopen GATT server
+            gattServer?.clearServices()
+            gattServer?.close()
+            gattServer = null
+            
+            val bluetoothAdapter = bluetoothManager.adapter
+            if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
+                Timber.e("Cannot restart: Bluetooth not available")
+                return
+            }
+            
+            advertiser = bluetoothAdapter.bluetoothLeAdvertiser
+            if (advertiser == null) {
+                Timber.e("Cannot restart: Failed to get advertiser")
+                return
+            }
+            
+            gattServer = bluetoothManager.openGattServer(context, this)
+            if (gattServer == null) {
+                Timber.e("Cannot restart: Failed to open GATT server")
+                return
+            }
+            
+            // Re-register all services
+            val savedServices = registeredServices.toList()
+            registeredServices.clear()
+            servicesToRegister.clear()
+            servicesToRegister.addAll(savedServices)
+            currentlyRegisteringService = null
+            
+            registerNextService()
+            
+        } catch (e: SecurityException) {
+            Timber.e(e, "Missing bluetooth permissions during restart")
+        } catch (e: Exception) {
+            Timber.e(e, "Error during GATT and advertising restart")
         }
     }
 
@@ -246,6 +449,8 @@ class BleServer(
     private fun stopAdvertising() {
         try {
             advertiser?.stopAdvertising(advertisingCallback)
+            isAdvertising = false
+            Timber.d("Stopped advertising")
         } catch (e: SecurityException) {
             Timber.e(e, "Missing bluetooth permissions")
         }
@@ -254,11 +459,24 @@ class BleServer(
     private val advertisingCallback =
             object : AdvertiseCallback() {
                 override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
-                    Timber.i("BLE advertising started")
+                    isAdvertising = true
+                    lastAdvertisingStartTime = System.currentTimeMillis()
+                    lastAdvertisingFailureCode = null
+                    Timber.i("BLE advertising started successfully")
                 }
 
                 override fun onStartFailure(errorCode: Int) {
-                    Timber.e("BLE advertising failed: $errorCode")
+                    isAdvertising = false
+                    lastAdvertisingFailureCode = errorCode
+                    val errorMessage = when (errorCode) {
+                        AdvertiseCallback.ADVERTISE_FAILED_DATA_TOO_LARGE -> "Data too large"
+                        AdvertiseCallback.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> "Too many advertisers"
+                        AdvertiseCallback.ADVERTISE_FAILED_ALREADY_STARTED -> "Already started"
+                        AdvertiseCallback.ADVERTISE_FAILED_INTERNAL_ERROR -> "Internal error"
+                        AdvertiseCallback.ADVERTISE_FAILED_FEATURE_UNSUPPORTED -> "Feature unsupported"
+                        else -> "Unknown error"
+                    }
+                    Timber.e("BLE advertising failed: $errorCode ($errorMessage)")
                 }
             }
 
@@ -283,9 +501,39 @@ class BleServer(
 
     override fun onConnectionStateChange(device: BluetoothDevice?, status: Int, newState: Int) {
         if (newState == BluetoothProfile.STATE_CONNECTED) {
-            device?.let { registeredServices.forEach { it.onConnected(device) } }
+            device?.let { 
+                registeredServices.forEach { it.onConnected(device) }
+                Timber.d("Device connected: ${device.address}")
+                
+                // Restart advertising to allow additional clients to connect (support multiple connections)
+                if (!isAdvertising && isServerStarted) {
+                    Timber.i("Device connected, restarting advertising to allow more clients")
+                    launch {
+                        // Small delay to ensure connection is fully established
+                        delay(500)
+                        if (!isAdvertising && isServerStarted) {
+                            startAdvertising()
+                        }
+                    }
+                }
+            }
         } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-            device?.let { registeredServices.forEach { it.onDisconnected(device) } }
+            device?.let { 
+                registeredServices.forEach { it.onDisconnected(device) }
+                Timber.d("Device disconnected: ${device.address}")
+                
+                // Restart advertising if no devices are connected anymore
+                if (!hasConnectedDevices() && !isAdvertising && isServerStarted) {
+                    Timber.i("Last device disconnected, restarting advertising")
+                    launch {
+                        // Small delay to ensure disconnect is fully processed
+                        delay(500)
+                        if (!hasConnectedDevices() && !isAdvertising) {
+                            startAdvertising()
+                        }
+                    }
+                }
+            }
         }
     }
 
