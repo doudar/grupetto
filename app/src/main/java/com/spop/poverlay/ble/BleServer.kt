@@ -292,6 +292,10 @@ class BleServer(
         Timber.d("Stopped advertising watchdog")
     }
     
+    private fun hasConnectedDevices(): Boolean {
+        return registeredServices.any { it.connectedDevices.isNotEmpty() }
+    }
+    
     private fun checkAndRestartAdvertising() {
         val bluetoothAdapter = bluetoothManager.adapter
         
@@ -308,6 +312,12 @@ class BleServer(
         
         // Check if we should be advertising but aren't
         if (!isAdvertising && registeredServices.isNotEmpty()) {
+            // Don't restart if we have connected devices - advertising stops when devices connect
+            if (hasConnectedDevices()) {
+                Timber.d("Watchdog: Advertising stopped due to connected devices (normal behavior)")
+                return
+            }
+            
             val timeSinceLastStart = System.currentTimeMillis() - lastAdvertisingStartTime
             val reason = if (lastAdvertisingStartTime == 0L) {
                 "never started"
@@ -466,9 +476,27 @@ class BleServer(
 
     override fun onConnectionStateChange(device: BluetoothDevice?, status: Int, newState: Int) {
         if (newState == BluetoothProfile.STATE_CONNECTED) {
-            device?.let { registeredServices.forEach { it.onConnected(device) } }
+            device?.let { 
+                registeredServices.forEach { it.onConnected(device) }
+                Timber.d("Device connected: ${device.address}")
+            }
         } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-            device?.let { registeredServices.forEach { it.onDisconnected(device) } }
+            device?.let { 
+                registeredServices.forEach { it.onDisconnected(device) }
+                Timber.d("Device disconnected: ${device.address}")
+                
+                // Restart advertising if no devices are connected anymore
+                if (!hasConnectedDevices() && !isAdvertising && isServerStarted) {
+                    Timber.i("Last device disconnected, restarting advertising")
+                    launch {
+                        // Small delay to ensure disconnect is fully processed
+                        delay(500)
+                        if (!hasConnectedDevices() && !isAdvertising) {
+                            startAdvertising()
+                        }
+                    }
+                }
+            }
         }
     }
 
