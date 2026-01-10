@@ -4,10 +4,11 @@ import android.os.Build
 import android.text.format.DateUtils
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.ClickableText
-import androidx.compose.material3.*
+import androidx.compose.material.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -19,7 +20,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spop.poverlay.releases.Release
 import com.spop.poverlay.ui.theme.ErrorColor
 import com.spop.poverlay.ui.theme.LatoFontFamily
@@ -85,7 +85,14 @@ private fun StartServicePage(
             fontStyle = FontStyle.Italic,
             fontWeight = FontWeight.Bold
     )
-    Spacer(modifier = Modifier.height(50.dp))
+    Spacer(modifier = Modifier.height(20.dp))
+    Text(
+        text = "Nov 2025 Update with colored metrics, charts, and max",
+        fontSize = 18.sp,
+        fontStyle = FontStyle.Italic,
+        color = Color.Gray
+    )
+    Spacer(modifier = Modifier.height(140.dp))
     Button(
             onClick = onClickedStartOverlay,
     ) {
@@ -169,7 +176,7 @@ private fun StartServicePage(
     Spacer(modifier = Modifier.height(40.dp))
     Button(
             onClick = onClickedRestartApp,
-            colors = ButtonDefaults.buttonColors(containerColor = ErrorColor),
+            colors = ButtonDefaults.buttonColors(backgroundColor = ErrorColor),
     ) {
         Text(
                 text = "Restart Grupetto",
