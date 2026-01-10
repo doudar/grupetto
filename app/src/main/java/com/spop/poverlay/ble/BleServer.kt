@@ -312,22 +312,36 @@ class BleServer(
         
         // Check if we should be advertising but aren't
         if (!isAdvertising && registeredServices.isNotEmpty()) {
-            // Don't restart if we have connected devices - advertising stops when devices connect
-            if (hasConnectedDevices()) {
-                Timber.d("Watchdog: Advertising stopped due to connected devices (normal behavior)")
+            // With multi-client support, advertising should be active even with connected devices
+            // Only skip if we very recently had a connection state change (give it time to restart)
+            val timeSinceLastStart = System.currentTimeMillis() - lastAdvertisingStartTime
+            
+            if (hasConnectedDevices() && timeSinceLastStart < 5000) {
+                // Recent connection, advertising is being restarted automatically
+                Timber.d("Watchdog: Recent connection detected, waiting for automatic advertising restart")
                 return
             }
             
-            val timeSinceLastStart = System.currentTimeMillis() - lastAdvertisingStartTime
             val reason = if (lastAdvertisingStartTime == 0L) {
                 "never started"
             } else if (lastAdvertisingFailureCode != null) {
                 "last failed with code $lastAdvertisingFailureCode"
+            } else if (hasConnectedDevices()) {
+                "stopped despite connected clients (${timeSinceLastStart / 1000}s ago)"
             } else {
                 "stopped (${timeSinceLastStart / 1000}s ago)"
             }
+            
             Timber.w("Watchdog: Advertising is not active, reason: $reason. Restarting...")
-            restartGattAndAdvertising("Watchdog detected inactive advertising")
+            
+            // If we have connected devices, just restart advertising (don't reset GATT server)
+            if (hasConnectedDevices()) {
+                Timber.i("Restarting advertising only (preserving connections)")
+                startAdvertising()
+            } else {
+                // No connections, safe to do full restart
+                restartGattAndAdvertising("Watchdog detected inactive advertising")
+            }
         } else if (isAdvertising) {
             val timeSinceStart = System.currentTimeMillis() - lastAdvertisingStartTime
             Timber.d("Watchdog: Advertising active for ${timeSinceStart / 1000}s")
