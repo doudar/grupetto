@@ -479,6 +479,18 @@ class BleServer(
             device?.let { 
                 registeredServices.forEach { it.onConnected(device) }
                 Timber.d("Device connected: ${device.address}")
+                
+                // Restart advertising to allow additional clients to connect (support multiple connections)
+                if (!isAdvertising && isServerStarted) {
+                    Timber.i("Device connected, restarting advertising to allow more clients")
+                    launch {
+                        // Small delay to ensure connection is fully established
+                        delay(500)
+                        if (!isAdvertising && isServerStarted) {
+                            startAdvertising()
+                        }
+                    }
+                }
             }
         } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
             device?.let { 
