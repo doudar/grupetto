@@ -18,6 +18,14 @@ import kotlinx.coroutines.sync.withLock
 import timber.log.Timber
 import kotlin.math.abs
 
+interface TimeProvider {
+    fun elapsedRealtime(): Long
+}
+
+class SystemTimeProvider : TimeProvider {
+    override fun elapsedRealtime() = android.os.SystemClock.elapsedRealtime()
+}
+
 // Listener for sensor data updates
 interface SensorDataListener {
     fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float)
@@ -78,7 +86,8 @@ abstract class BaseBleService(val server: BleServer) : SensorDataListener {
 class BleServer(
         private val context: Context,
         private val bluetoothManager: BluetoothManager,
-        private val sensorInterface: SensorInterface
+        private val sensorInterface: SensorInterface,
+        private val timeProvider: TimeProvider = SystemTimeProvider()
 ) : BluetoothGattServerCallback(), CoroutineScope {
 
     override val coroutineContext = SupervisorJob() + Dispatchers.IO
@@ -511,34 +520,34 @@ class BleServer(
 
     // Update CSC wheel and crank revolutions using the C++ algorithm
     // speedKmh: if provided, wheel data will be updated; cadenceRpm always used for crank
-    private var cscLastUpdateMs: Long = android.os.SystemClock.elapsedRealtime()
+    private var cscLastUpdateMs: Long = timeProvider.elapsedRealtime()
     private var cscCrankResidual: Double = 0.0
     private var cscWheelResidual: Double = 0.0
     fun updateWheelAndCrankRev(speedKmh: Float?, cadenceRpm: Float) {
-        val now = android.os.SystemClock.elapsedRealtime()
+        val now = timeProvider.elapsedRealtime()
         val deltaMs = (now - cscLastUpdateMs).coerceAtLeast(0)
         cscLastUpdateMs = now
 
         // Wheel
         val wheelSizeMeters = 2.127f // 700c x 28, typical
-    // speedKmh must be in km/h; convert to m/s for wheel RPM calculation
-    var speedMps = speedKmh?.let { it / 3.6f }
-    if (speedMps != null && speedMps > 0f) {
-        //speedMps = speedMps.div(2)
-        val wheelRpm = (speedMps / wheelSizeMeters) * 60f
-        if (wheelRpm > 0f) {
-            val wheelRevPeriodTicks = (60.0 * 1024.0) / wheelRpm
-            val wheelRevsDelta = wheelRpm * (deltaMs / 60000.0)
-            cscWheelResidual += wheelRevsDelta
-                val toAdd = kotlin.math.floor(cscWheelResidual).toInt()
-                if (toAdd > 0) {
-                    cscWheelResidual -= toAdd
-                    cscCumulativeWheelRev = (cscCumulativeWheelRev + toAdd) and 0xFFFF_FFFFL
-                    val ticksAdd = (wheelRevPeriodTicks * toAdd).toInt().coerceAtLeast(1)
-                    cscLastWheelEvtTime = (cscLastWheelEvtTime + ticksAdd) and 0xFFFF
+        // speedKmh must be in km/h; convert to m/s for wheel RPM calculation
+        var speedMps = speedKmh?.let { it / 3.6f }
+        if (speedMps != null && speedMps > 0f) {
+
+            val wheelRpm = (speedMps / wheelSizeMeters) * 60f
+            if (wheelRpm > 0f) {
+                val wheelRevPeriodTicks = (60.0 * 1024.0) / wheelRpm
+                val wheelRevsDelta = wheelRpm * (deltaMs / 60000.0)
+                cscWheelResidual += wheelRevsDelta
+                    val toAdd = kotlin.math.floor(cscWheelResidual).toInt()
+                    if (toAdd > 0) {
+                        cscWheelResidual -= toAdd
+                        cscCumulativeWheelRev = (cscCumulativeWheelRev + toAdd) and 0xFFFF_FFFFL
+                        val ticksAdd = (wheelRevPeriodTicks * toAdd).toInt().coerceAtLeast(1)
+                        cscLastWheelEvtTime = (cscLastWheelEvtTime + ticksAdd) and 0xFFFF
+                    }
                 }
             }
-        }
 
         // Crank
         if (cadenceRpm > 0f) {
