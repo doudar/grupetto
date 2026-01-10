@@ -31,6 +31,8 @@ abstract class BaseBleService(val server: BleServer) : SensorDataListener {
     abstract val service: BluetoothGattService
     protected val connectedDevices = mutableSetOf<BluetoothDevice>()
 
+    fun hasConnectedDevices(): Boolean = connectedDevices.isNotEmpty()
+
     open fun onConnected(device: BluetoothDevice) {
         connectedDevices.add(device)
     }
@@ -293,7 +295,7 @@ class BleServer(
     }
     
     private fun hasConnectedDevices(): Boolean {
-        return registeredServices.any { it.connectedDevices.isNotEmpty() }
+        return registeredServices.any { it.hasConnectedDevices() }
     }
     
     private fun checkAndRestartAdvertising() {
