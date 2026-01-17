@@ -33,7 +33,8 @@ jobs:
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       run: |
-        echo "$SIGNING_KEY" | base64 -d > release.keystore
+        mkdir -p app
+        echo "$SIGNING_KEY" | base64 -d > app/release.keystore
         cat <<EOF > keystore.properties
         storeFile=release.keystore
         storePassword=$KEY_STORE_PASSWORD
