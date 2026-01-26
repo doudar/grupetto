@@ -42,6 +42,10 @@ fun OverlayMainContent(
     maxCadence: String,
     maxResistance: String,
     maxSpeed: String,
+    maxPowerValue: Float,
+    maxCadenceValue: Float,
+    maxResistanceValue: Float,
+    maxSpeedValue: Float,
     totalEnergy: String,
     totalDistance: String,
     distanceUnit: String,
@@ -67,11 +71,13 @@ fun OverlayMainContent(
         MetricType.SPEED -> "Speed"
     }
 
+    // Define minimum thresholds to prevent chart from getting too compressed at low values
+    // Use session max if higher than threshold, otherwise use threshold
     val chartMaxValue = when (selectedMetric) {
-        MetricType.POWER -> 250f
-        MetricType.CADENCE -> 160f
-        MetricType.RESISTANCE -> 100f
-        MetricType.SPEED -> 40f
+        MetricType.POWER -> maxOf(250f, maxPowerValue)
+        MetricType.CADENCE -> maxOf(160f, maxCadenceValue)
+        MetricType.RESISTANCE -> maxOf(100f, maxResistanceValue)
+        MetricType.SPEED -> maxOf(40f, maxSpeedValue)
     }
 
     Row(
