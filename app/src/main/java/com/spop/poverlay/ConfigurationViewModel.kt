@@ -36,6 +36,9 @@ class ConfigurationViewModel(
     val showTimerWhenMinimized
         get() = configurationRepository.showTimerWhenMinimized
 
+    val showCaloriesWhenMinimized
+        get() = configurationRepository.showCaloriesWhenMinimized
+
     val bleTxEnabled
         get() = configurationRepository.bleTxEnabled
 
@@ -61,6 +64,10 @@ class ConfigurationViewModel(
 
     fun onShowTimerWhenMinimizedClicked(isChecked: Boolean) {
         configurationRepository.setShowTimerWhenMinimized(isChecked)
+    }
+
+    fun onShowCaloriesWhenMinimizedClicked(isChecked: Boolean) {
+        configurationRepository.setShowCaloriesWhenMinimized(isChecked)
     }
 
     fun onBleTxEnabledClicked(isChecked: Boolean) {
