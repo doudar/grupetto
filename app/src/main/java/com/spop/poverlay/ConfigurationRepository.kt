@@ -12,6 +12,7 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
 
     enum class Preferences(val key: String) {
         ShowTimerWhenMinimized("showTimerWhenMinimized"),
+        ShowCaloriesWhenMinimized("showCaloriesWhenMinimized"),
         BleTxEnabled("bleTxEnabled"),
     BleFtmsDeviceName("bleFtmsDeviceName"),
     SerialNumber("serialNumber")
@@ -26,11 +27,13 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
     }
 
     private val mutableShowTimerWhenMinimized = MutableStateFlow(true)
+    private val mutableShowCaloriesWhenMinimized = MutableStateFlow(true)
     private val mutableBleTxEnabled = MutableStateFlow(true)
     private val mutableBleFtmsDeviceName = MutableStateFlow("Grupetto FTMS")
     private val mutableSerialNumber = MutableStateFlow("")
 
     val showTimerWhenMinimized = mutableShowTimerWhenMinimized
+    val showCaloriesWhenMinimized = mutableShowCaloriesWhenMinimized
     val bleTxEnabled = mutableBleTxEnabled
     val bleFtmsDeviceName = mutableBleFtmsDeviceName
     val serialNumber = mutableSerialNumber
@@ -66,6 +69,13 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         }
     }
 
+    fun setShowCaloriesWhenMinimized(isShown: Boolean) {
+        mutableShowCaloriesWhenMinimized.value = isShown
+        sharedPreferences.edit {
+            putBoolean(Preferences.ShowCaloriesWhenMinimized.key, isShown)
+        }
+    }
+
     fun setBleTxEnabled(enabled: Boolean) {
         mutableBleTxEnabled.value = enabled
         sharedPreferences.edit {
@@ -97,6 +107,10 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         mutableShowTimerWhenMinimized.value =
             sharedPreferences
                 .getBoolean(Preferences.ShowTimerWhenMinimized.key, true)
+
+        mutableShowCaloriesWhenMinimized.value =
+            sharedPreferences
+                .getBoolean(Preferences.ShowCaloriesWhenMinimized.key, true)
 
         mutableBleTxEnabled.value =
             sharedPreferences

@@ -41,6 +41,10 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                     viewModel.showTimerWhenMinimized.collectAsStateWithLifecycle(
                             initialValue = true
                     )
+            val showCaloriesWhenMinimized by
+                    viewModel.showCaloriesWhenMinimized.collectAsStateWithLifecycle(
+                            initialValue = true
+                    )
             val bleTxEnabled by
                     viewModel.bleTxEnabled.collectAsStateWithLifecycle(initialValue = false)
             val bleFtmsDeviceName by
@@ -50,6 +54,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
             StartServicePage(
                     timerShownWhenMinimized,
                     viewModel::onShowTimerWhenMinimizedClicked,
+                    showCaloriesWhenMinimized,
+                    viewModel::onShowCaloriesWhenMinimizedClicked,
                     bleTxEnabled,
                     viewModel::onBleTxEnabledClicked,
                     bleFtmsDeviceName,
@@ -66,6 +72,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
 private fun StartServicePage(
         timerShownWhenMinimized: Boolean,
         onTimerShownWhenMinimizedToggled: (Boolean) -> Unit,
+        showCaloriesWhenMinimized: Boolean,
+        onShowCaloriesWhenMinimizedToggled: (Boolean) -> Unit,
         bleTxEnabled: Boolean,
         onBleTxEnabledToggled: (Boolean) -> Unit,
         bleFtmsDeviceName: String,
@@ -111,6 +119,13 @@ private fun StartServicePage(
                 onCheckedChange = onTimerShownWhenMinimizedToggled
         )
     }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = "Show calories in mini view?", fontSize = 20.sp)
+                Checkbox(
+                        checked = showCaloriesWhenMinimized,
+                        onCheckedChange = onShowCaloriesWhenMinimizedToggled
+                )
+        }
     // BLE FTMS Settings
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(

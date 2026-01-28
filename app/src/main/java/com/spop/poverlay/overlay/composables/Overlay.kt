@@ -156,8 +156,8 @@ fun Overlay(
             cadenceLabel = rpm,
             speedLabel = speed,
             resistanceLabel = resistance,
-            // show calories in mini view when we have a value
-            showCalories = calories != SensorValuePlaceholderText,
+            // show calories in mini view only if user enabled the setting
+            showCalories = timerViewModel.showCaloriesWhenMinimized.value,
             caloriesLabel = calories,
             onTap = { timerViewModel.onTimerTap() },
             onLongPress = { timerViewModel.onTimerLongPress() },

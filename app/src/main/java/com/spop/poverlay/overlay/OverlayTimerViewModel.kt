@@ -26,6 +26,9 @@ open class OverlayTimerViewModel(
     val showTimerWhenMinimized
         get() = configurationRepository.showTimerWhenMinimized
 
+    val showCaloriesWhenMinimized
+        get() = configurationRepository.showCaloriesWhenMinimized
+
     // Accumulated seconds (persists across pause/resume)
     private var accumulatedSeconds = 0L
     private val mutableAccumulatedSeconds = MutableStateFlow(0L)
