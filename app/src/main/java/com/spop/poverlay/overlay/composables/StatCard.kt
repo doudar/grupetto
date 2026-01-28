@@ -18,6 +18,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.height
 import androidx.compose.ui.unit.sp
 
 
@@ -65,37 +66,38 @@ fun StatCard(
             fontSize = 32.sp,
             fontWeight = FontWeight.Bold
         )
-        // Total and max row
-        Row(
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (totalValue != null && totalUnit != null) {
-                Text(
-                    text = "$totalValue $totalUnit",
-                    color = Color.Gray,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Normal
-                )
-                if (maxValue != null && maxValue != "0") {
+            // Total and max row (reserve space even if values missing so layout aligns)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.height(20.dp)
+            ) {
+                if (totalValue != null && totalUnit != null) {
                     Text(
-                        text = " | ",
+                        text = "$totalValue $totalUnit",
                         color = Color.Gray,
                         fontSize = 16.sp,
-                        fontWeight = FontWeight.Light
+                        fontWeight = FontWeight.Normal
+                    )
+                    if (maxValue != null && maxValue != "0") {
+                        Text(
+                            text = " | ",
+                            color = Color.Gray,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Light
+                        )
+                    }
+                }
+                if (maxValue != null && maxValue != "0") {
+                    Text(
+                        text = maxValue,
+                        color = Color.Gray,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Normal
                     )
                 }
             }
-            if (maxValue != null && maxValue != "0") {
-                Text(
-                    text = maxValue,
-                    color = Color.Gray,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Normal
-                )
-            }
-        }
-        // Unit row
-        if (onUnitClick != null) {
+            // Unit row (reserve same layout spot)
+            if (onUnitClick != null) {
             Text(
                 text = unit,
                 fontSize = 14.sp,

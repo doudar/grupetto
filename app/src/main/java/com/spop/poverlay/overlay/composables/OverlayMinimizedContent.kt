@@ -41,6 +41,7 @@ fun OverlayMinimizedContent(
     cadenceLabel: String,
     speedLabel: String,
     resistanceLabel: String,
+    heartLabel: String,
     // optional additional stats
     showCalories: Boolean = false,
     caloriesLabel: String = "",
@@ -50,6 +51,8 @@ fun OverlayMinimizedContent(
     onTap: () -> Unit,
     onLongPress: () -> Unit,
     onMinimizeToggle: () -> Unit,
+    showHeartOnMain: Boolean = true,
+    heartAvailable: Boolean = false,
     onLayout: (IntSize) -> Unit
 ) {
     val backgroundShape = if (isMinimized) {
@@ -174,6 +177,14 @@ fun OverlayMinimizedContent(
                     modifier = Modifier.width(62.dp),
                     timerLabel = caloriesLabel,
                     iconDrawable = R.drawable.ic_calories
+                )
+            }
+            if (showHeartOnMain && heartAvailable) {
+                Spacer(modifier = Modifier.width(4.dp))
+                OverlayTimerField(
+                    modifier = Modifier.width(62.dp),
+                    timerLabel = heartLabel,
+                    iconDrawable = R.drawable.ic_heart
                 )
             }
         }
