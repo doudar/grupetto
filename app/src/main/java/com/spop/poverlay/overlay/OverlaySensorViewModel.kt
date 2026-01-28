@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.spop.poverlay.MainActivity
 import com.spop.poverlay.sensor.DeadSensorDetector
 import com.spop.poverlay.sensor.interfaces.SensorInterface
+import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.util.smoothSensorValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.FlowCollector
@@ -247,6 +248,38 @@ class OverlaySensorViewModel(
         }
     }
 
+    val heartRateValue = HeartRateManager.heartRate
+        .map { bpm ->
+            if (bpm != null && bpm > 0) bpm.toString() else SensorValuePlaceholderText
+        }
+
+    val heartAvailable = HeartRateManager.heartRate.map { it != null }
+
+    // UI toggles: whether calories and heart show fully on main overlay
+    private val _showCaloriesOnMain = MutableStateFlow(true)
+    val showCaloriesOnMain = _showCaloriesOnMain.asStateFlow()
+
+    private val _showHeartOnMain = MutableStateFlow(true)
+    val showHeartOnMain = _showHeartOnMain.asStateFlow()
+
+    fun toggleShowCaloriesOnMain() {
+        _showCaloriesOnMain.value = !_showCaloriesOnMain.value
+    }
+
+    fun toggleShowHeartOnMain() {
+        _showHeartOnMain.value = !_showHeartOnMain.value
+    }
+
+    // Peak and average heart rate tracking (session simple average)
+    private val mutableHeartPeak = MutableStateFlow(0)
+    private val mutableHeartAvg = MutableStateFlow(0)
+
+    val heartPeakValue = mutableHeartPeak
+        .map { v -> if (v > 0) v.toString() else SensorValuePlaceholderText }
+
+    val heartAvgValue = mutableHeartAvg
+        .map { v -> if (v > 0) v.toString() else SensorValuePlaceholderText }
+
     fun onClickedSpeedUnit() {
         viewModelScope.launch {
             useMph.emit(!useMph.value)
@@ -411,6 +444,22 @@ class OverlaySensorViewModel(
                     }
                 }
             })
+        }
+
+        // Track peak and average heart rate
+        viewModelScope.launch(Dispatchers.IO) {
+            var sum = 0L
+            var count = 0L
+            HeartRateManager.heartRate.collect { bpm ->
+                if (bpm != null && bpm > 0) {
+                    // peak
+                    if (bpm > mutableHeartPeak.value) mutableHeartPeak.value = bpm
+                    // average (simple running average)
+                    sum += bpm
+                    count += 1
+                    mutableHeartAvg.value = (sum / count).toInt()
+                }
+            }
         }
     }
 }

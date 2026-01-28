@@ -35,6 +35,7 @@ import com.spop.poverlay.MainActivity
 import com.spop.poverlay.R
 
 import com.spop.poverlay.sensor.CadenceWatchdog
+import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.sensor.DeadSensorDetector
 import com.spop.poverlay.sensor.interfaces.DummySensorInterface
 import com.spop.poverlay.sensor.interfaces.PelotonBikeSensorInterfaceV1New
@@ -89,8 +90,17 @@ class OverlayService : LifecycleEnabledService() {
             startForeground(OverlayServiceId, notification)
         }
         buildDialog()
+        
+        // start minimal heart-rate client
+        HeartRateManager.start(applicationContext)
     }
 
+    override fun onDestroy() {
+        try {
+            HeartRateManager.stop()
+        } catch (_: Exception) {}
+        super.onDestroy()
+    }
     override fun onBind(intent: Intent?): IBinder? {
         return null
     }

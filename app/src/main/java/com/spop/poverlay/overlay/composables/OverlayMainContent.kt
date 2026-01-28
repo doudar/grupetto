@@ -1,6 +1,7 @@
 package com.spop.poverlay.overlay.composables
 
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 //import androidx.compose.material.Text
 import androidx.compose.runtime.*
@@ -31,6 +32,14 @@ fun OverlayMainContent(
     rowAlignment: Alignment.Vertical,
     power: String,
     rpm: String,
+    heartRate: String,
+    heartAvg: String,
+    heartPeak: String,
+    showHeart: Boolean,
+    showCalories: Boolean,
+    showHeartAvailable: Boolean,
+    onToggleCalories: () -> Unit,
+    onToggleHeart: () -> Unit,
     currentGraph: List<Float>,
     selectedMetric: MetricType,
     resistance: String,
@@ -83,15 +92,16 @@ fun OverlayMainContent(
     Row(
         modifier = modifier,
         verticalAlignment = rowAlignment,
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.Start,
     ) {
-        val statCardModifier = Modifier.requiredWidth(StatCardWidth)
+        val statCardFullModifier = Modifier.requiredWidth(StatCardWidth)
+        val statCardCollapsedModifier = Modifier.requiredWidth(48.dp)
 
         StatCard(
             name = "Power",
             value = power,
             unit = "watts",
-            modifier = statCardModifier,
+            modifier = statCardFullModifier,
             iconDrawable = R.drawable.ic_power,
             maxValue = maxPower,
             totalValue = totalEnergy,
@@ -104,7 +114,7 @@ fun OverlayMainContent(
             name = "Cadence",
             value = rpm,
             unit = "rpm",
-            modifier = statCardModifier,
+            modifier = statCardFullModifier,
             iconDrawable = R.drawable.ic_cadence,
             maxValue = maxCadence,
             totalValue = avgCadence,
@@ -112,6 +122,8 @@ fun OverlayMainContent(
             color = MetricCadenceColor,
             onClick = { onMetricSelected(MetricType.CADENCE) }
         )
+
+        // heart stat will be shown at the far right (after Calories) when available
 
         val chartWidth = if (shrinkChart) {
             PowerChartShrunkWidth
@@ -157,7 +169,7 @@ fun OverlayMainContent(
             name = "Resistance",
             value = resistance,
             unit = "%",
-            modifier = statCardModifier,
+            modifier = statCardFullModifier,
             iconDrawable = R.drawable.ic_resistance,
             maxValue = maxResistance,
             totalValue = avgResistance,
@@ -170,7 +182,7 @@ fun OverlayMainContent(
             name = "Speed",
             value = speed,
             unit = speedLabel,
-            modifier = statCardModifier,
+            modifier = statCardFullModifier,
             iconDrawable = R.drawable.ic_speed,
             maxValue = maxSpeed,
             totalValue = totalDistance,
@@ -179,7 +191,59 @@ fun OverlayMainContent(
             onClick = { onMetricSelected(MetricType.SPEED) },
             onUnitClick = onSpeedUnitClicked
         )
-        StatCard("Calories", calories, color = MetricCalorieColor, unit = "kcal",maxValue = "", modifier = statCardModifier, iconDrawable = R.drawable.ic_calories)
+        // Calories/Heart area: calories then heart; both can be toggled to collapse
+        if (showCalories) {
+            StatCard(
+                name = "Calories",
+                value = calories,
+                unit = "kcal",
+                modifier = statCardFullModifier,
+                iconDrawable = R.drawable.ic_calories,
+                maxValue = null,
+                totalValue = null,
+                totalUnit = null,
+                color = MetricCalorieColor,
+                onClick = onToggleCalories
+            )
+        } else {
+            // collapsed calories: show only icon clickable (fills slot)
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = statCardCollapsedModifier.clickable { onToggleCalories() }
+            ) {
+                androidx.compose.foundation.Image(
+                    painter = androidx.compose.ui.res.painterResource(id = R.drawable.ic_calories),
+                    contentDescription = "Calories",
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+
+        if (showHeart && showHeartAvailable) {
+            StatCard(
+                name = "Heart",
+                value = heartRate,
+                unit = "bpm",
+                modifier = statCardFullModifier,
+                iconDrawable = R.drawable.ic_heart,
+                maxValue = heartPeak,
+                totalValue = heartAvg,
+                totalUnit = "avg",
+                color = Color.Red,
+                onClick = onToggleHeart
+            )
+        } else if (showHeartAvailable) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = statCardCollapsedModifier.clickable { onToggleHeart() }
+            ) {
+                androidx.compose.foundation.Image(
+                    painter = androidx.compose.ui.res.painterResource(id = R.drawable.ic_heart),
+                    contentDescription = "Heart",
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
     }
 }
 
