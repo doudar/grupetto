@@ -41,6 +41,9 @@ fun OverlayMinimizedContent(
     cadenceLabel: String,
     speedLabel: String,
     resistanceLabel: String,
+    // optional additional stats
+    showCalories: Boolean = false,
+    caloriesLabel: String = "",
     contentAlpha: Float,
     timerLabel: String,
     timerPaused: Boolean,
@@ -165,6 +168,14 @@ fun OverlayMinimizedContent(
                 timerLabel = speedLabel,
                 iconDrawable = R.drawable.ic_speed
             )
+            if (showCalories) {
+                Spacer(modifier = Modifier.width(4.dp))
+                OverlayTimerField(
+                    modifier = Modifier.width(62.dp),
+                    timerLabel = caloriesLabel,
+                    iconDrawable = R.drawable.ic_calories
+                )
+            }
         }
     }
 }
