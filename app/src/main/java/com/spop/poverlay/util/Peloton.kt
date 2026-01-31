@@ -12,7 +12,10 @@ val IsRunningOnPeloton = Build.BRAND == PelotonBrand
  * All Peloton bikes start with model "PLTN-T". Treadmills start with "PLTN-TR", so this might also
  * apply to them, but it will be interesting if anything works on them here.
  */
-val IsBikePlus = Build.MODEL.startsWith("PLTN-T")
+val IsBikePlus =
+    Build.MODEL.contains("PLTN-T") ||
+        Build.MODEL.contains("G700")
+
 
 fun calculateSpeedFromPelotonV1Power(power: Float) =
         if (power < 0.1f) {
