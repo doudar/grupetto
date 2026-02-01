@@ -110,6 +110,12 @@ class BleServer(
     private var lastAdvertisingStartTime = 0L
     private var lastAdvertisingFailureCode: Int? = null
     private var isServerStarted = false
+
+    // CCCD UUID for checking notification subscriptions
+    private val CLIENT_CHARACTERISTIC_CONFIG = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+    
+    // Track notification subscriptions: Device Address -> Set of Characteristic UUIDs
+    private val notificationSubscriptions = mutableMapOf<String, MutableSet<UUID>>()
     
     // Watchdog configuration
     companion object {
@@ -234,6 +240,15 @@ class BleServer(
             characteristic: BluetoothGattCharacteristic,
             confirm: Boolean
     ) {
+        // Convention compliance: Only notify if subscribed (handled by tracking CCCD writes)
+        val isSubscribed = synchronized(notificationSubscriptions) {
+            notificationSubscriptions[device.address]?.contains(characteristic.uuid) == true
+        }
+
+        if (!isSubscribed) {
+             return
+        }
+
         try {
             gattServer?.notifyCharacteristicChanged(device, characteristic, confirm)
         } catch (e: SecurityException) {
@@ -500,7 +515,7 @@ class BleServer(
     }
 
     override fun onConnectionStateChange(device: BluetoothDevice?, status: Int, newState: Int) {
-        if (newState == BluetoothProfile.STATE_CONNECTED) {
+        if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
             device?.let { 
                 registeredServices.forEach { it.onConnected(device) }
                 Timber.d("Device connected: ${device.address}")
@@ -518,6 +533,10 @@ class BleServer(
                 }
             }
         } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+            // Clean up subscriptions
+            synchronized(notificationSubscriptions) {
+                notificationSubscriptions.remove(device?.address)
+            }
             device?.let { 
                 registeredServices.forEach { it.onDisconnected(device) }
                 Timber.d("Device disconnected: ${device.address}")
@@ -535,6 +554,10 @@ class BleServer(
                 }
             }
         }
+    }
+
+    override fun onMtuChanged(device: BluetoothDevice?, mtu: Int) {
+        Timber.d("onMtuChanged: $mtu for ${device?.address}")
     }
 
     private fun findServiceForCharacteristic(uuid: UUID?): BaseBleService? {
@@ -595,6 +618,28 @@ class BleServer(
             offset: Int,
             value: ByteArray?
     ) {
+        // Convention compliance: Track CCCD state
+        if (descriptor.uuid == CLIENT_CHARACTERISTIC_CONFIG && value != null) {
+            val isEnabled = Arrays.equals(value, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) ||
+                           Arrays.equals(value, BluetoothGattDescriptor.ENABLE_INDICATION_VALUE)
+            val isDisable = Arrays.equals(value, BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE)
+
+            synchronized(notificationSubscriptions) {
+                val deviceAddress = device.address
+                if (isEnabled) {
+                    val uuidSet = notificationSubscriptions.getOrPut(deviceAddress) { mutableSetOf() }
+                    uuidSet.add(descriptor.characteristic.uuid)
+                    Timber.d("Notifications enabled for ${descriptor.characteristic.uuid} on $deviceAddress")
+                } else if (isDisable) {
+                    notificationSubscriptions[deviceAddress]?.remove(descriptor.characteristic.uuid)
+                    if (notificationSubscriptions[deviceAddress]?.isEmpty() == true) {
+                        notificationSubscriptions.remove(deviceAddress)
+                    }
+                    Timber.d("Notifications disabled for ${descriptor.characteristic.uuid} on $deviceAddress")
+                }
+            }
+        }
+
         findServiceForCharacteristic(descriptor.characteristic.service.uuid)
                 ?.onDescriptorWriteRequest(
                         device,
