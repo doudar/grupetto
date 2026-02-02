@@ -485,16 +485,17 @@ class OverlaySensorViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             var sum = 0L
             var count = 0L
-            HeartRateManager.heartRate.collect { bpm ->
-                if (bpm != null && bpm > 0) {
-                    // peak
-                    if (bpm > mutableHeartPeak.value) mutableHeartPeak.value = bpm
-                    // average (simple running average)
-                    sum += bpm
-                    count += 1
-                    mutableHeartAvg.value = (sum / count).toInt()
+            combine(HeartRateManager.heartRate, isMoving) { bpm, moving -> bpm to moving }
+                .collect { (bpm, moving) ->
+                    if (bpm != null && bpm > 0 && moving) {
+                        // peak
+                        if (bpm > mutableHeartPeak.value) mutableHeartPeak.value = bpm
+                        // average (simple running average)
+                        sum += bpm
+                        count += 1
+                        mutableHeartAvg.value = (sum / count).toInt()
+                    }
                 }
-            }
         }
     }
 }
