@@ -160,7 +160,6 @@ class BleServer(
         // Set the Bluetooth adapter name to "Grupetto"
         try {
             bluetoothAdapter.name = "Grupetto"
-            Timber.d("Bluetooth adapter name set to Grupetto")
         } catch (e: SecurityException) {
             Timber.e(e, "Missing bluetooth permissions to set adapter name")
         } catch (e: Exception) {
@@ -181,7 +180,6 @@ class BleServer(
             // Register Bluetooth state change receiver
             val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
             context.registerReceiver(bluetoothStateReceiver, filter)
-            Timber.d("Registered Bluetooth state change receiver")
             
             setupServices()
             startWatchdog()
@@ -217,10 +215,8 @@ class BleServer(
             // Unregister Bluetooth state change receiver
             try {
                 context.unregisterReceiver(bluetoothStateReceiver)
-                Timber.d("Unregistered Bluetooth state change receiver")
             } catch (e: IllegalArgumentException) {
                 // Receiver was not registered, this is normal if stop() called without start()
-                Timber.d("Bluetooth state receiver was not registered (normal if not started)")
             }
             
             gattServer?.clearServices()
@@ -288,11 +284,9 @@ class BleServer(
                 }
             }
             BluetoothAdapter.STATE_TURNING_OFF -> {
-                Timber.d("Bluetooth turning off")
                 isAdvertising = false
             }
             BluetoothAdapter.STATE_TURNING_ON -> {
-                Timber.d("Bluetooth turning on")
             }
         }
     }
@@ -313,13 +307,11 @@ class BleServer(
                 delay(WATCHDOG_CHECK_INTERVAL_MS)
             }
         }
-        Timber.d("Started advertising watchdog")
     }
     
     private fun stopWatchdog() {
         watchdogJob?.cancel()
         watchdogJob = null
-        Timber.d("Stopped advertising watchdog")
     }
     
     private fun hasConnectedDevices(): Boolean {
@@ -335,7 +327,6 @@ class BleServer(
         }
         
         if (!bluetoothAdapter.isEnabled) {
-            Timber.d("Watchdog: Bluetooth is disabled, waiting for it to be enabled")
             isAdvertising = false
             return
         }
@@ -348,7 +339,6 @@ class BleServer(
             
             if (hasConnectedDevices() && timeSinceLastStart < 5000) {
                 // Recent connection, advertising is being restarted automatically
-                Timber.d("Watchdog: Recent connection detected, waiting for automatic advertising restart")
                 return
             }
             
@@ -374,7 +364,6 @@ class BleServer(
             }
         } else if (isAdvertising) {
             val timeSinceStart = System.currentTimeMillis() - lastAdvertisingStartTime
-            Timber.d("Watchdog: Advertising active for ${timeSinceStart / 1000}s")
         }
     }
     
@@ -469,7 +458,6 @@ class BleServer(
         try {
             advertiser?.stopAdvertising(advertisingCallback)
             isAdvertising = false
-            Timber.d("Stopped advertising")
         } catch (e: SecurityException) {
             Timber.e(e, "Missing bluetooth permissions")
         }
@@ -510,7 +498,6 @@ class BleServer(
         }
 
         if (status == BluetoothGatt.GATT_SUCCESS) {
-            Timber.d("Service added ${service.uuid}")
             registeredServices.add(currentlyRegisteringService!!)
         } else {
             Timber.e("Failed to add service ${service.uuid}, status: $status")
@@ -522,7 +509,6 @@ class BleServer(
         if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
             device?.let { 
                 registeredServices.forEach { it.onConnected(device) }
-                Timber.d("Device connected: ${device.address}")
                 
                 // Restart advertising to allow additional clients to connect (support multiple connections)
                 if (!isAdvertising && isServerStarted) {
@@ -543,7 +529,6 @@ class BleServer(
             }
             device?.let { 
                 registeredServices.forEach { it.onDisconnected(device) }
-                Timber.d("Device disconnected: ${device.address}")
                 
                 // Restart advertising if no devices are connected anymore
                 if (!hasConnectedDevices() && !isAdvertising && isServerStarted) {

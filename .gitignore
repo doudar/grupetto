@@ -16,6 +16,7 @@
 local.properties
 app/release
 app/debug
+/debug
 
 # Claude Code
 .claude/

@@ -69,6 +69,7 @@ fun Overlay(
     val heartAvg by sensorViewModel.heartAvgValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
     val heartPeak by sensorViewModel.heartPeakValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
     val showHeartOnMain by sensorViewModel.showHeartOnMain.collectAsStateWithLifecycle(initialValue = true)
+    val showCaloriesOnMain by sensorViewModel.showCaloriesOnMain.collectAsStateWithLifecycle(initialValue = true)
     val heartAvailable by sensorViewModel.heartAvailable.collectAsStateWithLifecycle(initialValue = false)
     val timerLabel by timerViewModel.timerLabel.collectAsState(initial = "")
     val isTimerPaused by timerViewModel.timerPaused.collectAsState(initial = false)
@@ -163,8 +164,8 @@ fun Overlay(
             speedLabel = speed,
             resistanceLabel = resistance,
             // show calories in mini view only if calories is enabled on main
-            showCalories = sensorViewModel.showCaloriesOnMain.value,
-            showHeartOnMain = sensorViewModel.showHeartOnMain.value,
+            showCalories = showCaloriesOnMain,
+            showHeartOnMain = showHeartOnMain,
             heartAvailable = heartAvailable,
             caloriesLabel = calories,
             onTap = { timerViewModel.onTimerTap() },
@@ -217,7 +218,7 @@ fun Overlay(
                     heartAvg = heartAvg,
                     heartPeak = heartPeak,
                     showHeart = showHeartOnMain,
-                    showCalories = sensorViewModel.showCaloriesOnMain.value,
+                    showCalories = showCaloriesOnMain,
                     showHeartAvailable = heartAvailable,
                     onToggleCalories = { sensorViewModel.toggleShowCaloriesOnMain() },
                     onToggleHeart = { sensorViewModel.toggleShowHeartOnMain() },

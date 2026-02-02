@@ -1,4 +1,4 @@
-@file:OptIn(kotlinx.coroutines.InternalCoroutinesApi::class, kotlin.time.ExperimentalTime::class)
+@file:OptIn(kotlinx.coroutines.InternalCoroutinesApi::class, kotlin.time.ExperimentalTime::class, kotlinx.coroutines.FlowPreview::class)
 
 package com.spop.poverlay.overlay
 
@@ -12,6 +12,8 @@ import com.spop.poverlay.sensor.DeadSensorDetector
 import com.spop.poverlay.sensor.interfaces.SensorInterface
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.util.smoothSensorValue
+import com.spop.poverlay.util.windowed
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,7 +61,10 @@ class OverlaySensorViewModel(
 
     companion object {
         // The sensor does not necessarily return new value this quickly
-        val GraphUpdatePeriod = 400.milliseconds
+        val GraphUpdatePeriod = 800.milliseconds
+
+        // Rolling average window for power smoothing
+        private const val PowerAverageWindowSize = 4
 
         // Max number of points before data starts to shift
         const val GraphMaxDataPoints = 300
@@ -222,7 +227,13 @@ class OverlaySensorViewModel(
         }
     }
 
-    val powerValue = sensorInterface.power
+    private val smoothedPower = sensorInterface.power
+        .windowed(PowerAverageWindowSize, 1, true) { readings ->
+            readings.average().toFloat()
+        }
+
+    val powerValue = smoothedPower
+        .sample(GraphUpdatePeriod)
         .map { "%.0f".format(it) }
     val rpmValue = sensorInterface.cadence
         .map { "%.0f".format(it) }
@@ -340,12 +351,18 @@ class OverlaySensorViewModel(
     private fun setupGraphData() {
         // Power graph
         viewModelScope.launch(Dispatchers.IO) {
-            sensorInterface.power.smoothSensorValue()
+            var wasMoving = true
+            smoothedPower.smoothSensorValue()
                 .sample(GraphUpdatePeriod)
-                .collect(object : FlowCollector<Float> {
-                    override suspend fun emit(value: Float) {
+                .combine(isMoving) { value, moving -> value to moving }
+                .collect(object : FlowCollector<Pair<Float, Boolean>> {
+                    override suspend fun emit(value: Pair<Float, Boolean>) {
+                        val (sensorValue, moving) = value
+                        val shouldAppend = moving || wasMoving != moving
+                        wasMoving = moving
+                        if (!shouldAppend) return
                         withContext(Dispatchers.Main) {
-                            powerGraph.add(value)
+                            powerGraph.add(sensorValue)
                             if (powerGraph.size > GraphMaxDataPoints) {
                                 powerGraph.removeFirst()
                             }
@@ -356,12 +373,18 @@ class OverlaySensorViewModel(
 
         // Cadence graph
         viewModelScope.launch(Dispatchers.IO) {
+            var wasMoving = true
             sensorInterface.cadence.smoothSensorValue()
                 .sample(GraphUpdatePeriod)
-                .collect(object : FlowCollector<Float> {
-                    override suspend fun emit(value: Float) {
+                .combine(isMoving) { value, moving -> value to moving }
+                .collect(object : FlowCollector<Pair<Float, Boolean>> {
+                    override suspend fun emit(value: Pair<Float, Boolean>) {
+                        val (sensorValue, moving) = value
+                        val shouldAppend = moving || wasMoving != moving
+                        wasMoving = moving
+                        if (!shouldAppend) return
                         withContext(Dispatchers.Main) {
-                            cadenceGraph.add(value)
+                            cadenceGraph.add(sensorValue)
                             if (cadenceGraph.size > GraphMaxDataPoints) {
                                 cadenceGraph.removeFirst()
                             }
@@ -372,12 +395,18 @@ class OverlaySensorViewModel(
 
         // Resistance graph
         viewModelScope.launch(Dispatchers.IO) {
+            var wasMoving = true
             sensorInterface.resistance.smoothSensorValue()
                 .sample(GraphUpdatePeriod)
-                .collect(object : FlowCollector<Float> {
-                    override suspend fun emit(value: Float) {
+                .combine(isMoving) { value, moving -> value to moving }
+                .collect(object : FlowCollector<Pair<Float, Boolean>> {
+                    override suspend fun emit(value: Pair<Float, Boolean>) {
+                        val (sensorValue, moving) = value
+                        val shouldAppend = moving || wasMoving != moving
+                        wasMoving = moving
+                        if (!shouldAppend) return
                         withContext(Dispatchers.Main) {
-                            resistanceGraph.add(value)
+                            resistanceGraph.add(sensorValue)
                             if (resistanceGraph.size > GraphMaxDataPoints) {
                                 resistanceGraph.removeFirst()
                             }
@@ -388,12 +417,18 @@ class OverlaySensorViewModel(
 
         // Speed graph
         viewModelScope.launch(Dispatchers.IO) {
+            var wasMoving = true
             sensorInterface.speed.smoothSensorValue()
                 .sample(GraphUpdatePeriod)
-                .collect(object : FlowCollector<Float> {
-                    override suspend fun emit(value: Float) {
+                .combine(isMoving) { value, moving -> value to moving }
+                .collect(object : FlowCollector<Pair<Float, Boolean>> {
+                    override suspend fun emit(value: Pair<Float, Boolean>) {
+                        val (sensorValue, moving) = value
+                        val shouldAppend = moving || wasMoving != moving
+                        wasMoving = moving
+                        if (!shouldAppend) return
                         withContext(Dispatchers.Main) {
-                            speedGraph.add(value)
+                            speedGraph.add(sensorValue)
                             if (speedGraph.size > GraphMaxDataPoints) {
                                 speedGraph.removeFirst()
                             }
