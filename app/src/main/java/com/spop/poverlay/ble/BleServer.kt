@@ -121,6 +121,10 @@ class BleServer(
     companion object {
         private const val WATCHDOG_INITIAL_DELAY_MS = 60_000L // 1 minute
         private const val WATCHDOG_CHECK_INTERVAL_MS = 120_000L // 2 minutes
+        
+        // Standard BLE sensors typically update at 1Hz. 
+        // We use a slight offset to avoid aliasing with sensor sampling rates.
+        private const val SENSOR_UPDATE_INTERVAL_MS = 709L 
     }
     
     // Bluetooth adapter state receiver
@@ -688,7 +692,10 @@ class BleServer(
 
             launch {
                 while (isActive) {
-                    delay(300)
+                    // Use a standard interval (~1Hz) to be consistent with typical clients.
+                    // The slight offset (e.g. 1003ms) prevents phase-locking/aliasing with incoming sensor data loops.
+                    delay(SENSOR_UPDATE_INTERVAL_MS)
+                    
                     val buffers =
                             mutex.withLock {
                                 if (cadenceBuffer.isEmpty()) null
@@ -778,22 +785,24 @@ class BleServer(
     private fun smooth(prev: Float?, value: Float, alpha: Float): Float =
         if (prev == null) value else (alpha * value + (1f - alpha) * prev)
 
-    private fun smoothCadence(v: Float, alpha: Float = 0.35f): Float {
+    // With 1Hz updates, we increase alpha (reduce smoothing) to maintain responsiveness.
+    // The previous 1-second buffering already provides significant noise reduction.
+    private fun smoothCadence(v: Float, alpha: Float = 0.7f): Float {
         smoothedCadence = smooth(smoothedCadence, v, alpha)
         return smoothedCadence!!
     }
 
-    private fun smoothPower(v: Float, alpha: Float = 0.25f): Float {
+    private fun smoothPower(v: Float, alpha: Float = 0.7f): Float {
         smoothedPower = smooth(smoothedPower, v, alpha)
         return smoothedPower!!
     }
 
-    private fun smoothSpeed(vMph: Float, alpha: Float = 0.4f): Float {
+    private fun smoothSpeed(vMph: Float, alpha: Float = 0.7f): Float {
         smoothedSpeedMph = smooth(smoothedSpeedMph, vMph, alpha)
         return smoothedSpeedMph!!
     }
 
-    private fun smoothResistance(v: Float, alpha: Float = 0.35f): Float {
+    private fun smoothResistance(v: Float, alpha: Float = 0.7f): Float {
         smoothedResistance = smooth(smoothedResistance, v, alpha)
         return smoothedResistance!!
     }
