@@ -7,11 +7,14 @@ import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
@@ -21,8 +24,12 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.spop.poverlay.releases.Release
+import com.spop.poverlay.sensor.heartrate.HeartRateDevice
+import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.ui.theme.ErrorColor
 import com.spop.poverlay.ui.theme.LatoFontFamily
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
 
 @Composable
 fun ConfigurationPage(viewModel: ConfigurationViewModel) {
@@ -48,12 +55,28 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                     viewModel.bleFtmsDeviceName.collectAsStateWithLifecycle(
                             initialValue = "Grupetto FTMS"
                     )
+            val hrConnectedDevice by
+                    viewModel.hrConnectedDevice.collectAsStateWithLifecycle(initialValue = null)
+            val hrDiscoveredDevices by
+                    viewModel.hrDiscoveredDevices.collectAsStateWithLifecycle(initialValue = emptyList())
+            val hrSavedDevices by
+                    viewModel.hrSavedDevices.collectAsStateWithLifecycle(initialValue = emptyList())
+            val hrIsScanning by
+                    viewModel.hrIsScanning.collectAsStateWithLifecycle(initialValue = false)
             StartServicePage(
                     timerShownWhenMinimized,
                     viewModel::onShowTimerWhenMinimizedClicked,
                     bleTxEnabled,
                     viewModel::onBleTxEnabledClicked,
                     bleFtmsDeviceName,
+                    hrConnectedDevice,
+                    hrDiscoveredDevices,
+                    hrSavedDevices,
+                    hrIsScanning,
+                    viewModel::startHeartRateDiscovery,
+                    viewModel::stopHeartRateDiscovery,
+                    viewModel::connectHeartRateDevice,
+                    viewModel::forgetHeartRateDevice,
                     viewModel::onStartServiceClicked,
                     viewModel::onRestartClicked,
                     viewModel::onClickedRelease,
@@ -70,11 +93,21 @@ private fun StartServicePage(
         bleTxEnabled: Boolean,
         onBleTxEnabledToggled: (Boolean) -> Unit,
         bleFtmsDeviceName: String,
+        hrConnectedDevice: HeartRateDevice?,
+        hrDiscoveredDevices: List<HeartRateDevice>,
+        hrSavedDevices: List<HeartRateDevice>,
+        hrIsScanning: Boolean,
+        onStartHeartRateDiscovery: () -> Unit,
+        onStopHeartRateDiscovery: () -> Unit,
+        onConnectHeartRateDevice: (HeartRateDevice) -> Unit,
+        onForgetHeartRateDevice: (String) -> Unit,
         onClickedStartOverlay: () -> Unit,
         onClickedRestartApp: () -> Unit,
         onClickedRelease: (Release) -> Unit,
         latestRelease: Release?
 ) {
+    var showHeartRateDialog by remember { mutableStateOf(false) }
+
     Text(
             text = "Grupetto: An overlay for your Peloton bike",
             fontSize = 50.sp,
@@ -93,7 +126,7 @@ private fun StartServicePage(
         fontStyle = FontStyle.Italic,
         color = Color.Gray
     )
-    Spacer(modifier = Modifier.height(140.dp))
+        Spacer(modifier = Modifier.height(32.dp))
     Button(
             onClick = onClickedStartOverlay,
     ) {
@@ -143,6 +176,57 @@ private fun StartServicePage(
                 color = Color.Gray
         )
     }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        val hrStatus = hrConnectedDevice?.let {
+                "Connected to ${it.name ?: it.address}"
+        } ?: "Disconnected"
+
+            Button(
+                    onClick = { showHeartRateDialog = true },
+                    modifier = Modifier
+                            .wrapContentWidth()
+                            .padding(horizontal = 6.dp),
+                    colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF2F2F2F))
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                                        imageVector = Icons.Default.Favorite,
+                                        contentDescription = "Heart Rate",
+                                        tint = Color.Red
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                                Text(
+                                                text = "Manage Heart Rate Monitors",
+                                                fontSize = 16.sp,
+                                                fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                                text = hrStatus,
+                                                fontSize = 13.sp,
+                                                color = Color.Gray,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                )
+                        }
+                }
+        }
+
+        if (showHeartRateDialog) {
+                HeartRateManagerDialog(
+                                connectedDevice = hrConnectedDevice,
+                                discoveredDevices = hrDiscoveredDevices,
+                                savedDevices = hrSavedDevices,
+                                isScanning = hrIsScanning,
+                                onStartDiscovery = onStartHeartRateDiscovery,
+                                onStopDiscovery = onStopHeartRateDiscovery,
+                                onConnectDevice = onConnectHeartRateDevice,
+                                onForgetDevice = onForgetHeartRateDevice,
+                                onDismiss = { showHeartRateDialog = false }
+                )
+        }
 
     Spacer(modifier = Modifier.height(8.dp))
 
@@ -195,6 +279,121 @@ private fun StartServicePage(
                     "OS Version: ${Build.FINGERPRINT}\t",
             color = LocalContentColor.current.copy(alpha = .5f)
     )
+}
+
+@Composable
+private fun HeartRateManagerDialog(
+                connectedDevice: HeartRateDevice?,
+                discoveredDevices: List<HeartRateDevice>,
+                savedDevices: List<HeartRateDevice>,
+                isScanning: Boolean,
+                onStartDiscovery: () -> Unit,
+                onStopDiscovery: () -> Unit,
+                onConnectDevice: (HeartRateDevice) -> Unit,
+                onForgetDevice: (String) -> Unit,
+                onDismiss: () -> Unit
+) {
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+                onStartDiscovery()
+                HeartRateManager.setManaging(true)
+        }
+        androidx.compose.runtime.DisposableEffect(Unit) {
+                onDispose {
+                        onStopDiscovery()
+                        HeartRateManager.setManaging(false)
+                }
+        }
+
+        AlertDialog(
+                        onDismissRequest = onDismiss,
+                        title = { Text("Manage Heart Rate Monitors") },
+                        text = {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                        SectionHeader("Connected")
+                                        if (connectedDevice == null) {
+                                                Text("None", color = Color.Gray)
+                                        } else {
+                                                HeartRateDeviceRow(
+                                                                device = connectedDevice,
+                                                                actionLabel = "Forget",
+                                                                onAction = { onForgetDevice(connectedDevice.address) }
+                                                )
+                                        }
+
+                                        Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+                                        SectionHeader("Discovered")
+                                        if (discoveredDevices.isEmpty()) {
+                                                Text(
+                                                                text = if (isScanning) "Scanning..." else "None",
+                                                                color = Color.Gray
+                                                )
+                                        } else {
+                                                discoveredDevices.forEach { device ->
+                                                        HeartRateDeviceRow(
+                                                                        device = device,
+                                                                        actionLabel = "Connect",
+                                                                        onAction = { onConnectDevice(device) }
+                                                        )
+                                                }
+                                        }
+
+                                        Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+                                        SectionHeader("Saved")
+                                        val filteredSaved = savedDevices.filter { it.address != connectedDevice?.address }
+                                        if (filteredSaved.isEmpty()) {
+                                                Text("None", color = Color.Gray)
+                                        } else {
+                                                filteredSaved.forEach { device ->
+                                                        HeartRateDeviceRow(
+                                                                        device = device,
+                                                                        actionLabel = "Forget",
+                                                                        onAction = { onForgetDevice(device.address) }
+                                                        )
+                                                }
+                                        }
+                                }
+                        },
+                        confirmButton = {
+                                TextButton(onClick = onDismiss) { Text("Close") }
+                        }
+        )
+}
+
+@Composable
+private fun SectionHeader(title: String) {
+        Text(
+                        text = title,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+}
+
+@Composable
+private fun HeartRateDeviceRow(
+                device: HeartRateDevice,
+                actionLabel: String,
+                onAction: () -> Unit
+) {
+        Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+                Column(modifier = Modifier.weight(1f)) {
+                        Text(text = device.name ?: "Unknown", fontSize = 14.sp)
+                        Text(
+                                        text = device.address,
+                                        fontSize = 12.sp,
+                                        color = Color.Gray
+                        )
+                }
+                TextButton(onClick = onAction) {
+                        Text(actionLabel)
+                }
+        }
 }
 
 @Composable
