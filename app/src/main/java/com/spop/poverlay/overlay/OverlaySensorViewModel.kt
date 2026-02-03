@@ -33,7 +33,7 @@ import kotlin.time.Duration.Companion.minutes
 private const val MphToKph = 1.60934
 
 enum class MetricType {
-    POWER, CADENCE, RESISTANCE, SPEED
+    POWER, CADENCE, RESISTANCE, SPEED, HEART
 }
 
 /**
@@ -272,20 +272,14 @@ class OverlaySensorViewModel(
 
     val heartAvailable = HeartRateManager.heartRate.map { it != null }
 
-    // UI toggles: whether calories and heart show fully on main overlay
+    // UI toggles: whether calories show fully on main overlay
     private val _showCaloriesOnMain = MutableStateFlow(true)
     val showCaloriesOnMain = _showCaloriesOnMain.asStateFlow()
-
-    private val _showHeartOnMain = MutableStateFlow(true)
-    val showHeartOnMain = _showHeartOnMain.asStateFlow()
 
     fun toggleShowCaloriesOnMain() {
         _showCaloriesOnMain.value = !_showCaloriesOnMain.value
     }
 
-    fun toggleShowHeartOnMain() {
-        _showHeartOnMain.value = !_showHeartOnMain.value
-    }
 
     // Peak and average heart rate tracking (session simple average)
     private val mutableHeartPeak = MutableStateFlow(0)
@@ -296,6 +290,8 @@ class OverlaySensorViewModel(
 
     val heartAvgValue = mutableHeartAvg
         .map { v -> if (v > 0) v.toString() else SensorValuePlaceholderText }
+
+    val heartPeakRaw = mutableHeartPeak.asStateFlow()
 
     fun onClickedSpeedUnit() {
         viewModelScope.launch {
@@ -344,6 +340,7 @@ class OverlaySensorViewModel(
     val cadenceGraph = mutableStateListOf<Float>()
     val resistanceGraph = mutableStateListOf<Float>()
     val speedGraph = mutableStateListOf<Float>()
+    val heartGraph = mutableStateListOf<Float>()
 
     fun getGraphForMetric(metric: MetricType): List<Float> {
         return when (metric) {
@@ -351,6 +348,7 @@ class OverlaySensorViewModel(
             MetricType.CADENCE -> cadenceGraph
             MetricType.RESISTANCE -> resistanceGraph
             MetricType.SPEED -> speedGraph
+            MetricType.HEART -> heartGraph
         }
     }
 
@@ -437,6 +435,29 @@ class OverlaySensorViewModel(
                             speedGraph.add(sensorValue)
                             if (speedGraph.size > GraphMaxDataPoints) {
                                 speedGraph.removeFirst()
+                            }
+                        }
+                    }
+                })
+        }
+
+        // Heart rate graph
+        viewModelScope.launch(Dispatchers.IO) {
+            var wasMoving = true
+            HeartRateManager.heartRate
+                .map { bpm -> bpm?.toFloat() ?: 0f }
+                .sample(GraphUpdatePeriod)
+                .combine(isMoving) { value, moving -> value to moving }
+                .collect(object : FlowCollector<Pair<Float, Boolean>> {
+                    override suspend fun emit(value: Pair<Float, Boolean>) {
+                        val (sensorValue, moving) = value
+                        val shouldAppend = moving || wasMoving != moving
+                        wasMoving = moving
+                        if (!shouldAppend) return
+                        withContext(Dispatchers.Main) {
+                            heartGraph.add(sensorValue)
+                            if (heartGraph.size > GraphMaxDataPoints) {
+                                heartGraph.removeFirst()
                             }
                         }
                     }

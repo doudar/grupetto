@@ -68,7 +68,7 @@ fun Overlay(
     val heartRate by sensorViewModel.heartRateValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
     val heartAvg by sensorViewModel.heartAvgValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
     val heartPeak by sensorViewModel.heartPeakValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
-    val showHeartOnMain by sensorViewModel.showHeartOnMain.collectAsStateWithLifecycle(initialValue = true)
+    val heartPeakRaw by sensorViewModel.heartPeakRaw.collectAsStateWithLifecycle(initialValue = 0)
     val showCaloriesOnMain by sensorViewModel.showCaloriesOnMain.collectAsStateWithLifecycle(initialValue = true)
     val heartAvailable by sensorViewModel.heartAvailable.collectAsStateWithLifecycle(initialValue = false)
     val timerLabel by timerViewModel.timerLabel.collectAsState(initial = "")
@@ -165,7 +165,6 @@ fun Overlay(
             resistanceLabel = resistance,
             // show calories in mini view only if calories is enabled on main
             showCalories = showCaloriesOnMain,
-            showHeartOnMain = showHeartOnMain,
             heartAvailable = heartAvailable,
             caloriesLabel = calories,
             onTap = { timerViewModel.onTimerTap() },
@@ -217,11 +216,9 @@ fun Overlay(
                     heartRate = heartRate,
                     heartAvg = heartAvg,
                     heartPeak = heartPeak,
-                    showHeart = showHeartOnMain,
                     showCalories = showCaloriesOnMain,
                     showHeartAvailable = heartAvailable,
                     onToggleCalories = { sensorViewModel.toggleShowCaloriesOnMain() },
-                    onToggleHeart = { sensorViewModel.toggleShowHeartOnMain() },
                     pauseChart = isCurrentlyAnimating,
                 currentGraph = currentGraph,
                 selectedMetric = selectedMetric,
@@ -237,6 +234,7 @@ fun Overlay(
                 maxCadenceValue = maxCadence,
                 maxResistanceValue = maxResistance,
                 maxSpeedValue = maxSpeed,
+                maxHeartValue = heartPeakRaw.toFloat(),
                 totalEnergy = "%.0f".format(totalEnergy),
                 totalDistance = if (speedLabel == "mph") "%.2f".format(totalDistance) else "%.2f".format(totalDistance * 1.60934f),
                 distanceUnit = if (speedLabel == "mph") "mi" else "km",

@@ -35,11 +35,9 @@ fun OverlayMainContent(
     heartRate: String,
     heartAvg: String,
     heartPeak: String,
-    showHeart: Boolean,
     showCalories: Boolean,
     showHeartAvailable: Boolean,
     onToggleCalories: () -> Unit,
-    onToggleHeart: () -> Unit,
     currentGraph: List<Float>,
     selectedMetric: MetricType,
     resistance: String,
@@ -55,6 +53,7 @@ fun OverlayMainContent(
     maxCadenceValue: Float,
     maxResistanceValue: Float,
     maxSpeedValue: Float,
+    maxHeartValue: Float,
     totalEnergy: String,
     totalDistance: String,
     distanceUnit: String,
@@ -71,6 +70,7 @@ fun OverlayMainContent(
         MetricType.CADENCE -> MetricCadenceColor
         MetricType.RESISTANCE -> MetricResistanceColor
         MetricType.SPEED -> MetricSpeedColor
+        MetricType.HEART -> Color.Red
     }
 
     val chartLabel = when (selectedMetric) {
@@ -78,6 +78,7 @@ fun OverlayMainContent(
         MetricType.CADENCE -> "Cadence"
         MetricType.RESISTANCE -> "Resistance"
         MetricType.SPEED -> "Speed"
+        MetricType.HEART -> "Heart"
     }
 
     // Define minimum thresholds to prevent chart from getting too compressed at low values
@@ -87,6 +88,7 @@ fun OverlayMainContent(
         MetricType.CADENCE -> maxOf(160f, maxCadenceValue)
         MetricType.RESISTANCE -> maxOf(100f, maxResistanceValue)
         MetricType.SPEED -> maxOf(40f, maxSpeedValue)
+        MetricType.HEART -> maxOf(200f, maxHeartValue)
     }
 
     Row(
@@ -123,7 +125,7 @@ fun OverlayMainContent(
             onClick = { onMetricSelected(MetricType.CADENCE) }
         )
 
-        // heart stat will be shown at the far right (after Calories) when available
+        // heart stat will be shown just left of Calories when available
 
         val chartWidth = if (shrinkChart) {
             PowerChartShrunkWidth
@@ -191,7 +193,21 @@ fun OverlayMainContent(
             onClick = { onMetricSelected(MetricType.SPEED) },
             onUnitClick = onSpeedUnitClicked
         )
-        // Calories/Heart area: calories then heart; both can be toggled to collapse
+        // Calories/Heart area: heart (if any) then calories so calories stays far right
+        if (showHeartAvailable) {
+            StatCard(
+                name = "Heart",
+                value = heartRate,
+                unit = "bpm",
+                modifier = statCardFullModifier,
+                iconDrawable = R.drawable.ic_heart,
+                maxValue = heartPeak,
+                totalValue = heartAvg,
+                totalUnit = "avg",
+                color = Color.Red,
+                onClick = { onMetricSelected(MetricType.HEART) }
+            )
+        }
         if (showCalories) {
             StatCard(
                 name = "Calories",
@@ -214,32 +230,6 @@ fun OverlayMainContent(
                 androidx.compose.foundation.Image(
                     painter = androidx.compose.ui.res.painterResource(id = R.drawable.ic_calories),
                     contentDescription = "Calories",
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-        }
-
-        if (showHeart && showHeartAvailable) {
-            StatCard(
-                name = "Heart",
-                value = heartRate,
-                unit = "bpm",
-                modifier = statCardFullModifier,
-                iconDrawable = R.drawable.ic_heart,
-                maxValue = heartPeak,
-                totalValue = heartAvg,
-                totalUnit = "avg",
-                color = Color.Red,
-                onClick = onToggleHeart
-            )
-        } else if (showHeartAvailable) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = statCardCollapsedModifier.clickable { onToggleHeart() }
-            ) {
-                androidx.compose.foundation.Image(
-                    painter = androidx.compose.ui.res.painterResource(id = R.drawable.ic_heart),
-                    contentDescription = "Heart",
                     modifier = Modifier.size(24.dp)
                 )
             }
