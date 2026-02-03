@@ -2,7 +2,12 @@ package com.spop.poverlay.ble
 
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import com.spop.poverlay.sensor.SensorSnapshotRepository
 import com.spop.poverlay.sensor.interfaces.SensorInterface
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 import io.mockk.mockk
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -13,6 +18,7 @@ class BleServerTest {
     private lateinit var context: Context
     private lateinit var bluetoothManager: BluetoothManager
     private lateinit var sensorInterface: SensorInterface
+    private lateinit var sensorSnapshotRepository: SensorSnapshotRepository
     private lateinit var timeProvider: FakeTimeProvider
     private lateinit var bleServer: BleServer
 
@@ -20,11 +26,19 @@ class BleServerTest {
     fun setup() {
         context = mockk(relaxed = true)
         bluetoothManager = mockk(relaxed = true)
-        sensorInterface = mockk(relaxed = true)
+        sensorInterface = object : SensorInterface {
+            override val cadence = MutableStateFlow(0f)
+            override val power = MutableStateFlow(0f)
+            override val resistance = MutableStateFlow(0f)
+        }
+        sensorSnapshotRepository = SensorSnapshotRepository(
+            sensorInterface,
+            CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        )
         timeProvider = FakeTimeProvider()
         // Initialize with default time 0
         timeProvider.currentTime = 0
-        bleServer = BleServer(context, bluetoothManager, sensorInterface, timeProvider)
+        bleServer = BleServer(context, bluetoothManager, sensorSnapshotRepository, timeProvider)
     }
 
     @Test

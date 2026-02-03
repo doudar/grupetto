@@ -4,16 +4,27 @@ import android.app.Application
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import com.spop.poverlay.ble.BleServer
+import com.spop.poverlay.sensor.SensorSnapshotRepository
+import com.spop.poverlay.sensor.interfaces.DummySensorInterface
 import com.spop.poverlay.sensor.interfaces.PelotonBikePlusSensorInterface
 import com.spop.poverlay.sensor.interfaces.PelotonBikeSensorInterfaceV1New
 import com.spop.poverlay.sensor.interfaces.SensorInterface
 import com.spop.poverlay.util.IsBikePlus
 import com.spop.poverlay.util.IsRunningOnPeloton
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import timber.log.Timber
 
 class GrupettoApplication : Application() {
     lateinit var bleServer: BleServer
         private set
+    lateinit var sensorInterface: SensorInterface
+        private set
+    lateinit var sensorSnapshotRepository: SensorSnapshotRepository
+        private set
+
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
         super.onCreate()
@@ -22,8 +33,9 @@ class GrupettoApplication : Application() {
         }
 
         val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        val sensorInterface = createSensorInterface()
-        bleServer = BleServer(this, bluetoothManager, sensorInterface)
+        sensorInterface = createSensorInterface()
+        sensorSnapshotRepository = SensorSnapshotRepository(sensorInterface, appScope)
+        bleServer = BleServer(this, bluetoothManager, sensorSnapshotRepository)
     }
 
     private fun createSensorInterface(): SensorInterface {
@@ -35,11 +47,7 @@ class GrupettoApplication : Application() {
             }
         } else {
             // For testing on an emulator
-            object : SensorInterface {
-                override val cadence = kotlinx.coroutines.flow.MutableStateFlow(0f)
-                override val power = kotlinx.coroutines.flow.MutableStateFlow(0f)
-                override val resistance = kotlinx.coroutines.flow.MutableStateFlow(0f)
-            }
+            DummySensorInterface()
         }
     }
 }

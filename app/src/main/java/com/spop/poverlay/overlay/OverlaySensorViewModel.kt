@@ -9,6 +9,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.spop.poverlay.MainActivity
 import com.spop.poverlay.sensor.DeadSensorDetector
+import com.spop.poverlay.sensor.SensorSnapshot
+import com.spop.poverlay.sensor.SensorSnapshotRepository
 import com.spop.poverlay.sensor.interfaces.SensorInterface
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.util.smoothSensorValue
@@ -55,6 +57,7 @@ private const val CaloriesPerJoule = 4184.0 // Joules per kcal (thermochemical c
 class OverlaySensorViewModel(
     application: Application,
     private val sensorInterface: SensorInterface,
+    private val sensorSnapshotRepository: SensorSnapshotRepository,
     private val deadSensorDetector: DeadSensorDetector,
     private val timerViewModel: OverlayTimerViewModel
 ) : AndroidViewModel(application) {
@@ -232,17 +235,20 @@ class OverlaySensorViewModel(
             readings.average().toFloat()
         }
 
-    val powerValue = smoothedPower
-        .sample(GraphUpdatePeriod)
-        .map { "%.0f".format(it) }
-    val rpmValue = sensorInterface.cadence
-        .map { "%.0f".format(it) }
+    private val uiSensorSnapshot = sensorSnapshotRepository.uiSnapshot
+    private val rawSensorSnapshot = sensorSnapshotRepository.snapshot
 
-    val resistanceValue = sensorInterface.resistance
-        .map { "%.0f".format(it) }
+    val powerValue = uiSensorSnapshot
+        .map { "%.0f".format(it.power) }
+
+    val rpmValue = uiSensorSnapshot
+        .map { "%.0f".format(it.cadence) }
+
+    val resistanceValue = uiSensorSnapshot
+        .map { "%.0f".format(it.resistance) }
 
     val speedValue = combine(
-        sensorInterface.speed, useMph
+        uiSensorSnapshot.map { it.speed }, useMph
     ) { speed, isMph ->
         val value = if (isMph) {
             speed
@@ -311,7 +317,7 @@ class OverlaySensorViewModel(
         
         viewModelScope.launch(Dispatchers.IO) {
             combine(
-                sensorInterface.power,
+                rawSensorSnapshot.map { it.power },
                 timerViewModel.elapsedSeconds
             ) { watts, seconds -> 
                 Pair(watts, seconds)
@@ -440,17 +446,15 @@ class OverlaySensorViewModel(
 
     private fun setupMaxTracking() {
         viewModelScope.launch(Dispatchers.IO) {
-            combine(
-                sensorInterface.power,
-                sensorInterface.cadence,
-                sensorInterface.resistance,
-                sensorInterface.speed
-            ) { power, cadence, resistance, speed ->
-                arrayOf(power, cadence, resistance, speed)
-            }.collect(object : FlowCollector<Array<Float>> {
-                override suspend fun emit(value: Array<Float>) {
+            rawSensorSnapshot.collect(object : FlowCollector<SensorSnapshot> {
+                override suspend fun emit(value: SensorSnapshot) {
                     withContext(Dispatchers.Main) {
-                        updateSessionStats(value[0], value[1], value[2], value[3])
+                        updateSessionStats(
+                            value.power,
+                            value.cadence,
+                            value.resistance,
+                            value.speed
+                        )
                     }
                 }
             })

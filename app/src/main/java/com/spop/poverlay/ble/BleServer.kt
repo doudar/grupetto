@@ -11,11 +11,11 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.ParcelUuid
 import androidx.core.content.edit
-import com.spop.poverlay.sensor.interfaces.SensorInterface
+import com.spop.poverlay.sensor.SensorSnapshot
+import com.spop.poverlay.sensor.SensorSnapshotRepository
 import java.util.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import timber.log.Timber
@@ -91,7 +91,7 @@ abstract class BaseBleService(val server: BleServer) : SensorDataListener {
 class BleServer(
         private val context: Context,
         private val bluetoothManager: BluetoothManager,
-        private val sensorInterface: SensorInterface,
+    private val sensorSnapshotRepository: SensorSnapshotRepository,
         private val timeProvider: TimeProvider = SystemTimeProvider()
 ) : BluetoothGattServerCallback(), CoroutineScope {
 
@@ -659,20 +659,14 @@ class BleServer(
             val resistanceBuffer = mutableListOf<Float>()
 
             launch {
-                combine(
-                                sensorInterface.cadence,
-                                sensorInterface.power,
-                                sensorInterface.speed,
-                                sensorInterface.resistance
-                        ) { cadence, power, speed, resistance ->
-                            mutex.withLock {
-                                cadenceBuffer.add(cadence)
-                                powerBuffer.add(power)
-                                speedBuffer.add(speed)
-                                resistanceBuffer.add(resistance)
-                            }
-                        }
-                        .collect()
+                sensorSnapshotRepository.snapshot.collect { snapshot: SensorSnapshot ->
+                    mutex.withLock {
+                        cadenceBuffer.add(snapshot.cadence)
+                        powerBuffer.add(snapshot.power)
+                        speedBuffer.add(snapshot.speed)
+                        resistanceBuffer.add(snapshot.resistance)
+                    }
+                }
             }
 
             launch {
