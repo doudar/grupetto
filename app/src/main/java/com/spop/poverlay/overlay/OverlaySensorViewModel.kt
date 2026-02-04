@@ -70,7 +70,7 @@ class OverlaySensorViewModel(
         private const val PowerAverageWindowSize = 4
 
         // Max number of points before data starts to shift
-        const val GraphMaxDataPoints = 300
+        const val GraphMaxDataPoints = 150
 
         // Reset max values after all metrics are zero for this duration
         val MaxResetTimeout = 5.minutes
@@ -451,13 +451,14 @@ class OverlaySensorViewModel(
                 })
         }
 
-        // Heart rate graph
+        // Heart rate graph (tick-driven so the line advances even if value is steady)
         viewModelScope.launch(Dispatchers.IO) {
             var wasMoving = true
-            HeartRateManager.heartRate
-                .map { bpm -> bpm?.toFloat() ?: 0f }
-                .sample(GraphUpdatePeriod)
-                .combine(isMoving) { value, moving -> value to moving }
+            combine(
+                com.spop.poverlay.util.tickerFlow(GraphUpdatePeriod),
+                HeartRateManager.heartRate,
+                isMoving
+            ) { _, bpm, moving -> (bpm?.toFloat() ?: 0f) to moving }
                 .collect(object : FlowCollector<Pair<Float, Boolean>> {
                     override suspend fun emit(value: Pair<Float, Boolean>) {
                         val (sensorValue, moving) = value
