@@ -41,6 +41,10 @@ object HeartRateManager {
     private const val PrefSavedDevices = "hr_saved_devices"
     private const val PrefSelectedDevice = "hr_selected_device"
     private const val PrefNamePrefix = "hr_name_"
+    private const val PrefZone12 = "hr_zone_12"
+    private const val PrefZone23 = "hr_zone_23"
+    private const val PrefZone34 = "hr_zone_34"
+    private const val PrefZone45 = "hr_zone_45"
 
     private const val ReconnectDelayMs = 3_000L
     private const val AutoReconnectScanMs = 10_000L
@@ -64,6 +68,17 @@ object HeartRateManager {
 
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning
+
+    private val _zone12 = MutableStateFlow<Int?>(null)
+    private val _zone23 = MutableStateFlow<Int?>(null)
+    private val _zone34 = MutableStateFlow<Int?>(null)
+    private val _zone45 = MutableStateFlow<Int?>(null)
+    val zone12: StateFlow<Int?> = _zone12
+    val zone23: StateFlow<Int?> = _zone23
+    val zone34: StateFlow<Int?> = _zone34
+    val zone45: StateFlow<Int?> = _zone45
+    private val _heartRateZones = MutableStateFlow<List<Int>?>(null)
+    val heartRateZones: StateFlow<List<Int>?> = _heartRateZones
 
     @Volatile
     private var bluetoothGatt: BluetoothGatt? = null
@@ -95,6 +110,7 @@ object HeartRateManager {
             }
             appContext = context.applicationContext
             prefs = appContext?.getSharedPreferences(PrefsName, Context.MODE_PRIVATE)
+            loadHeartRateZones()
             stopped.set(false)
             loadSavedDevices()
             selectedAddress = prefs?.getString(PrefSelectedDevice, null)
@@ -128,6 +144,48 @@ object HeartRateManager {
         _heartRate.value = null
         _connectedDevice.value = null
         Timber.i("HeartRateManager stopped")
+    }
+
+    private fun readIntOrNull(key: String): Int? {
+        val sharedPrefs = prefs ?: return null
+        return if (sharedPrefs.contains(key)) sharedPrefs.getInt(key, 0) else null
+    }
+
+    private fun loadHeartRateZones() {
+        _zone12.value = readIntOrNull(PrefZone12)
+        _zone23.value = readIntOrNull(PrefZone23)
+        _zone34.value = readIntOrNull(PrefZone34)
+        _zone45.value = readIntOrNull(PrefZone45)
+        updateHeartRateZones()
+    }
+
+    fun setHeartRateZones(zone12: Int?, zone23: Int?, zone34: Int?, zone45: Int?) {
+        prefs?.edit {
+            if (zone12 != null) putInt(PrefZone12, zone12) else remove(PrefZone12)
+            if (zone23 != null) putInt(PrefZone23, zone23) else remove(PrefZone23)
+            if (zone34 != null) putInt(PrefZone34, zone34) else remove(PrefZone34)
+            if (zone45 != null) putInt(PrefZone45, zone45) else remove(PrefZone45)
+        }
+        _zone12.value = zone12
+        _zone23.value = zone23
+        _zone34.value = zone34
+        _zone45.value = zone45
+        updateHeartRateZones()
+    }
+
+    private fun updateHeartRateZones() {
+        val z12 = _zone12.value
+        val z23 = _zone23.value
+        val z34 = _zone34.value
+        val z45 = _zone45.value
+        val zones = if (z12 != null && z23 != null && z34 != null && z45 != null
+            && z12 > 0 && z12 < z23 && z23 < z34 && z34 < z45
+        ) {
+            listOf(z12, z23, z34, z45)
+        } else {
+            null
+        }
+        _heartRateZones.value = zones
     }
 
     fun startDiscovery() {

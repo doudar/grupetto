@@ -35,6 +35,7 @@ fun OverlayMainContent(
     heartRate: String,
     heartAvg: String,
     heartPeak: String,
+    heartRateZones: List<Int?>?,
     showCalories: Boolean,
     showHeartAvailable: Boolean,
     onToggleCalories: () -> Unit,
@@ -83,12 +84,25 @@ fun OverlayMainContent(
 
     // Define minimum thresholds to prevent chart from getting too compressed at low values
     // Use session max if higher than threshold, otherwise use threshold
+    val heartZoneThresholds = if (selectedMetric == MetricType.HEART) {
+        heartRateZones?.map { it?.toFloat() }
+    } else {
+        null
+    }
+    val heartZoneDefined = heartZoneThresholds?.filterNotNull()?.sorted()
+    val heartZoneMin = heartZoneDefined?.firstOrNull()?.let { maxOf(0f, it - 10f) }
+    val heartZoneMax = heartZoneDefined?.lastOrNull()?.let { it + 10f }
+
     val chartMaxValue = when (selectedMetric) {
         MetricType.POWER -> maxOf(250f, maxPowerValue)
         MetricType.CADENCE -> maxOf(160f, maxCadenceValue)
         MetricType.RESISTANCE -> maxOf(100f, maxResistanceValue)
         MetricType.SPEED -> maxOf(40f, maxSpeedValue)
-        MetricType.HEART -> maxOf(200f, maxHeartValue)
+        MetricType.HEART -> heartZoneMax ?: maxOf(200f, maxHeartValue)
+    }
+    val chartMinValue = when (selectedMetric) {
+        MetricType.HEART -> heartZoneMin ?: 0f
+        else -> 0f
     }
 
     Row(
@@ -157,6 +171,7 @@ fun OverlayMainContent(
             LineChart(
                 data = currentGraph,
                 maxValue = chartMaxValue,
+                minValue = chartMinValue,
                 pauseChart = pauseChart,
                 modifier = Modifier
                     .requiredWidth(chartWidth)
@@ -164,6 +179,7 @@ fun OverlayMainContent(
                     .padding(horizontal = chartPadding),
                 fillColor = chartColor.copy(alpha = 0.6f),
                 lineColor = chartColor,
+                zoneThresholds = heartZoneThresholds,
             )
         }
 

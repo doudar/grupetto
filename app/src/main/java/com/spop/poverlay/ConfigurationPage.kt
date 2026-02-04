@@ -293,6 +293,29 @@ private fun HeartRateManagerDialog(
                 onForgetDevice: (String) -> Unit,
                 onDismiss: () -> Unit
 ) {
+        val zone12 = remember { mutableStateOf("") }
+        val zone23 = remember { mutableStateOf("") }
+        val zone34 = remember { mutableStateOf("") }
+        val zone45 = remember { mutableStateOf("") }
+        val savedZone12 by HeartRateManager.zone12.collectAsStateWithLifecycle(initialValue = null)
+        val savedZone23 by HeartRateManager.zone23.collectAsStateWithLifecycle(initialValue = null)
+        val savedZone34 by HeartRateManager.zone34.collectAsStateWithLifecycle(initialValue = null)
+        val savedZone45 by HeartRateManager.zone45.collectAsStateWithLifecycle(initialValue = null)
+        androidx.compose.runtime.LaunchedEffect(savedZone12, savedZone23, savedZone34, savedZone45) {
+                if (zone12.value.isBlank() && savedZone12 != null) zone12.value = savedZone12.toString()
+                if (zone23.value.isBlank() && savedZone23 != null) zone23.value = savedZone23.toString()
+                if (zone34.value.isBlank() && savedZone34 != null) zone34.value = savedZone34.toString()
+                if (zone45.value.isBlank() && savedZone45 != null) zone45.value = savedZone45.toString()
+        }
+        fun parseZone(value: String): Int? = value.toIntOrNull()
+        fun updateZones() {
+                HeartRateManager.setHeartRateZones(
+                        parseZone(zone12.value),
+                        parseZone(zone23.value),
+                        parseZone(zone34.value),
+                        parseZone(zone45.value)
+                )
+        }
         androidx.compose.runtime.LaunchedEffect(Unit) {
                 onStartDiscovery()
                 HeartRateManager.setManaging(true)
@@ -350,6 +373,67 @@ private fun HeartRateManagerDialog(
                                                                         device = device,
                                                                         actionLabel = "Forget",
                                                                         onAction = { onForgetDevice(device.address) }
+                                                        )
+                                                }
+                                        }
+
+                                        Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+                                        SectionHeader("Heart Rate Zone Transitions")
+                                        Row(
+                                                modifier = Modifier.wrapContentWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                        ) {
+                                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                        Text("Zone 1–2", fontSize = 12.sp, color = Color.Gray)
+                                                        TextField(
+                                                                value = zone12.value,
+                                                                onValueChange = {
+                                                                        zone12.value = it.filter { ch -> ch.isDigit() }
+                                                                        updateZones()
+                                                                },
+                                                                modifier = Modifier.width(72.dp),
+                                                                placeholder = { Text("bpm") },
+                                                                singleLine = true
+                                                        )
+                                                }
+                                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                        Text("Zone 2–3", fontSize = 12.sp, color = Color.Gray)
+                                                        TextField(
+                                                                value = zone23.value,
+                                                                onValueChange = {
+                                                                        zone23.value = it.filter { ch -> ch.isDigit() }
+                                                                        updateZones()
+                                                                },
+                                                                modifier = Modifier.width(72.dp),
+                                                                placeholder = { Text("bpm") },
+                                                                singleLine = true
+                                                        )
+                                                }
+                                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                        Text("Zone 3–4", fontSize = 12.sp, color = Color.Gray)
+                                                        TextField(
+                                                                value = zone34.value,
+                                                                onValueChange = {
+                                                                        zone34.value = it.filter { ch -> ch.isDigit() }
+                                                                        updateZones()
+                                                                },
+                                                                modifier = Modifier.width(72.dp),
+                                                                placeholder = { Text("bpm") },
+                                                                singleLine = true
+                                                        )
+                                                }
+                                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                        Text("Zone 4–5", fontSize = 12.sp, color = Color.Gray)
+                                                        TextField(
+                                                                value = zone45.value,
+                                                                onValueChange = {
+                                                                        zone45.value = it.filter { ch -> ch.isDigit() }
+                                                                        updateZones()
+                                                                },
+                                                                modifier = Modifier.width(72.dp),
+                                                                placeholder = { Text("bpm") },
+                                                                singleLine = true
                                                         )
                                                 }
                                         }

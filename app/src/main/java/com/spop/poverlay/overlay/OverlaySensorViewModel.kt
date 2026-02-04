@@ -293,6 +293,16 @@ class OverlaySensorViewModel(
 
     val heartPeakRaw = mutableHeartPeak.asStateFlow()
 
+    val heartRateZones = HeartRateManager.heartRateZones
+    val heartRateZoneThresholds = combine(
+        HeartRateManager.zone12,
+        HeartRateManager.zone23,
+        HeartRateManager.zone34,
+        HeartRateManager.zone45
+    ) { z12, z23, z34, z45 ->
+        listOf(z12, z23, z34, z45)
+    }
+
     fun onClickedSpeedUnit() {
         viewModelScope.launch {
             useMph.emit(!useMph.value)

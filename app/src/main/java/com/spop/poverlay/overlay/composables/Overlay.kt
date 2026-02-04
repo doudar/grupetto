@@ -69,6 +69,7 @@ fun Overlay(
     val heartAvg by sensorViewModel.heartAvgValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
     val heartPeak by sensorViewModel.heartPeakValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
     val heartPeakRaw by sensorViewModel.heartPeakRaw.collectAsStateWithLifecycle(initialValue = 0)
+    val heartRateZones by sensorViewModel.heartRateZoneThresholds.collectAsStateWithLifecycle(initialValue = emptyList())
     val showCaloriesOnMain by sensorViewModel.showCaloriesOnMain.collectAsStateWithLifecycle(initialValue = true)
     val heartAvailable by sensorViewModel.heartAvailable.collectAsStateWithLifecycle(initialValue = false)
     val timerLabel by timerViewModel.timerLabel.collectAsState(initial = "")
@@ -216,6 +217,7 @@ fun Overlay(
                     heartRate = heartRate,
                     heartAvg = heartAvg,
                     heartPeak = heartPeak,
+                    heartRateZones = heartRateZones.ifEmpty { null },
                     showCalories = showCaloriesOnMain,
                     showHeartAvailable = heartAvailable,
                     onToggleCalories = { sensorViewModel.toggleShowCaloriesOnMain() },
