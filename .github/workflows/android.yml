@@ -37,6 +37,7 @@ jobs:
         echo "$SIGNING_KEY" | base64 -d > app/release.keystore
         cat <<EOF > keystore.properties
         storeFile=release.keystore
+        storeType=pkcs12
         storePassword=$KEY_STORE_PASSWORD
         keyAlias=$KEY_ALIAS
         keyPassword=$KEY_PASSWORD
