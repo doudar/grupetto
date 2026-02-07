@@ -11,6 +11,7 @@ import kotlinx.coroutines.launch
 import timber.log.Timber
 import kotlin.coroutines.CoroutineContext
 import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Monitors cadence and triggers a restart if no cadence is detected for a specified duration.
@@ -19,7 +20,7 @@ import kotlin.time.Duration.Companion.hours
 class CadenceWatchdog(
     private val sensorInterface: SensorInterface,
     override val coroutineContext: CoroutineContext,
-    private val inactivityThreshold: kotlin.time.Duration = 1.hours
+    private val inactivityThreshold: kotlin.time.Duration = 30.minutes
 ) : CoroutineScope {
 
     private val mutableRestartTriggered = MutableSharedFlow<Unit>(replay = 0)
@@ -34,7 +35,7 @@ class CadenceWatchdog(
     private var cadenceCollectionJob: Job? = null
     
     companion object {
-        private const val CADENCE_THRESHOLD = 1.0f // RPM threshold to consider as "active"
+        private const val CADENCE_THRESHOLD = 20.0f // RPM threshold to consider as "active"
     }
 
     fun start() {

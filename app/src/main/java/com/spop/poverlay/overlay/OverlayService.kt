@@ -46,6 +46,7 @@ import com.spop.poverlay.util.disableAnimations
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
+import kotlin.time.Duration.Companion.minutes
 import timber.log.Timber
 import java.util.*
 import kotlin.math.roundToInt
@@ -149,7 +150,8 @@ class OverlayService : LifecycleEnabledService() {
         val dialogViewModel = OverlayDialogViewModel(screenSize, sensorViewModel.isMinimized)
 
         // Initialize and start watchdog (always enabled)
-        val watchdog = CadenceWatchdog(sensorInterface, this.coroutineContext)
+        val watchdogThreshold = 30.minutes
+        val watchdog = CadenceWatchdog(sensorInterface, this.coroutineContext, watchdogThreshold)
         watchdog.start()
         
         lifecycle.addObserver(object : DefaultLifecycleObserver {
@@ -161,7 +163,9 @@ class OverlayService : LifecycleEnabledService() {
         // Handle watchdog restart trigger
         lifecycleScope.launchWhenStarted {
             watchdog.restartTriggered.collect {
-                Timber.w("Watchdog triggered restart - no cadence detected for 1 hour")
+                Timber.w(
+                    "Watchdog triggered restart - no cadence detected for ${watchdogThreshold.inWholeMinutes} minutes"
+                )
                 restartToOverlay()
             }
         }
