@@ -104,6 +104,7 @@ class BleServer(
     private val registeredServices = mutableListOf<BaseBleService>()
     private val servicesToRegister = LinkedList<BaseBleService>()
     private var currentlyRegisteringService: BaseBleService? = null
+    private var serviceAddTimeoutJob: Job? = null
     
     // Advertising state tracking
     private var isAdvertising = false
@@ -121,10 +122,11 @@ class BleServer(
     companion object {
         private const val WATCHDOG_INITIAL_DELAY_MS = 60_000L // 1 minute
         private const val WATCHDOG_CHECK_INTERVAL_MS = 120_000L // 2 minutes
+        private const val SERVICE_ADD_TIMEOUT_MS = 2_000L
         
         // Standard BLE sensors typically update at 1Hz. 
         // We use a slight offset to avoid aliasing with sensor sampling rates.
-        private const val SENSOR_UPDATE_INTERVAL_MS = 709L 
+        private const val SENSOR_UPDATE_INTERVAL_MS = 709L
     }
     
     // Bluetooth adapter state receiver
@@ -136,11 +138,24 @@ class BleServer(
             }
         }
     }
+    
+    // Bond state receiver for diagnostics
+    private val bondStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == BluetoothDevice.ACTION_BOND_STATE_CHANGED) {
+                val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.BOND_NONE)
+                val prev = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.BOND_NONE)
+                Timber.d("Bond state changed: ${device?.address} ${device?.name} $prev -> $state")
+            }
+        }
+    }
 
     //ADD OR EDIT SERVICES HERE
     private fun setupServices() {
         servicesToRegister.addAll(
                 listOf(
+                        GenericAttributeService(this),
                         FitnessMachineService(this),
                         CyclingPowerService(this),
                         CyclingSpeedAndCadenceService(this),
@@ -183,6 +198,10 @@ class BleServer(
             context.registerReceiver(bluetoothStateReceiver, filter)
             Timber.d("Registered Bluetooth state change receiver")
             
+            // Register bond state receiver
+            val bondFilter = IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+            context.registerReceiver(bondStateReceiver, bondFilter)
+            
             setupServices()
             startWatchdog()
         } catch (e: SecurityException) {
@@ -193,12 +212,28 @@ class BleServer(
     private fun registerNextService() {
         if (servicesToRegister.isEmpty()) {
             currentlyRegisteringService = null
+            serviceAddTimeoutJob?.cancel()
+            serviceAddTimeoutJob = null
             startAdvertising()
             startSensorDataUpdates()
         } else {
             currentlyRegisteringService = servicesToRegister.pop()
             try {
-                gattServer?.addService(currentlyRegisteringService!!.service)
+                val added = gattServer?.addService(currentlyRegisteringService!!.service) == true
+                if (!added) {
+                    currentlyRegisteringService = null
+                    registerNextService()
+                    return
+                }
+                serviceAddTimeoutJob?.cancel()
+                serviceAddTimeoutJob = launch {
+                    delay(SERVICE_ADD_TIMEOUT_MS)
+                    val pending = currentlyRegisteringService
+                    if (pending != null) {
+                        currentlyRegisteringService = null
+                        registerNextService()
+                    }
+                }
             } catch (e: SecurityException) {
                 Timber.e(e, "Failed to add service ${currentlyRegisteringService!!.service.uuid}")
                 currentlyRegisteringService = null
@@ -221,6 +256,11 @@ class BleServer(
             } catch (e: IllegalArgumentException) {
                 // Receiver was not registered, this is normal if stop() called without start()
                 Timber.d("Bluetooth state receiver was not registered (normal if not started)")
+            }
+            try {
+                context.unregisterReceiver(bondStateReceiver)
+            } catch (e: IllegalArgumentException) {
+                Timber.d("Bond state receiver was not registered")
             }
             
             gattServer?.clearServices()
@@ -425,7 +465,13 @@ class BleServer(
     }
 
     private fun startAdvertising() {
+        if (isAdvertising) {
+            return
+        }
         val serviceUuids = registeredServices.map { ParcelUuid(it.service.uuid) }
+        if (serviceUuids.isEmpty()) {
+            return
+        }
         try {
             val settings =
                     AdvertiseSettings.Builder()
@@ -496,10 +542,15 @@ class BleServer(
                         else -> "Unknown error"
                     }
                     Timber.e("BLE advertising failed: $errorCode ($errorMessage)")
+                    if (errorCode == AdvertiseCallback.ADVERTISE_FAILED_ALREADY_STARTED) {
+                        isAdvertising = true
+                    }
                 }
             }
 
     override fun onServiceAdded(status: Int, service: BluetoothGattService) {
+        serviceAddTimeoutJob?.cancel()
+        serviceAddTimeoutJob = null
         if (currentlyRegisteringService?.service?.uuid != service.uuid) {
             Timber.e(
                     "Mismatched service added callback! Expected ${currentlyRegisteringService?.service?.uuid}, got ${service.uuid}"
@@ -523,6 +574,10 @@ class BleServer(
             device?.let { 
                 registeredServices.forEach { it.onConnected(device) }
                 Timber.d("Device connected: ${device.address}")
+                if (device.bondState == BluetoothDevice.BOND_NONE) {
+                    val bondStarted = device.createBond()
+                    Timber.d("Bond requested: ${device.address} started=$bondStarted")
+                }
                 
                 // Restart advertising to allow additional clients to connect (support multiple connections)
                 if (!isAdvertising && isServerStarted) {
@@ -883,4 +938,5 @@ class BleServer(
         }
         return existing
     }
+    
 }
