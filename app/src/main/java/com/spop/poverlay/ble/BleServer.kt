@@ -126,7 +126,7 @@ class BleServer(
         
         // Standard BLE sensors typically update at 1Hz. 
         // We use a slight offset to avoid aliasing with sensor sampling rates.
-        private const val SENSOR_UPDATE_INTERVAL_MS = 250L
+        private const val SENSOR_UPDATE_INTERVAL_MS = 709L
     }
     
     // Bluetooth adapter state receiver
