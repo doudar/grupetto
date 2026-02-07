@@ -58,7 +58,7 @@ class OverlaySensorViewModel(
 
     companion object {
         // The sensor does not necessarily return new value this quickly
-        val GraphUpdatePeriod = 400.milliseconds
+        val UiUpdatePeriod = 500.milliseconds
 
         // Max number of points before data starts to shift
         const val GraphMaxDataPoints = 300
@@ -222,11 +222,14 @@ class OverlaySensorViewModel(
     }
 
     val powerValue = sensorInterface.power
+        .sample(UiUpdatePeriod)
         .map { "%.0f".format(it) }
     val rpmValue = sensorInterface.cadence
+        .sample(UiUpdatePeriod)
         .map { "%.0f".format(it) }
 
     val resistanceValue = sensorInterface.resistance
+        .sample(UiUpdatePeriod)
         .map { "%.0f".format(it) }
 
     val speedValue = combine(
@@ -238,7 +241,7 @@ class OverlaySensorViewModel(
             speed * MphToKph
         }
         "%.1f".format(value)
-    }
+    }.sample(UiUpdatePeriod)
     val speedLabel = useMph.map {
         if (it) {
             "mph"
@@ -257,10 +260,12 @@ class OverlaySensorViewModel(
     // Calories (kcal) = Total Energy (Joules) / 4184 / Efficiency
     private val accumulatedEnergy = MutableStateFlow(0.0)
     
-    val caloriesValue = accumulatedEnergy.map { totalJoules ->
-        val calories = totalJoules / CaloriesPerJoule / CyclingEfficiency
-        "%.0f".format(calories)
-    }
+    val caloriesValue = accumulatedEnergy
+        .sample(UiUpdatePeriod)
+        .map { totalJoules ->
+            val calories = totalJoules / CaloriesPerJoule / CyclingEfficiency
+            "%.0f".format(calories)
+        }
     
     private fun setupCaloriesAccumulation() {
         var lastUpdateTime = System.currentTimeMillis()
@@ -308,7 +313,7 @@ class OverlaySensorViewModel(
         // Power graph
         viewModelScope.launch(Dispatchers.IO) {
             sensorInterface.power.smoothSensorValue()
-                .sample(GraphUpdatePeriod)
+                .sample(UiUpdatePeriod)
                 .collect(object : FlowCollector<Float> {
                     override suspend fun emit(value: Float) {
                         withContext(Dispatchers.Main) {
@@ -324,7 +329,7 @@ class OverlaySensorViewModel(
         // Cadence graph
         viewModelScope.launch(Dispatchers.IO) {
             sensorInterface.cadence.smoothSensorValue()
-                .sample(GraphUpdatePeriod)
+                .sample(UiUpdatePeriod)
                 .collect(object : FlowCollector<Float> {
                     override suspend fun emit(value: Float) {
                         withContext(Dispatchers.Main) {
@@ -340,7 +345,7 @@ class OverlaySensorViewModel(
         // Resistance graph
         viewModelScope.launch(Dispatchers.IO) {
             sensorInterface.resistance.smoothSensorValue()
-                .sample(GraphUpdatePeriod)
+                .sample(UiUpdatePeriod)
                 .collect(object : FlowCollector<Float> {
                     override suspend fun emit(value: Float) {
                         withContext(Dispatchers.Main) {
@@ -356,7 +361,7 @@ class OverlaySensorViewModel(
         // Speed graph
         viewModelScope.launch(Dispatchers.IO) {
             sensorInterface.speed.smoothSensorValue()
-                .sample(GraphUpdatePeriod)
+                .sample(UiUpdatePeriod)
                 .collect(object : FlowCollector<Float> {
                     override suspend fun emit(value: Float) {
                         withContext(Dispatchers.Main) {
