@@ -27,10 +27,10 @@ suspend fun getG700Binder(context: Context) = suspendCoroutine<IBinder> { ctx ->
         }, object : ServiceConnection {
             override fun onServiceConnected(p0: ComponentName?, iBinder: IBinder?) {
                 Timber.i("G700 sensor service connected $p0")
-                if(iBinder == null){
+                if (iBinder == null) {
                     Timber.i("G700 sensor service resolution failed $p0")
                     ctx.resumeWithException(Exception("G700 sensor service resolution failed"))
-                }else{
+                } else {
                     ctx.resume(iBinder)
                 }
             }

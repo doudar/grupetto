@@ -21,7 +21,7 @@ import kotlin.coroutines.CoroutineContext
  * Based on research by stellarhopper in issue #38.
  */
 class G700SensorInterface(val context: Context) : SensorInterface, CoroutineScope {
-    companion object{
+    companion object {
         /**
          * Resistance is filtered with a moving window since it occasionally spikes
          * The last few resistance readings will grouped, and the lowest reading will be shown

@@ -61,8 +61,10 @@ abstract class G700Sensor(private val binder: IBinder) {
                     val parcel = Parcel.obtain()
                     val parcel2 = Parcel.obtain()
                     
-                    // Try the same transact code as Bike+ (14)
-                    // This may need to be adjusted based on actual G700 protocol
+                    // TODO: Verify transact code for G700 MetricsService
+                    // Currently using the same transact code (14) as Bike+ affernetservice
+                    // This may need to be adjusted based on actual G700 protocol testing
+                    // See issue #38 for more details
                     binder.transact(14, parcel, parcel2, 0)
                     parcel2.readException()
                     // Skip the first integer
