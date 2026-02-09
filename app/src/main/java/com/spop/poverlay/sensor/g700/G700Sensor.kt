@@ -72,7 +72,7 @@ abstract class G700Sensor(private val binder: IBinder) {
                     val bikeData = BikeData.CREATOR.createFromParcel(parcel2)
                     
                     val rawValue = when (sensorType) {
-                        "RPM" -> bikeData.rPM.toFloat()
+                        "RPM" -> bikeData.rpm.toFloat()
                         "Power" -> bikeData.power.toFloat()
                         "Resistance" -> bikeData.targetResistance.toFloat()
                         else -> 0f
