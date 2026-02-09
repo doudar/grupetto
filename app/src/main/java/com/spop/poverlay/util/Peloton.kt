@@ -9,12 +9,17 @@ private const val PelotonBrand = "Peloton"
 val IsRunningOnPeloton = Build.BRAND == PelotonBrand
 
 /**
+ * Check if the device is a G700 CrossTrainer bike.
+ * The G700 uses a different sensor interface than the regular Bike+.
+ */
+val IsG700CrossTrainer = Build.MODEL.contains("G700")
+
+/**
  * All Peloton bikes start with model "PLTN-T". Treadmills start with "PLTN-TR", so this might also
  * apply to them, but it will be interesting if anything works on them here.
+ * Note: G700 is handled separately.
  */
-val IsBikePlus =
-    Build.MODEL.contains("PLTN-T") ||
-        Build.MODEL.contains("G700")
+val IsBikePlus = Build.MODEL.contains("PLTN-T")
 
 
 fun calculateSpeedFromPelotonV1Power(power: Float) =

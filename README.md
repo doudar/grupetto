@@ -12,6 +12,8 @@
 You can use it to watch media from sources like Netflix and Youtube while viewing your current 
 *power output, cadence, resistance, and speed.*
 
+**Supported bikes:** Peloton Bike (Gen 1), Bike+ (Gen 2), and G700 CrossTrainer
+
 ***Note: This project is wholly unaffiliated with Peloton. Please do not approach them for support
 with this app. It relies on undocumented interfaces that are subject to change with any update.***
 
