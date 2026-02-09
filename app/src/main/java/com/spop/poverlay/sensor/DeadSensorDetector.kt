@@ -13,9 +13,11 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.onTimeout
 import kotlin.coroutines.CoroutineContext
-import kotlin.time.Duration
 import kotlin.time.ExperimentalTime
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * At times the Peloton sensor service stops responding until the Bike is power cycled
@@ -41,11 +43,11 @@ class DeadSensorDetector(
 
     companion object {
         // Max time between sensor updates before the user is shown the dead sensor message
-        val DeadSensorTimeout = Duration.seconds(10)
+        val DeadSensorTimeout = 10.seconds
 
         // Once the dead sensor warning has been shown,
         // wait at least this long before showing it again
-        val DeadSensorWarningInterval = Duration.minutes(5)
+        val DeadSensorWarningInterval = 5.minutes
     }
 
     private val resetTimeoutChannel = Channel<Unit>()
@@ -88,7 +90,7 @@ class DeadSensorDetector(
             selectForever<Unit> {
                 resetTimeoutChannel.onReceive { }  // Do nothing if the timeout was reset
 
-                onTimeout(DeadSensorTimeout.inWholeMilliseconds) {
+                onTimeout(DeadSensorTimeout) {
                     // Check 'DeadSensorWarningInterval' has passed
                     // since the last error emission
                     val canShowMessage = lastDeadSensorMessageMillis?.let {

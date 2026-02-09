@@ -9,8 +9,8 @@ import com.spop.poverlay.util.tickerFlow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlin.time.Duration
 import kotlin.time.ExperimentalTime
+import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalTime::class)
 open class OverlayTimerViewModel(
@@ -53,7 +53,7 @@ open class OverlayTimerViewModel(
     init {
         // Tick every second when timer is running
         viewModelScope.launch {
-            tickerFlow(period = Duration.seconds(1)).collect {
+            tickerFlow(period = 1.seconds).collect {
                 if (mutableTimerRunning.value) {
                     accumulatedSeconds++
                     mutableAccumulatedSeconds.value = accumulatedSeconds

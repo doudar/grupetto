@@ -5,7 +5,7 @@ import android.view.View
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
-import androidx.lifecycle.ViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
@@ -34,7 +34,7 @@ abstract class LifecycleEnabledService : Service(), LifecycleOwner, SavedStateRe
         get() = savedStateRegistryController.savedStateRegistry
 
     protected fun View.lifecycleViaService() {
-        ViewTreeLifecycleOwner.set(this, this@LifecycleEnabledService)
+        this.setViewTreeLifecycleOwner(this@LifecycleEnabledService)
         setViewTreeSavedStateRegistryOwner(this@LifecycleEnabledService)
     }
 
@@ -43,7 +43,8 @@ abstract class LifecycleEnabledService : Service(), LifecycleOwner, SavedStateRe
     }
 
     // Provide LifecycleOwner implementation explicitly to avoid override issues
-    override fun getLifecycle(): Lifecycle = lifecycleRegistry
+    override val lifecycle: Lifecycle
+        get() = lifecycleRegistry
 
 
     private fun handleLifecycleEvent(event: Lifecycle.Event) =

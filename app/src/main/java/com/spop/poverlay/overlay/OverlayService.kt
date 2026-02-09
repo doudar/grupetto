@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -74,11 +75,12 @@ class OverlayService : LifecycleEnabledService() {
         val EmulatorSensorInterface by lazy { DummySensorInterface() }
     }
 
-
+    private var wakeLock: PowerManager.WakeLock? = null
     
 
     override fun onCreate() {
         super.onCreate()
+        acquireWakeLock()
         val notification = prepareNotification(NotificationManagerCompat.from(this))
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
@@ -100,6 +102,11 @@ class OverlayService : LifecycleEnabledService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Timber.i("overlay service received intent")
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        releaseWakeLock()
+        super.onDestroy()
     }
 
     private fun buildDialog() {
@@ -353,6 +360,24 @@ class OverlayService : LifecycleEnabledService() {
             .setContentIntent(pendingIntent)
         notificationBuilder.setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
         return notificationBuilder.build()
+    }
+
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val pm = ContextCompat.getSystemService(this, PowerManager::class.java) ?: return
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Grupetto:OverlayWakelock").apply {
+            setReferenceCounted(false)
+            acquire()
+        }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let {
+            if (it.isHeld) {
+                it.release()
+            }
+        }
+        wakeLock = null
     }
 }
 
