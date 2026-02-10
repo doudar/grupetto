@@ -241,8 +241,8 @@ class OverlayService : LifecycleEnabledService() {
             clipChildren = false
             clipToOutline = false
         }
-        val overlay = checkNotNull(overlayView) { "Overlay view was not created" }
-        val touchTarget = checkNotNull(touchTargetView) { "Touch target view was not created" }
+        val overlay = overlayView!!
+        val touchTarget = touchTargetView!!
         wm.addView(overlay, overlayParams)
 
         wm.addView(touchTarget, touchTargetParams)
@@ -387,6 +387,10 @@ class OverlayService : LifecycleEnabledService() {
     }
 
     private fun removeOverlayViews() {
+        if (overlayView == null && touchTargetView == null) {
+            windowManager = null
+            return
+        }
         val wm = windowManager
         if (wm != null) {
             overlayView?.let {
