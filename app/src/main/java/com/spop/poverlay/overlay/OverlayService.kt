@@ -241,16 +241,8 @@ class OverlayService : LifecycleEnabledService() {
             clipChildren = false
             clipToOutline = false
         }
-        val overlay = overlayView ?: run {
-            Timber.e("Overlay view was not created; stopping service to avoid inconsistent state")
-            stopSelf()
-            return
-        }
-        val touchTarget = touchTargetView ?: run {
-            Timber.e("Touch target view was not created; stopping service to avoid inconsistent state")
-            stopSelf()
-            return
-        }
+        val overlay = checkNotNull(overlayView) { "Overlay view was not created" }
+        val touchTarget = checkNotNull(touchTargetView) { "Touch target view was not created" }
         wm.addView(overlay, overlayParams)
 
         wm.addView(touchTarget, touchTargetParams)
@@ -405,6 +397,8 @@ class OverlayService : LifecycleEnabledService() {
                 runCatching { wm.removeViewImmediate(it) }
                     .onFailure { ex -> Timber.w(ex, "Failed to remove touch target view") }
             }
+        } else if (overlayView != null || touchTargetView != null) {
+            Timber.w("WindowManager unavailable during cleanup; overlay views may still be attached")
         }
         overlayView = null
         touchTargetView = null
