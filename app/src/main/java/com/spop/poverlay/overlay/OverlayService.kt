@@ -405,7 +405,7 @@ class OverlayService : LifecycleEnabledService() {
                     .onFailure { ex -> Timber.w(ex, "Failed to remove touch target view") }
             }
         } else if (wm == null && hasViews) {
-            Timber.e("WindowManager unavailable during cleanup; overlay views may still be attached, please restart the app to clear the overlay")
+            Timber.e("WindowManager unavailable during cleanup; overlay views may remain attached and leak")
         }
         overlayView = null
         touchTargetView = null
