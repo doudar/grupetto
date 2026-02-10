@@ -241,13 +241,8 @@ class OverlayService : LifecycleEnabledService() {
             clipChildren = false
             clipToOutline = false
         }
-        val overlay = overlayView
-        val touchTarget = touchTargetView
-        if (overlay == null || touchTarget == null) {
-            Timber.e("Overlay views were not created; stopping service to avoid inconsistent overlay state")
-            stopSelf()
-            return
-        }
+        val overlay = overlayView!!
+        val touchTarget = touchTargetView!!
         wm.addView(overlay, overlayParams)
 
         wm.addView(touchTarget, touchTargetParams)
@@ -284,12 +279,8 @@ class OverlayService : LifecycleEnabledService() {
                 touchTargetParams.gravity = gravity
                 touchTargetParams.width = mWidth
                 touchTargetParams.height = touchTargetHeight.roundToInt()
-                val currentOverlay = overlayView
-                val currentTouchTarget = touchTargetView
-                if (currentOverlay == null || currentTouchTarget == null) {
-                    Timber.d("Overlay views cleared before update; skipping layout application")
-                    return@combine
-                }
+                val currentOverlay = overlayView ?: return@combine
+                val currentTouchTarget = touchTargetView ?: return@combine
                 currentTouchTarget.visibility = if(touchTargetHeight > 0f){
                     View.VISIBLE
                 }else{
