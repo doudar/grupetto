@@ -247,8 +247,8 @@ class OverlayService : LifecycleEnabledService() {
         wm.addView(overlay, overlayParams)
 
         wm.addView(touchTarget, touchTargetParams)
-        touchTarget.clipChildren = false
-        touchTarget.clipToPadding = false
+        //touchTarget.clipChildren = false
+        //touchTarget.clipToPadding = false
         //Subscribe to Dialog view model and update views
         lifecycleScope.launchWhenResumed {
             combine(
