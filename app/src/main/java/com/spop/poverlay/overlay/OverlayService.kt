@@ -241,8 +241,16 @@ class OverlayService : LifecycleEnabledService() {
             clipChildren = false
             clipToOutline = false
         }
-        val overlay = overlayView ?: return
-        val touchTarget = touchTargetView ?: return
+        val overlay = overlayView ?: run {
+            Timber.e("Overlay view was not created; stopping service to avoid inconsistent state")
+            stopSelf()
+            return
+        }
+        val touchTarget = touchTargetView ?: run {
+            Timber.e("Touch target view was not created; stopping service to avoid inconsistent state")
+            stopSelf()
+            return
+        }
         wm.addView(overlay, overlayParams)
 
         wm.addView(touchTarget, touchTargetParams)
