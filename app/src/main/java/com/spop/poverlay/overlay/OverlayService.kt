@@ -241,8 +241,14 @@ class OverlayService : LifecycleEnabledService() {
             clipChildren = false
             clipToOutline = false
         }
-        val overlay = requireNotNull(overlayView) { "Overlay view not created" }
-        val touchTarget = requireNotNull(touchTargetView) { "Touch target view not created" }
+        val overlay = overlayView ?: run {
+            Timber.e("Overlay view missing after creation; aborting overlay setup")
+            return
+        }
+        val touchTarget = touchTargetView ?: run {
+            Timber.e("Touch target view missing after creation; aborting overlay setup")
+            return
+        }
         wm.addView(overlay, overlayParams)
 
         wm.addView(touchTarget, touchTargetParams)
@@ -285,7 +291,7 @@ class OverlayService : LifecycleEnabledService() {
                     Timber.d("Overlay views cleared before update; skipping layout application")
                     return@combine
                 }
-                currentTouchTarget.visibility = if(touchTargetHeight > 0f){
+                currentTouchTarget.visibility = if (touchTargetHeight > 0f){
                     View.VISIBLE
                 }else{
                     View.GONE
