@@ -241,8 +241,13 @@ class OverlayService : LifecycleEnabledService() {
             clipChildren = false
             clipToOutline = false
         }
-        val overlay = requireNotNull(overlayView) { "Overlay view was not created" }
-        val touchTarget = requireNotNull(touchTargetView) { "Touch target view was not created" }
+        val overlay = overlayView
+        val touchTarget = touchTargetView
+        if (overlay == null || touchTarget == null) {
+            Timber.e("Overlay views were not created; stopping service to avoid inconsistent overlay state")
+            stopSelf()
+            return
+        }
         wm.addView(overlay, overlayParams)
 
         wm.addView(touchTarget, touchTargetParams)
@@ -279,14 +284,20 @@ class OverlayService : LifecycleEnabledService() {
                 touchTargetParams.gravity = gravity
                 touchTargetParams.width = mWidth
                 touchTargetParams.height = touchTargetHeight.roundToInt()
-                touchTarget.visibility = if(touchTargetHeight > 0f){
+                val currentOverlay = overlayView
+                val currentTouchTarget = touchTargetView
+                if (currentOverlay == null || currentTouchTarget == null) {
+                    Timber.d("Overlay views cleared before update; skipping layout application")
+                    return@combine
+                }
+                currentTouchTarget.visibility = if(touchTargetHeight > 0f){
                     View.VISIBLE
                 }else{
                     View.GONE
                 }
-                disableClipOnParents(overlay)
-                wm.updateViewLayout(overlay, overlayParams)
-                wm.updateViewLayout(touchTarget, touchTargetParams)
+                disableClipOnParents(currentOverlay)
+                wm.updateViewLayout(currentOverlay, overlayParams)
+                wm.updateViewLayout(currentTouchTarget, touchTargetParams)
             }.collect(object : FlowCollector<Unit> {
                 override suspend fun emit(value: Unit) {}
             })
@@ -400,8 +411,6 @@ class OverlayService : LifecycleEnabledService() {
             }
         } else if (wm == null && hasViews) {
             Timber.w("WindowManager unavailable during cleanup; overlay views may still be attached")
-        } else if (wm != null && !hasViews) {
-            Timber.d("Cleanup called with window manager present but no overlay views to remove")
         }
         overlayView = null
         touchTargetView = null
