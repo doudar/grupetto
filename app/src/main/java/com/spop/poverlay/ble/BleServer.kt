@@ -170,6 +170,10 @@ class BleServer(
     }
 
     fun start() {
+        if (isServerStarted) {
+            Timber.d("BLE server already started, ignoring duplicate start()")
+            return
+        }
         val bluetoothAdapter = bluetoothManager.adapter
         if (bluetoothAdapter == null) {
             Timber.e("Bluetooth adapter is null")

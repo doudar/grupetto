@@ -76,7 +76,9 @@ class OverlayService : LifecycleEnabledService() {
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
-    
+    private var overlayView: View? = null
+    private var touchTargetView: View? = null
+    private var windowManager: WindowManager? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -105,12 +107,14 @@ class OverlayService : LifecycleEnabledService() {
     }
 
     override fun onDestroy() {
+        removeOverlayViews()
         releaseWakeLock()
         super.onDestroy()
     }
 
     private fun buildDialog() {
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        windowManager = wm
         val screenSize = Size(
             resources.displayMetrics.widthPixels.toFloat(),
             resources.displayMetrics.heightPixels.toFloat()
@@ -204,7 +208,7 @@ class OverlayService : LifecycleEnabledService() {
             disableAnimations()
         }
 
-        val touchTargetView = FrameLayout(this).apply {
+        touchTargetView = FrameLayout(this).apply {
             lifecycleViaService()
             setOnClickListener {
                 sensorViewModel.onOverlayPressed()
@@ -212,7 +216,7 @@ class OverlayService : LifecycleEnabledService() {
             layoutParams = ViewGroup.LayoutParams(100, 100)
         }
 
-        val overlayView = ComposeView(this).apply {
+        overlayView = ComposeView(this).apply {
             lifecycleViaService()
             setViewCompositionStrategy(
                 ViewCompositionStrategy
@@ -237,11 +241,11 @@ class OverlayService : LifecycleEnabledService() {
             clipChildren = false
             clipToOutline = false
         }
-        wm.addView(overlayView, overlayParams)
+        overlayView?.let { wm.addView(it, overlayParams) }
 
-        wm.addView(touchTargetView, touchTargetParams)
-        touchTargetView.clipChildren = false
-        touchTargetView.clipToPadding = false
+        touchTargetView?.let { wm.addView(it, touchTargetParams) }
+        touchTargetView?.clipChildren = false
+        touchTargetView?.clipToPadding = false
         //Subscribe to Dialog view model and update views
         lifecycleScope.launchWhenResumed {
             combine(
@@ -273,14 +277,14 @@ class OverlayService : LifecycleEnabledService() {
                 touchTargetParams.gravity = gravity
                 touchTargetParams.width = mWidth
                 touchTargetParams.height = touchTargetHeight.roundToInt()
-                touchTargetView.visibility = if(touchTargetHeight > 0f){
+                touchTargetView?.visibility = if(touchTargetHeight > 0f){
                     View.VISIBLE
                 }else{
                     View.GONE
                 }
-                disableClipOnParents(overlayView)
-                wm.updateViewLayout(overlayView, overlayParams)
-                wm.updateViewLayout(touchTargetView, touchTargetParams)
+                overlayView?.let { disableClipOnParents(it) }
+                overlayView?.let { wm.updateViewLayout(it, overlayParams) }
+                touchTargetView?.let { wm.updateViewLayout(it, touchTargetParams) }
             }.collect(object : FlowCollector<Unit> {
                 override suspend fun emit(value: Unit) {}
             })
@@ -379,5 +383,19 @@ class OverlayService : LifecycleEnabledService() {
         }
         wakeLock = null
     }
-}
 
+    private fun removeOverlayViews() {
+        val wm = windowManager
+        if (wm != null) {
+            overlayView?.let {
+                runCatching { wm.removeViewImmediate(it) }
+            }
+            touchTargetView?.let {
+                runCatching { wm.removeViewImmediate(it) }
+            }
+        }
+        overlayView = null
+        touchTargetView = null
+        windowManager = null
+    }
+}
