@@ -2,15 +2,16 @@ package com.spop.poverlay.sensor.interfaces
 
 import android.content.Context
 import android.os.IBinder
-import com.spop.poverlay.sensor.v1new.V1NewPowerSensor
-import com.spop.poverlay.sensor.v1new.V1NewResistanceSensor
-import com.spop.poverlay.sensor.v1new.V1NewRpmSensor
+import com.spop.poverlay.sensor.v1new.V1NewCombinedSensor
 import com.spop.poverlay.sensor.v1new.getV1NewBinder
 import com.spop.poverlay.util.windowed
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.shareIn
+import kotlinx.coroutines.flow.transformLatest
 import kotlin.coroutines.CoroutineContext
 import timber.log.Timber
 
@@ -52,26 +53,25 @@ class PelotonBikeSensorInterfaceV1New(val context: Context) : SensorInterface, C
         coroutineContext.cancelChildren()
     }
 
-    override val power: Flow<Float>
-        get() = binder.flatMapLatest { binder ->
-            val powerSensor = V1NewPowerSensor(binder)
-            powerSensor.start()
-            powerSensor.sensorValue
+    private val combinedSensorState = binder.transformLatest { service ->
+        val sensor = V1NewCombinedSensor(service)
+        sensor.start()
+        emit(sensor)
+        try {
+            awaitCancellation()
+        } finally {
+            sensor.stop()
         }
+    }.shareIn(this, SharingStarted.Lazily, 1)
+
+    override val power: Flow<Float>
+        get() = combinedSensorState.flatMapLatest { it.power }
 
     override val cadence: Flow<Float>
-        get() = binder.flatMapLatest { binder ->
-            val rpmSensor = V1NewRpmSensor(binder)
-            rpmSensor.start()
-            rpmSensor.sensorValue
-        }
+        get() = combinedSensorState.flatMapLatest { it.cadence }
 
     override val resistance: Flow<Float>
-        get() = binder.flatMapLatest { binder ->
-            val resistanceSensor = V1NewResistanceSensor(binder)
-            resistanceSensor.start()
-            resistanceSensor.sensorValue
-        }
+        get() = combinedSensorState.flatMapLatest { it.resistance }
             .windowed(ResistanceMovingAverageWindowSize, 1, true) { readings ->
                 // Resistance sensor occasionally spikes for a single reading
                 // So take the least of the last few readings

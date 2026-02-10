@@ -170,6 +170,10 @@ class BleServer(
     }
 
     fun start() {
+        if (isServerStarted) {
+            Timber.d("BLE server already started, ignoring duplicate start()")
+            return
+        }
         val bluetoothAdapter = bluetoothManager.adapter
         if (bluetoothAdapter == null) {
             Timber.e("Bluetooth adapter is null")
@@ -194,8 +198,12 @@ class BleServer(
         advertiser = localAdvertiser
 
         try {
-            gattServer = bluetoothManager.openGattServer(context, this)
-            isServerStarted = true
+            val server = bluetoothManager.openGattServer(context, this)
+            if (server == null) {
+                Timber.e("Failed to open GATT server (returned null)")
+                return
+            }
+            gattServer = server
             
             // Register Bluetooth state change receiver
             val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
@@ -208,8 +216,11 @@ class BleServer(
             
             setupServices()
             startWatchdog()
-        } catch (e: SecurityException) {
-            Timber.e(e, "Missing bluetooth permissions")
+            
+            isServerStarted = true
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to start BLE server")
+            stop() // Clean up partial initialization
         }
     }
 

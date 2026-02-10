@@ -77,7 +77,9 @@ class OverlayService : LifecycleEnabledService() {
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
-    
+    private var overlayView: View? = null
+    private var touchTargetView: View? = null
+    private var windowManager: WindowManager? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -106,12 +108,14 @@ class OverlayService : LifecycleEnabledService() {
     }
 
     override fun onDestroy() {
+        removeOverlayViews()
         releaseWakeLock()
         super.onDestroy()
     }
 
     private fun buildDialog() {
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        windowManager = wm
         val screenSize = Size(
             resources.displayMetrics.widthPixels.toFloat(),
             resources.displayMetrics.heightPixels.toFloat()
@@ -205,7 +209,7 @@ class OverlayService : LifecycleEnabledService() {
             disableAnimations()
         }
 
-        val touchTargetView = FrameLayout(this).apply {
+        touchTargetView = FrameLayout(this).apply {
             lifecycleViaService()
             setOnClickListener {
                 sensorViewModel.onOverlayPressed()
@@ -213,7 +217,7 @@ class OverlayService : LifecycleEnabledService() {
             layoutParams = ViewGroup.LayoutParams(100, 100)
         }
 
-        val overlayView = ComposeView(this).apply {
+        overlayView = ComposeView(this).apply {
             lifecycleViaService()
             setViewCompositionStrategy(
                 ViewCompositionStrategy
@@ -238,11 +242,13 @@ class OverlayService : LifecycleEnabledService() {
             clipChildren = false
             clipToOutline = false
         }
-        wm.addView(overlayView, overlayParams)
+        val overlay = overlayView!!
+        val touchTarget = touchTargetView!!
+        wm.addView(overlay, overlayParams)
 
-        wm.addView(touchTargetView, touchTargetParams)
-        touchTargetView.clipChildren = false
-        touchTargetView.clipToPadding = false
+        wm.addView(touchTarget, touchTargetParams)
+        //touchTarget.clipChildren = false
+        //touchTarget.clipToPadding = false
         //Subscribe to Dialog view model and update views
         lifecycleScope.launchWhenResumed {
             combine(
@@ -274,14 +280,20 @@ class OverlayService : LifecycleEnabledService() {
                 touchTargetParams.gravity = gravity
                 touchTargetParams.width = mWidth
                 touchTargetParams.height = touchTargetHeight.roundToInt()
-                touchTargetView.visibility = if(touchTargetHeight > 0f){
+                val currentOverlay = overlayView
+                val currentTouchTarget = touchTargetView
+                if (currentOverlay == null || currentTouchTarget == null) {
+                    Timber.d("Overlay views cleared before update; skipping layout application")
+                    return@combine
+                }
+                currentTouchTarget.visibility = if (touchTargetHeight > 0f){
                     View.VISIBLE
                 }else{
                     View.GONE
                 }
-                disableClipOnParents(overlayView)
-                wm.updateViewLayout(overlayView, overlayParams)
-                wm.updateViewLayout(touchTargetView, touchTargetParams)
+                disableClipOnParents(currentOverlay)
+                wm.updateViewLayout(currentOverlay, overlayParams)
+                wm.updateViewLayout(currentTouchTarget, touchTargetParams)
             }.collect(object : FlowCollector<Unit> {
                 override suspend fun emit(value: Unit) {}
             })
@@ -380,5 +392,24 @@ class OverlayService : LifecycleEnabledService() {
         }
         wakeLock = null
     }
-}
 
+    private fun removeOverlayViews() {
+        val wm = windowManager
+        val hasViews = overlayView != null || touchTargetView != null
+        if (wm != null && hasViews) {
+            overlayView?.let {
+                runCatching { wm.removeViewImmediate(it) }
+                    .onFailure { ex -> Timber.w(ex, "Failed to remove overlay view") }
+            }
+            touchTargetView?.let {
+                runCatching { wm.removeViewImmediate(it) }
+                    .onFailure { ex -> Timber.w(ex, "Failed to remove touch target view") }
+            }
+        } else if (wm == null && hasViews) {
+            Timber.e("WindowManager unavailable during cleanup; overlay views may remain attached and leak")
+        }
+        overlayView = null
+        touchTargetView = null
+        windowManager = null
+    }
+}
