@@ -9,9 +9,32 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="onepeloton.permission.SUBSCRIPTION_TYPE_ACCESS" />
-    <!-- Permission for G700 CrossTrainer MetricsService -->
-    <uses-permission android:name="com.onepeloton.permission.METRICS_SERVICE" />
+    <!-- Permission for G700 CrossTrainer MetricsService
+         Unused currently because it seems we can still use the Affernet service
+         but leaving this here as a hint for future support.
+         Findings from reverse-engineering the MetricsService APK (com.onepeloton.workoutservices.app) for future reference:
+
+         - AIDL interface: com.onepeloton.workoutservices.metrics.IMetricsServiceInterface
+         - Binding requires Intent with action set to the interface name and package set to "com.onepeloton.workoutservices.app"
+         - Binding also requires a <queries> element in the manifest for package visibility (Android 11+)
+         - Permission required: com.onepeloton.permission.METRICS_SERVICE
+         - The interface is callback-based, NOT polling-based:
+           - registerCallback(IMetricsServiceCallback) [transact code 3]
+           - The callback receives onUpdate(Bundle) with metrics data
+           - fetch(String) -> Bundle [transact code 2] for synchronous queries
+         - There is no transact code 14 and no BikeData parcelable
+         - Metrics are delivered in nested maps inside a Bundle:
+           - bundle.get("metrics_bike_map") -> Map containing:
+             - "cadence" -> {"current": Double, "average": Double, "max": Double}
+             - "power" -> {"current": Double, "average": Double, "max": Double}
+             - "resistance" -> {"current": Double, "average
+         <uses-permission android:name="com.onepeloton.permission.METRICS_SERVICE" /> -->
     
+    <!-- Required on Android 11+ (API 30+) for package visibility
+    <queries>
+        <package android:name="com.onepeloton.workoutservices.app" />
+    </queries> -->
+
     <!-- Bluetooth permissions for BLE FTMS -->
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
@@ -24,6 +47,8 @@
     <uses-feature
         android:name="android.hardware.bluetooth_le"
         android:required="true" />
+
+
 
     <application
         android:name=".GrupettoApplication"
@@ -57,8 +82,7 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Displays live workout statistics overlay" />
         </service>
-            
-        
+
     </application>
 
 </manifest>

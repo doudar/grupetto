@@ -4,7 +4,6 @@ import android.app.Application
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import com.spop.poverlay.ble.BleServer
-import com.spop.poverlay.sensor.interfaces.G700SensorInterface
 import com.spop.poverlay.sensor.interfaces.PelotonBikePlusSensorInterface
 import com.spop.poverlay.sensor.interfaces.PelotonBikeSensorInterfaceV1New
 import com.spop.poverlay.sensor.interfaces.SensorInterface
@@ -30,9 +29,7 @@ class GrupettoApplication : Application() {
 
     private fun createSensorInterface(): SensorInterface {
         return if (IsRunningOnPeloton) {
-            if (IsG700CrossTrainer) {
-                G700SensorInterface(this)
-            } else if (IsBikePlus) {
+            if (IsG700CrossTrainer || IsBikePlus) {
                 PelotonBikePlusSensorInterface(this)
             } else {
                 PelotonBikeSensorInterfaceV1New(this)
