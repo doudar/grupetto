@@ -241,8 +241,8 @@ class OverlayService : LifecycleEnabledService() {
             clipChildren = false
             clipToOutline = false
         }
-        val overlay = overlayView ?: return
-        val touchTarget = touchTargetView ?: return
+        val overlay = overlayView!!
+        val touchTarget = touchTargetView!!
         wm.addView(overlay, overlayParams)
 
         wm.addView(touchTarget, touchTargetParams)
