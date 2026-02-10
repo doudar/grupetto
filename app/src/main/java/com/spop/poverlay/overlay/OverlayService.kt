@@ -241,11 +241,13 @@ class OverlayService : LifecycleEnabledService() {
             clipChildren = false
             clipToOutline = false
         }
-        overlayView?.let { wm.addView(it, overlayParams) }
+        val overlay = overlayView ?: return
+        val touchTarget = touchTargetView ?: return
+        wm.addView(overlay, overlayParams)
 
-        touchTargetView?.let { wm.addView(it, touchTargetParams) }
-        touchTargetView?.clipChildren = false
-        touchTargetView?.clipToPadding = false
+        wm.addView(touchTarget, touchTargetParams)
+        touchTarget.clipChildren = false
+        touchTarget.clipToPadding = false
         //Subscribe to Dialog view model and update views
         lifecycleScope.launchWhenResumed {
             combine(
@@ -277,14 +279,14 @@ class OverlayService : LifecycleEnabledService() {
                 touchTargetParams.gravity = gravity
                 touchTargetParams.width = mWidth
                 touchTargetParams.height = touchTargetHeight.roundToInt()
-                touchTargetView?.visibility = if(touchTargetHeight > 0f){
+                touchTarget.visibility = if(touchTargetHeight > 0f){
                     View.VISIBLE
                 }else{
                     View.GONE
                 }
-                overlayView?.let { disableClipOnParents(it) }
-                overlayView?.let { wm.updateViewLayout(it, overlayParams) }
-                touchTargetView?.let { wm.updateViewLayout(it, touchTargetParams) }
+                disableClipOnParents(overlay)
+                wm.updateViewLayout(overlay, overlayParams)
+                wm.updateViewLayout(touchTarget, touchTargetParams)
             }.collect(object : FlowCollector<Unit> {
                 override suspend fun emit(value: Unit) {}
             })
@@ -389,9 +391,11 @@ class OverlayService : LifecycleEnabledService() {
         if (wm != null) {
             overlayView?.let {
                 runCatching { wm.removeViewImmediate(it) }
+                    .onFailure { ex -> Timber.w(ex, "Failed to remove overlay view") }
             }
             touchTargetView?.let {
                 runCatching { wm.removeViewImmediate(it) }
+                    .onFailure { ex -> Timber.w(ex, "Failed to remove touch target view") }
             }
         }
         overlayView = null
