@@ -41,6 +41,7 @@ import com.spop.poverlay.sensor.interfaces.DummySensorInterface
 import com.spop.poverlay.sensor.interfaces.PelotonBikeSensorInterfaceV1New
 import com.spop.poverlay.sensor.interfaces.PelotonBikePlusSensorInterface
 import com.spop.poverlay.util.IsBikePlus
+import com.spop.poverlay.util.IsG700CrossTrainer
 import com.spop.poverlay.util.IsRunningOnPeloton
 import com.spop.poverlay.util.LifecycleEnabledService
 import com.spop.poverlay.util.disableAnimations
@@ -117,7 +118,7 @@ class OverlayService : LifecycleEnabledService() {
         )
 
         val sensorInterface = if (IsRunningOnPeloton) {
-            if (IsBikePlus) {
+            if (IsG700CrossTrainer || IsBikePlus) {
                 PelotonBikePlusSensorInterface(this).also {
                     lifecycle.addObserver(LifecycleEventObserver { _, event ->
                         if (event == Lifecycle.Event.ON_DESTROY) {
