@@ -241,14 +241,8 @@ class OverlayService : LifecycleEnabledService() {
             clipChildren = false
             clipToOutline = false
         }
-        val overlay = overlayView ?: run {
-            Timber.e("Overlay view missing after creation; aborting overlay setup")
-            return
-        }
-        val touchTarget = touchTargetView ?: run {
-            Timber.e("Touch target view missing after creation; aborting overlay setup")
-            return
-        }
+        val overlay = overlayView ?: return
+        val touchTarget = touchTargetView ?: return
         wm.addView(overlay, overlayParams)
 
         wm.addView(touchTarget, touchTargetParams)
@@ -411,7 +405,7 @@ class OverlayService : LifecycleEnabledService() {
                     .onFailure { ex -> Timber.w(ex, "Failed to remove touch target view") }
             }
         } else if (wm == null && hasViews) {
-            Timber.e("WindowManager unavailable during cleanup; overlay views may still be attached")
+            Timber.e("WindowManager unavailable during cleanup; overlay views may still be attached, please restart the app to clear the overlay")
         }
         overlayView = null
         touchTargetView = null
