@@ -16,6 +16,7 @@ import androidx.core.content.edit
 import com.spop.poverlay.dircon.DirConGattBridge
 import com.spop.poverlay.dircon.DirConServer
 import com.spop.poverlay.dircon.toDirConService
+import com.spop.poverlay.erg.ErgController
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.sensor.interfaces.SensorInterface
 import java.util.LinkedList
@@ -66,6 +67,16 @@ abstract class BaseBleService(val server: BleServer) {
         }
     }
 
+    /**
+     * A write arriving over DirCon rather than GATT. There is no [BluetoothDevice] behind it, so
+     * services that act on writes handle them here and let the caller store the raw value.
+     * Return true if the write was fully handled, false to fall back to storing it verbatim.
+     */
+    open fun onDirConCharacteristicWrite(
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray
+    ): Boolean = false
+
     @Suppress("DEPRECATION")
     open fun onDescriptorWriteRequest(
             device: BluetoothDevice,
@@ -97,6 +108,7 @@ class BleServer(
         private val context: Context,
         private val bluetoothManager: BluetoothManager,
         private val sensorInterface: SensorInterface,
+        private val ergController: ErgController,
         private val timeProvider: TimeProvider = SystemTimeProvider()
 ) : BluetoothGattServerCallback(), CoroutineScope {
 
@@ -202,6 +214,10 @@ class BleServer(
                     BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0
             if (!writable) return false
 
+            val handled = findServiceForCharacteristic(characteristic.service.uuid)
+                ?.onDirConCharacteristicWrite(characteristic, value) ?: false
+            if (handled) return true
+
             @Suppress("DEPRECATION")
             characteristic.value = value
             return true
@@ -210,7 +226,7 @@ class BleServer(
 
     private fun baseServices(): List<BaseBleService> {
         return listOf(
-            FitnessMachineService(this),
+            FitnessMachineService(this, ergController, sensorInterface),
             CyclingPowerService(this),
             CyclingSpeedAndCadenceService(this),
             DeviceInformationService(this),

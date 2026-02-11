@@ -40,14 +40,19 @@ class PelotonBikePlusSensorInterface(val context: Context) : SensorInterface, Co
         coroutineContext.cancelChildren()
     }
 
+    @Volatile
+    private var currentSensor: BikePlusCombinedSensor? = null
+
     private val combinedSensorState = binder.transformLatest { service ->
         val sensor = BikePlusCombinedSensor(service)
+        currentSensor = sensor
         sensor.start()
         emit(sensor)
         try {
             awaitCancellation()
         } finally {
             sensor.stop()
+            currentSensor = null
         }
     }.shareIn(this, SharingStarted.Lazily, 1)
 
@@ -65,4 +70,7 @@ class PelotonBikePlusSensorInterface(val context: Context) : SensorInterface, Co
                 readings.minOf { it }
             }
 
+    override fun setResistance(resistance: Int) {
+        currentSensor?.setResistance(resistance)
+    }
 }

@@ -10,4 +10,6 @@ interface SensorInterface {
     val resistance: Flow<Float>
     val speed
         get() = power.map(::calculateSpeedFromPelotonV1Power)
+
+    fun setResistance(resistance: Int) {} // No-op default; Bike+ overrides
 }

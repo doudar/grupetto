@@ -7,6 +7,7 @@ import android.bluetooth.le.BluetoothLeAdvertiser
 import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
+import com.spop.poverlay.erg.ErgController
 import com.spop.poverlay.sensor.interfaces.SensorInterface
 import io.mockk.every
 import io.mockk.mockk
@@ -25,6 +26,7 @@ class BleServerTest {
     private lateinit var context: Context
     private lateinit var bluetoothManager: BluetoothManager
     private lateinit var sensorInterface: SensorInterface
+    private lateinit var ergController: ErgController
     private lateinit var timeProvider: FakeTimeProvider
     private lateinit var bleServer: BleServer
 
@@ -36,10 +38,11 @@ class BleServerTest {
         every { sensorInterface.power } returns flowOf(0f)
         every { sensorInterface.cadence } returns flowOf(0f)
         every { sensorInterface.resistance } returns flowOf(0f)
+        ergController = mockk(relaxed = true)
         timeProvider = FakeTimeProvider()
         // Initialize with default time 0
         timeProvider.currentTime = 0
-        bleServer = BleServer(context, bluetoothManager, sensorInterface, timeProvider)
+        bleServer = BleServer(context, bluetoothManager, sensorInterface, ergController, timeProvider)
     }
 
     @Test

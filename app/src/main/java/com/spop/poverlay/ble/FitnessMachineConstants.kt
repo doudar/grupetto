@@ -9,6 +9,8 @@ object FitnessMachineConstants {
     val ControlPointUUID: UUID = UUID.fromString("00002ad9-0000-1000-8000-00805f9b34fb")
     val SupportedResistanceRangeUUID: UUID = UUID.fromString("00002ad6-0000-1000-8000-00805f9b34fb")
     val TrainingStatusUUID: UUID = UUID.fromString("00002ad3-0000-1000-8000-00805f9b34fb")
+    val FitnessMachineStatusUUID: UUID = UUID.fromString("00002ada-0000-1000-8000-00805f9b34fb")
+    val SupportedPowerRangeUUID: UUID = UUID.fromString("00002ad8-0000-1000-8000-00805f9b34fb")
     val ClientCharacteristicConfigurationUUID: UUID =
             UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 

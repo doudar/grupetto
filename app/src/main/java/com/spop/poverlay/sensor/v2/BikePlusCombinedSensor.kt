@@ -109,6 +109,23 @@ class BikePlusCombinedSensor(private val binder: IBinder) {
         }
     }
 
+    fun setResistance(resistance: Int) {
+        val clamped = resistance.coerceIn(0, 100)
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        try {
+            data.writeInterfaceToken(SERVICE_ACTION)
+            data.writeInt(clamped)
+            binder.transact(7, data, reply, 0)
+            reply.readException()
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to set resistance to $clamped")
+        } finally {
+            data.recycle()
+            reply.recycle()
+        }
+    }
+
     fun stop() {
         threadRunning.set(false)
     }
