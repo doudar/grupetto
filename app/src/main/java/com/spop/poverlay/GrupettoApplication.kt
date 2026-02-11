@@ -4,6 +4,7 @@ import android.app.Application
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import com.spop.poverlay.ble.BleServer
+import com.spop.poverlay.erg.ErgController
 import com.spop.poverlay.sensor.interfaces.PelotonBikePlusSensorInterface
 import com.spop.poverlay.sensor.interfaces.PelotonBikeSensorInterfaceV1New
 import com.spop.poverlay.sensor.interfaces.SensorInterface
@@ -24,7 +25,8 @@ class GrupettoApplication : Application() {
 
         val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val sensorInterface = createSensorInterface()
-        bleServer = BleServer(this, bluetoothManager, sensorInterface)
+        val ergController = ErgController(sensorInterface)
+        bleServer = BleServer(this, bluetoothManager, sensorInterface, ergController)
     }
 
     private fun createSensorInterface(): SensorInterface {
