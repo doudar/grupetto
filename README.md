@@ -31,6 +31,7 @@ your repository
     - [Establishing system service connection](#establishing-system-service-connection)
   - [Android App Architecture](#android-app-architecture)
   - [Other hardware](#other-hardware)
+- [ERG Mode & Resistance Control](#erg-mode--resistance-control)
 - [Reporting Issues](#reporting-issues)
 - [Unimplemented features](#unimplemented-features)
 - [What's with the name?](#whats-with-the-name)
@@ -156,6 +157,16 @@ reference for how a Service can provide data for a complex UI
 
 The app is intentionally designed to not necessarily rely on data from the Peloton. The app could be
 expanded to support other tablets and sensor sources, such as ANT+ power meters.
+
+# ERG Mode & Resistance Control
+
+grupetto supports FTMS (Fitness Machine Service) controllable resistance and ERG mode on the **Bike+**. This allows third-party apps (e.g. Zwift, TrainerRoad, MyWhoosh) to control the bike's resistance over BLE.
+
+**Resistance control:** Apps can set a target resistance level (0-100%) directly via the FTMS Control Point. The bike's resistance knob will move to the requested position.
+
+**ERG mode:** Apps can set a target power (25-1000W). A PID controller continuously adjusts the bike's resistance to maintain the target wattage regardless of cadence changes. ERG mode is automatically disabled when the app sends a resistance command, resets, stops, or disconnects.
+
+**Note:** Resistance control requires a Bike+ (Gen 2). The original Bike does not have a motorized resistance knob.
 
 # Reporting Issues
 

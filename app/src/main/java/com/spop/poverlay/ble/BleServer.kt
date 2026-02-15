@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.ParcelUuid
 import androidx.core.content.edit
+import com.spop.poverlay.erg.ErgController
 import com.spop.poverlay.sensor.interfaces.SensorInterface
 import java.util.*
 import kotlinx.coroutines.*
@@ -92,6 +93,7 @@ class BleServer(
         private val context: Context,
         private val bluetoothManager: BluetoothManager,
         private val sensorInterface: SensorInterface,
+        private val ergController: ErgController,
         private val timeProvider: TimeProvider = SystemTimeProvider()
 ) : BluetoothGattServerCallback(), CoroutineScope {
 
@@ -160,7 +162,7 @@ class BleServer(
     private fun setupServices() {
         servicesToRegister.addAll(
                 listOf(
-                        FitnessMachineService(this),
+                        FitnessMachineService(this, ergController, sensorInterface),
                         CyclingPowerService(this),
                         CyclingSpeedAndCadenceService(this),
                         DeviceInformationService(this)
