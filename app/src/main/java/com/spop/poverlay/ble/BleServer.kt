@@ -126,7 +126,7 @@ class BleServer(
         
         // Standard BLE sensors typically update at 1Hz. 
         // We use a slight offset to avoid aliasing with sensor sampling rates.
-        private const val SENSOR_UPDATE_INTERVAL_MS = 709L
+        private const val SENSOR_UPDATE_INTERVAL_MS = 1_000L
     }
     
     // Bluetooth adapter state receiver
@@ -179,17 +179,7 @@ class BleServer(
             Timber.e("Bluetooth adapter is null")
             return
         }
-        
-        // Set the Bluetooth adapter name to "Grupetto"
-        try {
-            bluetoothAdapter.name = "Grupetto"
-            Timber.d("Bluetooth adapter name set to Grupetto")
-        } catch (e: SecurityException) {
-            Timber.e(e, "Missing bluetooth permissions to set adapter name")
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to set Bluetooth adapter name")
-        }
-        
+
         val localAdvertiser = bluetoothAdapter.bluetoothLeAdvertiser
         if (localAdvertiser == null) {
             Timber.e("Failed to create advertiser")
@@ -390,16 +380,7 @@ class BleServer(
         }
         
         if (!bluetoothAdapter.isEnabled) {
-            Timber.d("Watchdog: Bluetooth is disabled, attempting to enable it")
-            val enabled = try {
-                bluetoothAdapter.enable()
-            } catch (e: SecurityException) {
-                Timber.e(e, "Permission denied enabling bluetooth")
-                false
-            }
-            if (!enabled) {
-                Timber.w("Failed to enable Bluetooth automatically")
-            }
+            Timber.d("Watchdog: Bluetooth is disabled; skipping auto-enable to avoid interfering with other apps")
             isAdvertising = false
             return
         }
@@ -499,8 +480,8 @@ class BleServer(
         try {
             val settings =
                     AdvertiseSettings.Builder()
-                            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
-                            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
+                        .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_POWER)
+                        .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_LOW)
                             .setConnectable(true)
                             .build()
 
@@ -598,14 +579,6 @@ class BleServer(
             device?.let { 
                 registeredServices.forEach { it.onConnected(device) }
                 Timber.d("Device connected: ${device.address}")
-                try {
-                if (device.bondState == BluetoothDevice.BOND_NONE) {
-                    val bondStarted = device.createBond()
-                    Timber.d("Bond requested: ${device.address} started=$bondStarted")
-                }
-                } catch (e: SecurityException) {
-                    Timber.e(e, "Permission denied checking bond state")
-                }
                 
                 // Restart advertising to allow additional clients to connect (support multiple connections)
                 if (!isAdvertising && isServerStarted) {

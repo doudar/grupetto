@@ -2,6 +2,8 @@ package com.spop.poverlay
 
 import android.os.Build
 import android.text.format.DateUtils
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material.*
@@ -23,41 +25,61 @@ import androidx.compose.ui.unit.sp
 import com.spop.poverlay.releases.Release
 import com.spop.poverlay.ui.theme.ErrorColor
 import com.spop.poverlay.ui.theme.LatoFontFamily
+import kotlin.math.max
+import kotlin.math.min
+
+private data class UiScale(
+                val value: Float
+) {
+        fun sp(base: Float) = (base * value).sp
+        fun dp(base: Float) = (base * value).dp
+}
 
 @Composable
 fun ConfigurationPage(viewModel: ConfigurationViewModel) {
     val showPermissionInfo by remember { viewModel.showPermissionInfo }
     val latestRelease by remember { viewModel.latestRelease }
 
-    Column(
-            Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-    ) {
-        if (showPermissionInfo) {
-            PermissionPage(viewModel::onGrantPermissionClicked)
-        } else {
-            val timerShownWhenMinimized by
-                    viewModel.showTimerWhenMinimized.collectAsStateWithLifecycle(
-                            initialValue = true
-                    )
-            val bleTxEnabled by
-                    viewModel.bleTxEnabled.collectAsStateWithLifecycle(initialValue = false)
-            val bleFtmsDeviceName by
-                    viewModel.bleFtmsDeviceName.collectAsStateWithLifecycle(
-                            initialValue = "Grupetto FTMS"
-                    )
-            StartServicePage(
-                    timerShownWhenMinimized,
-                    viewModel::onShowTimerWhenMinimizedClicked,
-                    bleTxEnabled,
-                    viewModel::onBleTxEnabledClicked,
-                    bleFtmsDeviceName,
-                    viewModel::onStartServiceClicked,
-                    viewModel::onRestartClicked,
-                    viewModel::onClickedRelease,
-                    latestRelease
-            )
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val widthScale = maxWidth.value / 1200f
+        val heightScale = maxHeight.value / 800f
+        val rawScale = min(widthScale, heightScale)
+        val uiScale = UiScale(max(0.58f, min(rawScale, 1.15f)))
+
+        Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+        ) {
+            if (showPermissionInfo) {
+                PermissionPage(
+                        onClickedGrantPermission = viewModel::onGrantPermissionClicked,
+                        uiScale = uiScale
+                )
+            } else {
+                val timerShownWhenMinimized by
+                        viewModel.showTimerWhenMinimized.collectAsStateWithLifecycle(
+                                initialValue = true
+                        )
+                val bleTxEnabled by
+                        viewModel.bleTxEnabled.collectAsStateWithLifecycle(initialValue = false)
+                val bleFtmsDeviceName by
+                        viewModel.bleFtmsDeviceName.collectAsStateWithLifecycle(
+                                initialValue = "Grupetto FTMS"
+                        )
+                StartServicePage(
+                        timerShownWhenMinimized,
+                        viewModel::onShowTimerWhenMinimizedClicked,
+                        bleTxEnabled,
+                        viewModel::onBleTxEnabledClicked,
+                        bleFtmsDeviceName,
+                        uiScale,
+                        viewModel::onStartServiceClicked,
+                        viewModel::onRestartClicked,
+                        viewModel::onClickedRelease,
+                        latestRelease
+                )
+            }
         }
     }
 }
@@ -69,6 +91,7 @@ private fun StartServicePage(
         bleTxEnabled: Boolean,
         onBleTxEnabledToggled: (Boolean) -> Unit,
         bleFtmsDeviceName: String,
+        uiScale: UiScale,
         onClickedStartOverlay: () -> Unit,
         onClickedRestartApp: () -> Unit,
         onClickedRelease: (Release) -> Unit,
@@ -76,36 +99,36 @@ private fun StartServicePage(
 ) {
     Text(
             text = "Grupetto: An overlay for your Peloton bike",
-            fontSize = 50.sp,
+            fontSize = uiScale.sp(50f),
             fontWeight = FontWeight.Bold
     )
     Text(
             text = "Note: Not endorsed with, associated with, or supported by Peloton",
-            fontSize = 25.sp,
+            fontSize = uiScale.sp(25f),
             fontStyle = FontStyle.Italic,
             fontWeight = FontWeight.Bold
     )
-    Spacer(modifier = Modifier.height(20.dp))
+    Spacer(modifier = Modifier.height(uiScale.dp(20f)))
     Text(
         text = "Nov 2025 Update with colored metrics, charts, and max",
-        fontSize = 18.sp,
+        fontSize = uiScale.sp(18f),
         fontStyle = FontStyle.Italic,
         color = Color.Gray
     )
-    Spacer(modifier = Modifier.height(140.dp))
+    Spacer(modifier = Modifier.height(uiScale.dp(110f)))
     Button(
             onClick = onClickedStartOverlay,
     ) {
         Text(
                 text = "Click here to start the overlay",
-                fontSize = 30.sp,
+                fontSize = uiScale.sp(30f),
                 fontFamily = LatoFontFamily,
                 fontWeight = FontWeight.Bold,
                 fontStyle = FontStyle.Italic,
         )
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(text = "Show timer when the overlay minimized?", fontSize = 20.sp)
+        Text(text = "Show timer when the overlay minimized?", fontSize = uiScale.sp(20f))
         Checkbox(
                 checked = timerShownWhenMinimized,
                 onCheckedChange = onTimerShownWhenMinimizedToggled
@@ -115,34 +138,44 @@ private fun StartServicePage(
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
                 text = "Enable BLE TX (Transmission)?",
-                fontSize = 22.sp,
+                fontSize = uiScale.sp(22f),
                 fontWeight = FontWeight.Bold
         )
         Checkbox(checked = bleTxEnabled, onCheckedChange = onBleTxEnabledToggled)
     }
 
     if (bleTxEnabled) {
-        Row {
-            Text(text = "BLE TX is enabled and running!", fontSize = 14.sp, color = Color.Green)
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Text(
-                    text = " Look for '$bleFtmsDeviceName' in your fitness app's device list",
-                    fontSize = 14.sp
-            )
+        Card(
+                modifier = Modifier.padding(horizontal = uiScale.dp(12f), vertical = uiScale.dp(6f)),
+                elevation = uiScale.dp(6f),
+                backgroundColor = MaterialTheme.colors.primary.copy(alpha = 0.14f)
+        ) {
+            Column(modifier = Modifier.padding(horizontal = uiScale.dp(16f), vertical = uiScale.dp(12f))) {
+                Text(
+                        text = "✅ BLE TX is enabled",
+                        fontSize = uiScale.sp(16f),
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Green
+                )
+                Spacer(modifier = Modifier.height(uiScale.dp(6f)))
+                Text(
+                        text = "Connect your fitness app to: $bleFtmsDeviceName",
+                        fontSize = uiScale.sp(22f),
+                        fontWeight = FontWeight.ExtraBold
+                )
+            }
         }
     } else {
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(uiScale.dp(8f)))
 
         Text(
                 text = "💡 Enable to broadcast bike data to apps like Zwift, TrainerRoad, etc.",
-                fontSize = 14.sp,
+                fontSize = uiScale.sp(14f),
                 color = Color.Gray
         )
     }
 
-    Spacer(modifier = Modifier.height(8.dp))
+    Spacer(modifier = Modifier.height(uiScale.dp(8f)))
 
     if (latestRelease == null) {
         Text(text = "Couldn't check for updates")
@@ -167,25 +200,25 @@ private fun StartServicePage(
                 text = releaseText,
                 style =
                         LocalTextStyle.current.copy(
-                                fontSize = 20.sp,
+                                fontSize = uiScale.sp(20f),
                                 color = LocalContentColor.current
                         )
         ) { onClickedRelease(latestRelease) }
     }
 
-    Spacer(modifier = Modifier.height(40.dp))
+    Spacer(modifier = Modifier.height(uiScale.dp(40f)))
     Button(
             onClick = onClickedRestartApp,
             colors = ButtonDefaults.buttonColors(backgroundColor = ErrorColor),
     ) {
         Text(
                 text = "Restart Grupetto",
-                fontSize = 20.sp,
+                fontSize = uiScale.sp(20f),
                 fontStyle = FontStyle.Italic,
                 color = Color.White
         )
     }
-    Spacer(modifier = Modifier.height(10.dp))
+    Spacer(modifier = Modifier.height(uiScale.dp(10f)))
 
     Text(
             "Device: ${Build.DEVICE}\t" +
@@ -196,18 +229,18 @@ private fun StartServicePage(
 }
 
 @Composable
-private fun PermissionPage(onClickedGrantPermission: () -> Unit) {
+private fun PermissionPage(onClickedGrantPermission: () -> Unit, uiScale: UiScale) {
     Text(
             text = "Grupetto Needs Permission To Draw Over Other Apps",
-            fontSize = 40.sp,
+            fontSize = uiScale.sp(40f),
             fontStyle = FontStyle.Italic,
             fontWeight = FontWeight.Bold
     )
     Text(
             text = "It uses this permission to draw an overlay with your bike's sensor data",
-            fontSize = 20.sp,
+            fontSize = uiScale.sp(20f),
             fontWeight = FontWeight.Normal
     )
-    Spacer(modifier = Modifier.height(10.dp))
+    Spacer(modifier = Modifier.height(uiScale.dp(10f)))
     Button(onClick = onClickedGrantPermission) { Text(text = "Grant Permission") }
 }

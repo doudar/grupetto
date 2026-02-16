@@ -31,7 +31,7 @@ class DeviceInformationService(server: BleServer) : BaseBleService(server) {
                                 BluetoothGattCharacteristic(
                                         DeviceInformationConstants.SerialNumberUUID,
                                         BluetoothGattCharacteristic.PROPERTY_READ,
-                                        BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED
+                                        BluetoothGattCharacteristic.PERMISSION_READ
                                 )
                         )
                         addCharacteristic(
