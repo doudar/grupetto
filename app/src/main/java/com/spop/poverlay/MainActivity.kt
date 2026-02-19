@@ -3,6 +3,7 @@ package com.spop.poverlay
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.content.ActivityNotFoundException
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -50,6 +51,9 @@ class MainActivity : ComponentActivity() {
         }
         viewModel.requestRestart.observe(this) {
             restartGrupetto()
+        }
+        viewModel.requestIgnoreBatteryOptimizations.observe(this) {
+            requestIgnoreBatteryOptimizations()
         }
         viewModel.infoPopup.observe(this) {
             Toast.makeText(
@@ -114,6 +118,11 @@ class MainActivity : ComponentActivity() {
             viewModel.onBluetoothPermissionsResult(allGranted)
         }
 
+    private val batteryOptimizationRequest =
+        registerForActivityResult(StartActivityForResult()) {
+            viewModel.onBatteryOptimizationRequestCompleted()
+        }
+
     private fun requestScreenPermission() = Intent(
         "android.settings.action.MANAGE_OVERLAY_PERMISSION",
         Uri.parse("package:${packageName}")
@@ -123,6 +132,22 @@ class MainActivity : ComponentActivity() {
 
     private fun requestBluetoothPermissions(permissions: Array<String>) {
         bluetoothPermissionRequest.launch(permissions)
+    }
+
+    private fun requestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return
+        }
+
+        val packageUri = Uri.parse("package:$packageName")
+        val requestIntent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, packageUri)
+
+        try {
+            batteryOptimizationRequest.launch(requestIntent)
+        } catch (_: ActivityNotFoundException) {
+            val fallbackIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            batteryOptimizationRequest.launch(fallbackIntent)
+        }
     }
 }
 

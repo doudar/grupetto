@@ -4,6 +4,7 @@ import android.app.Application
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import com.spop.poverlay.ble.BleServer
+import com.spop.poverlay.sensor.interfaces.DummySensorInterface
 import com.spop.poverlay.sensor.interfaces.PelotonBikePlusSensorInterface
 import com.spop.poverlay.sensor.interfaces.PelotonBikeSensorInterfaceV1New
 import com.spop.poverlay.sensor.interfaces.SensorInterface
@@ -35,12 +36,7 @@ class GrupettoApplication : Application() {
                 PelotonBikeSensorInterfaceV1New(this)
             }
         } else {
-            // For testing on an emulator
-            object : SensorInterface {
-                override val cadence = kotlinx.coroutines.flow.MutableStateFlow(0f)
-                override val power = kotlinx.coroutines.flow.MutableStateFlow(0f)
-                override val resistance = kotlinx.coroutines.flow.MutableStateFlow(0f)
-            }
+            DummySensorInterface()
         }
     }
 }

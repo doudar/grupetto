@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
@@ -28,6 +29,7 @@ class ConfigurationViewModel(
     val requestOverlayPermission = MutableLiveData<Unit>()
     val requestRestart = MutableLiveData<Unit>()
     val requestBluetoothPermissions = MutableLiveData<Array<String>>()
+    val requestIgnoreBatteryOptimizations = MutableLiveData<Unit>()
     val showPermissionInfo = mutableStateOf(false)
     val infoPopup = MutableLiveData<String>()
 
@@ -43,11 +45,13 @@ class ConfigurationViewModel(
         get() = configurationRepository.bleFtmsDeviceName
 
     private val bleServer = (application as GrupettoApplication).bleServer
+    private var batteryOptimizationPromptShownThisSession = false
 
     init {
         updatePermissionState()
         if (bleTxEnabled.value && hasBluetoothPermissions()) {
             bleServer.start()
+            requestBatteryOptimizationExemptionIfNeeded()
         }
     }
 
@@ -68,17 +72,20 @@ class ConfigurationViewModel(
         if (isChecked) {
             if (hasBluetoothPermissions()) {
                 bleServer.start()
+                requestBatteryOptimizationExemptionIfNeeded()
             } else {
                 requestBluetoothPermissions.value = getRequiredBluetoothPermissions()
             }
         } else {
             bleServer.stop()
+            batteryOptimizationPromptShownThisSession = false
         }
     }
 
     fun onBluetoothPermissionsResult(granted: Boolean) {
         if (granted) {
             bleServer.start()
+            requestBatteryOptimizationExemptionIfNeeded()
             infoPopup.postValue("Bluetooth permissions granted. BLE service started.")
         } else {
             configurationRepository.setBleTxEnabled(false)
@@ -176,7 +183,43 @@ class ConfigurationViewModel(
         if (bleTxEnabled.value && !hasBluetoothPermissions()) {
             val permissions = getRequiredBluetoothPermissions()
             requestBluetoothPermissions.value = permissions
+        } else if (bleTxEnabled.value && hasBluetoothPermissions()) {
+            requestBatteryOptimizationExemptionIfNeeded()
         }
+    }
+
+    private fun isIgnoringBatteryOptimizations(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return true
+        }
+
+        val context = getApplication<Application>()
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        return powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true
+    }
+
+    private fun requestBatteryOptimizationExemptionIfNeeded() {
+        if (!bleTxEnabled.value || batteryOptimizationPromptShownThisSession) {
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !isIgnoringBatteryOptimizations()) {
+            batteryOptimizationPromptShownThisSession = true
+            requestIgnoreBatteryOptimizations.postValue(Unit)
+        }
+    }
+
+    fun onBatteryOptimizationRequestCompleted() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return
+        }
+
+        val prompt = if (isIgnoringBatteryOptimizations()) {
+            "Battery optimization disabled for Grupetto. BLE reliability should improve while idle."
+        } else {
+            "Battery optimization is still enabled. If BLE drops after idle, set Grupetto battery to Unrestricted."
+        }
+        infoPopup.postValue(prompt)
     }
 
     fun onOverlayPermissionRequestCompleted(wasGranted: Boolean) {
