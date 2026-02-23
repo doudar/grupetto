@@ -21,7 +21,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.core.text.HtmlCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.spop.poverlay.releases.ReleaseChecker
 import com.spop.poverlay.ui.theme.PTONOverlayTheme
 import kotlinx.coroutines.CoroutineScope
@@ -74,8 +76,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        lifecycleScope.launchWhenResumed {
-            viewModel.onResume()
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                viewModel.onResume()
+            }
         }
     }
 

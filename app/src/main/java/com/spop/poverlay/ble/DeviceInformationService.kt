@@ -2,9 +2,8 @@ package com.spop.poverlay.ble
 import com.spop.poverlay.BuildConfig
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattService
-import android.os.Build
-import android.health.connect.datatypes.Device
 
+@Suppress("DEPRECATION")
 class DeviceInformationService(server: BleServer) : BaseBleService(server) {
 
     override val service =
