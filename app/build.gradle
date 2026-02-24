@@ -87,7 +87,6 @@ android {
                     "-opt-in=kotlin.ExperimentalUnsignedTypes",
                     "-opt-in=androidx.compose.animation.ExperimentalAnimationApi",
                     "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
-                    "-opt-in=androidx.lifecycle.compose.ExperimentalLifecycleComposeApi",
                     "-opt-in=kotlinx.coroutines.FlowPreview"
             ]
         }

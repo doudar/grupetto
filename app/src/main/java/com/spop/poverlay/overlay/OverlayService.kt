@@ -1,5 +1,3 @@
-@file:OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
-
 package com.spop.poverlay.overlay
 
 import android.app.Notification
@@ -7,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
 import android.os.Build
@@ -31,7 +30,9 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.spop.poverlay.ConfigurationRepository
+import com.spop.poverlay.GrupettoApplication
 import com.spop.poverlay.MainActivity
 import com.spop.poverlay.R
 
@@ -45,12 +46,13 @@ import com.spop.poverlay.util.IsG700CrossTrainer
 import com.spop.poverlay.util.IsRunningOnPeloton
 import com.spop.poverlay.util.LifecycleEnabledService
 import com.spop.poverlay.util.disableAnimations
-import kotlinx.coroutines.flow.FlowCollector
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.minutes
 import timber.log.Timber
-import java.util.*
 import kotlin.math.roundToInt
 
 
@@ -62,6 +64,9 @@ class OverlayService : LifecycleEnabledService() {
 
 
         private const val OverlayServiceId = 2032
+        private const val OverlayNotificationChannelId = "grupetto_overlay_service"
+        private const val WakeLockTimeoutMs = 15 * 60 * 1000L
+        private const val WakeLockRenewIntervalMs = 10 * 60 * 1000L
 
         val OverlayHeightDp = 110.dp
 
@@ -77,19 +82,28 @@ class OverlayService : LifecycleEnabledService() {
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wakeLockRefreshJob: Job? = null
     private var overlayView: View? = null
     private var touchTargetView: View? = null
     private var windowManager: WindowManager? = null
+    private val bleServer by lazy { (application as GrupettoApplication).bleServer }
 
     override fun onCreate() {
         super.onCreate()
-        acquireWakeLock()
+        syncBackgroundExecutionGuards()
         val notification = prepareNotification(NotificationManagerCompat.from(this))
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
                 OverlayServiceId, 
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                OverlayServiceId,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
             )
         } else {
             startForeground(OverlayServiceId, notification)
@@ -104,6 +118,7 @@ class OverlayService : LifecycleEnabledService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Timber.i("overlay service received intent")
+        syncBackgroundExecutionGuards()
         return START_STICKY
     }
 
@@ -173,12 +188,14 @@ class OverlayService : LifecycleEnabledService() {
         })
         
         // Handle watchdog restart trigger
-        lifecycleScope.launchWhenStarted {
-            watchdog.restartTriggered.collect {
-                Timber.w(
-                    "Watchdog triggered restart - no cadence detected for ${watchdogThreshold.inWholeMinutes} minutes"
-                )
-                restartToOverlay()
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                watchdog.restartTriggered.collect {
+                    Timber.w(
+                        "Watchdog triggered restart - no cadence detected for ${watchdogThreshold.inWholeMinutes} minutes"
+                    )
+                    restartToOverlay()
+                }
             }
         }
 
@@ -190,15 +207,11 @@ class OverlayService : LifecycleEnabledService() {
         }
 
 
-        val defaultFlags = (LayoutParams.FLAG_NOT_TOUCH_MODAL
-                or LayoutParams.FLAG_NOT_FOCUSABLE
-                or LayoutParams.FLAG_LAYOUT_NO_LIMITS)
-
         val overlayParams = LayoutParams(
             200,
             LayoutParams.WRAP_CONTENT,
             layoutFlag,
-            defaultFlags,
+            DefaultOverlayFlags,
             PixelFormat.TRANSLUCENT
         ).apply {
             disableAnimations()
@@ -250,57 +263,57 @@ class OverlayService : LifecycleEnabledService() {
         //touchTarget.clipChildren = false
         //touchTarget.clipToPadding = false
         //Subscribe to Dialog view model and update views
-        lifecycleScope.launchWhenResumed {
-            combine(
-                dialogViewModel.dialogOrigin,
-                dialogViewModel.dialogGravity,
-                dialogViewModel.partialOverlayFlags,
-                dialogViewModel.touchTargetHeight,
-                dialogViewModel.dialogSizeParams,
-                dialogViewModel.minimizedDialogSizeParams
-            ) { values ->
-                val origin = values[0] as Offset
-                val gravity = values[1] as Int
-                val overlayFlags = values[2] as Int
-                val touchTargetHeight = values[3] as Float
-                val (width, height)  = values[4] as Pair<Int,Int>
-                val (mWidth, mHeight)  = values[5] as Pair<Int,Int>
-                overlayParams.x = origin.x.roundToInt()
-                overlayParams.y = origin.y.roundToInt()
-                overlayParams.flags = DefaultOverlayFlags or overlayFlags
-                overlayParams.gravity = gravity
-                overlayParams.width = width
-                overlayParams.height = if(sensorViewModel.isMinimized.value){
-                    mHeight
-                }else{
-                    height
-                }
-                touchTargetParams.x = origin.x.roundToInt()
-                touchTargetParams.y = origin.y.roundToInt()
-                touchTargetParams.gravity = gravity
-                touchTargetParams.width = mWidth
-                touchTargetParams.height = touchTargetHeight.roundToInt()
-                val currentOverlay = overlayView
-                val currentTouchTarget = touchTargetView
-                if (currentOverlay == null || currentTouchTarget == null) {
-                    Timber.d("Overlay views cleared before update; skipping layout application")
-                    return@combine
-                }
-                currentTouchTarget.visibility = if (touchTargetHeight > 0f){
-                    View.VISIBLE
-                }else{
-                    View.GONE
-                }
-                disableClipOnParents(currentOverlay)
-                wm.updateViewLayout(currentOverlay, overlayParams)
-                wm.updateViewLayout(currentTouchTarget, touchTargetParams)
-            }.collect(object : FlowCollector<Unit> {
-                override suspend fun emit(value: Unit) {}
-            })
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                combine(
+                    dialogViewModel.dialogOrigin,
+                    dialogViewModel.dialogGravity,
+                    dialogViewModel.partialOverlayFlags,
+                    dialogViewModel.touchTargetHeight,
+                    dialogViewModel.dialogSizeParams,
+                    dialogViewModel.minimizedDialogSizeParams
+                ) { values ->
+                    val origin = values[0] as Offset
+                    val gravity = values[1] as Int
+                    val overlayFlags = values[2] as Int
+                    val touchTargetHeight = values[3] as Float
+                    val (width, height)  = values[4] as Pair<Int,Int>
+                    val (mWidth, mHeight)  = values[5] as Pair<Int,Int>
+                    overlayParams.x = origin.x.roundToInt()
+                    overlayParams.y = origin.y.roundToInt()
+                    overlayParams.flags = DefaultOverlayFlags or overlayFlags
+                    overlayParams.gravity = gravity
+                    overlayParams.width = width
+                    overlayParams.height = if(sensorViewModel.isMinimized.value){
+                        mHeight
+                    }else{
+                        height
+                    }
+                    touchTargetParams.x = origin.x.roundToInt()
+                    touchTargetParams.y = origin.y.roundToInt()
+                    touchTargetParams.gravity = gravity
+                    touchTargetParams.width = mWidth
+                    touchTargetParams.height = touchTargetHeight.roundToInt()
+                    val currentOverlay = overlayView
+                    val currentTouchTarget = touchTargetView
+                    if (currentOverlay == null || currentTouchTarget == null) {
+                        Timber.d("Overlay views cleared before update; skipping layout application")
+                        return@combine
+                    }
+                    currentTouchTarget.visibility = if (touchTargetHeight > 0f){
+                        View.VISIBLE
+                    }else{
+                        View.GONE
+                    }
+                    disableClipOnParents(currentOverlay)
+                    wm.updateViewLayout(currentOverlay, overlayParams)
+                    wm.updateViewLayout(currentTouchTarget, touchTargetParams)
+                }.collect {}
+            }
         }
     }
 
-    fun disableClipOnParents(v: View) {
+    private fun disableClipOnParents(v: View) {
         if (v.parent == null) {
             return
         }
@@ -329,7 +342,7 @@ class OverlayService : LifecycleEnabledService() {
     }
 
     private fun prepareNotification(notificationManager: NotificationManagerCompat): Notification {
-        val channelId = UUID.randomUUID().toString()
+        val channelId = OverlayNotificationChannelId
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             notificationManager.getNotificationChannel(channelId) == null
@@ -366,6 +379,8 @@ class OverlayService : LifecycleEnabledService() {
 
         notificationBuilder
             .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText(getString(R.string.overlay_notification))
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
@@ -380,17 +395,75 @@ class OverlayService : LifecycleEnabledService() {
         val pm = ContextCompat.getSystemService(this, PowerManager::class.java) ?: return
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Grupetto:OverlayWakelock").apply {
             setReferenceCounted(false)
-            acquire()
+            acquire(WakeLockTimeoutMs)
+        }
+        wakeLockRefreshJob?.cancel()
+        wakeLockRefreshJob = lifecycleScope.launch {
+            while (isActive) {
+                delay(WakeLockRenewIntervalMs)
+                wakeLock?.let {
+                    if (it.isHeld) {
+                        it.acquire(WakeLockTimeoutMs)
+                    }
+                }
+            }
         }
     }
 
     private fun releaseWakeLock() {
+        wakeLockRefreshJob?.cancel()
+        wakeLockRefreshJob = null
         wakeLock?.let {
             if (it.isHeld) {
                 it.release()
             }
         }
         wakeLock = null
+    }
+
+    private fun syncBackgroundExecutionGuards() {
+        if (isBleTxEnabled() && hasBleRuntimePermissions()) {
+            bleServer.start()
+            acquireWakeLock()
+        } else {
+            releaseWakeLock()
+        }
+    }
+
+    private fun isBleTxEnabled(): Boolean {
+        val prefs = getSharedPreferences(ConfigurationRepository.SharedPrefsName, MODE_PRIVATE)
+        return prefs.getBoolean(ConfigurationRepository.Preferences.BleTxEnabled.key, true)
+    }
+
+    private fun hasBleRuntimePermissions(): Boolean {
+        val hasBaseBluetooth = ContextCompat.checkSelfPermission(
+            this,
+            android.Manifest.permission.BLUETOOTH
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val hasBluetoothAdmin = ContextCompat.checkSelfPermission(
+            this,
+            android.Manifest.permission.BLUETOOTH_ADMIN
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val hasFineLocation = ContextCompat.checkSelfPermission(
+            this,
+            android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val hasAdvertise = ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.BLUETOOTH_ADVERTISE
+            ) == PackageManager.PERMISSION_GRANTED
+            val hasConnect = ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.BLUETOOTH_CONNECT
+            ) == PackageManager.PERMISSION_GRANTED
+            return hasBaseBluetooth && hasBluetoothAdmin && hasFineLocation && hasAdvertise && hasConnect
+        }
+
+        return hasBaseBluetooth && hasBluetoothAdmin && hasFineLocation
     }
 
     private fun removeOverlayViews() {

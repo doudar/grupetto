@@ -9,10 +9,13 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.os.ParcelUuid
+import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import com.spop.poverlay.sensor.interfaces.SensorInterface
-import java.util.*
+import java.util.LinkedList
+import java.util.UUID
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
@@ -29,14 +32,10 @@ class SystemTimeProvider : TimeProvider {
     override fun elapsedRealtime() = android.os.SystemClock.elapsedRealtime()
 }
 
-// Listener for sensor data updates
-interface SensorDataListener {
-    fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float)
-}
-
 // Base class for all BLE services
-abstract class BaseBleService(val server: BleServer) : SensorDataListener {
+abstract class BaseBleService(val server: BleServer) {
     abstract val service: BluetoothGattService
+    abstract fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float)
     protected val connectedDevices = mutableSetOf<BluetoothDevice>()
 
     fun hasConnectedDevices(): Boolean = connectedDevices.isNotEmpty()
@@ -63,6 +62,7 @@ abstract class BaseBleService(val server: BleServer) : SensorDataListener {
         }
     }
 
+    @Suppress("DEPRECATION")
     open fun onDescriptorWriteRequest(
             device: BluetoothDevice,
             requestId: Int,
@@ -78,6 +78,7 @@ abstract class BaseBleService(val server: BleServer) : SensorDataListener {
         }
     }
 
+    @Suppress("DEPRECATION")
     open fun onDescriptorReadRequest(
             device: BluetoothDevice,
             requestId: Int,
@@ -143,7 +144,7 @@ class BleServer(
     private val bondStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == BluetoothDevice.ACTION_BOND_STATE_CHANGED) {
-                val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                val device = getBluetoothDeviceExtra(intent)
                 val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.BOND_NONE)
                 val prev = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.BOND_NONE)
                 val name = try {
@@ -154,6 +155,20 @@ class BleServer(
                 Timber.d("Bond state changed: ${device?.address} $name $prev -> $state")
             }
         }
+    }
+
+    private fun getBluetoothDeviceExtra(intent: Intent): BluetoothDevice? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun characteristicValue(characteristic: BluetoothGattCharacteristic): ByteArray {
+        return characteristic.value ?: ByteArray(0)
     }
 
     //ADD OR EDIT SERVICES HERE
@@ -187,6 +202,26 @@ class BleServer(
         }
         advertiser = localAdvertiser
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val hasConnectPermission = ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.BLUETOOTH_CONNECT
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!hasConnectPermission) {
+                Timber.w("Cannot start BLE server: missing BLUETOOTH_CONNECT permission")
+                return
+            }
+        } else {
+            val hasBluetoothPermission = ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.BLUETOOTH
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!hasBluetoothPermission) {
+                Timber.w("Cannot start BLE server: missing BLUETOOTH permission")
+                return
+            }
+        }
+
         try {
             val server = bluetoothManager.openGattServer(context, this)
             if (server == null) {
@@ -208,6 +243,9 @@ class BleServer(
             startWatchdog()
             
             isServerStarted = true
+        } catch (e: SecurityException) {
+            Timber.e(e, "Failed to open GATT server due to missing Bluetooth permission")
+            stop() // Clean up partial initialization
         } catch (e: Exception) {
             Timber.e(e, "Failed to start BLE server")
             stop() // Clean up partial initialization
@@ -279,6 +317,22 @@ class BleServer(
             isAdvertising = false
             lastAdvertisingStartTime = 0L
             lastAdvertisingFailureCode = null
+            
+            // Reset smoothing and CSC state so a restart begins fresh
+            smoothedCadence = null
+            smoothedPower = null
+            smoothedSpeedMph = null
+            smoothedResistance = null
+            cscCrankResidual = 0.0
+            cscWheelResidual = 0.0
+            cscCumulativeWheelRev = 0L
+            cscLastWheelEvtTime = 0
+            cscCumulativeCrankRev = 0
+            cscLastCrankEvtTime = 0
+            
+            synchronized(notificationSubscriptions) {
+                notificationSubscriptions.clear()
+            }
         } catch (e: SecurityException) {
             Timber.e(e, "Missing bluetooth permissions")
         }
@@ -299,7 +353,17 @@ class BleServer(
         }
 
         try {
-            gattServer?.notifyCharacteristicChanged(device, characteristic, confirm)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                gattServer?.notifyCharacteristicChanged(
+                    device,
+                    characteristic,
+                    confirm,
+                    characteristicValue(characteristic)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                gattServer?.notifyCharacteristicChanged(device, characteristic, confirm)
+            }
         } catch (e: SecurityException) {
             Timber.e(e, "Missing bluetooth permissions")
         }
@@ -656,7 +720,7 @@ class BleServer(
             sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, offset, null)
             return
         }
-        sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, characteristic.value)
+        sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, characteristicValue(characteristic))
     }
 
     override fun onDescriptorReadRequest(
@@ -680,9 +744,9 @@ class BleServer(
     ) {
         // Convention compliance: Track CCCD state
         if (descriptor.uuid == CLIENT_CHARACTERISTIC_CONFIG && value != null) {
-            val isEnabled = Arrays.equals(value, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) ||
-                           Arrays.equals(value, BluetoothGattDescriptor.ENABLE_INDICATION_VALUE)
-            val isDisable = Arrays.equals(value, BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE)
+            val isEnabled = value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) ||
+                           value.contentEquals(BluetoothGattDescriptor.ENABLE_INDICATION_VALUE)
+            val isDisabled = value.contentEquals(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE)
 
             synchronized(notificationSubscriptions) {
                 val deviceAddress = device.address
@@ -690,7 +754,7 @@ class BleServer(
                     val uuidSet = notificationSubscriptions.getOrPut(deviceAddress) { mutableSetOf() }
                     uuidSet.add(descriptor.characteristic.uuid)
                     Timber.d("Notifications enabled for ${descriptor.characteristic.uuid} on $deviceAddress")
-                } else if (isDisable) {
+                } else if (isDisabled) {
                     notificationSubscriptions[deviceAddress]?.remove(descriptor.characteristic.uuid)
                     if (notificationSubscriptions[deviceAddress]?.isEmpty() == true) {
                         notificationSubscriptions.remove(deviceAddress)
@@ -889,7 +953,7 @@ class BleServer(
         // Wheel
         val wheelSizeMeters = 2.127f // 700c x 28, typical
         // speedKmh must be in km/h; convert to m/s for wheel RPM calculation
-        var speedMps = speedKmh?.let { it / 3.6f }
+        val speedMps = speedKmh?.let { it / 3.6f }
         if (speedMps != null && speedMps > 0f) {
 
             val wheelRpm = (speedMps / wheelSizeMeters) * 60f
