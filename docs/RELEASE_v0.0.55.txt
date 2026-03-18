@@ -1,0 +1,57 @@
+## v0.0.55 Production Release - Quick Reference
+
+**Status**: ✅ Garmin Fenix 7 discovers and records power/cadence
+**Location**: `\\<PC_IP>\APKDrop\grupetto-v0.0.55.apk`
+
+---
+
+### What It Does
+Broadcasts real power/cadence from Peloton bike to Garmin Fenix 7 via ANT+ Bike Power profile.
+
+### Quick Start
+1. Install v0.0.55 on Peloton tablet
+2. Wait for "✓ ANT+ LIVE on networkId=1" in debug log
+3. On Garmin: Sensors & Accessories > Add New > Search All Sensors
+4. Should find "Grupetto" ANT+ Bike Power source
+5. Start workout on Garmin - power/cadence should update at ~4 Hz
+
+### Debug Log Location
+`/sdcard/Downloads/grupetto-ant-debug.log` (adb pull or SMB share)
+
+### Key Expected Logs
+```
+[1/4] Trying networkId=1 (ANT+ slot)
+acquireChannelByNetworkId networkId=1 via AntChannelProviderCommunicatorAidl
+RF frequency set to 57 (2457 MHz)
+✓ ANT+ LIVE on networkId=1 txType=5
+Broadcast pwr data queued (power=XXW, cadence=XXrpm, nextEvent=0)
+```
+
+### If Garmin Still Can't Find It
+1. Check that RF frequency log shows "RF frequency set to 57" (not rejected)
+2. Check that "✓ ANT+ LIVE" appears within first 5 seconds
+3. Try force-killing ANT Radio Service on tablet and restarting app
+4. Try on different Garmin device (if available) to confirm ANT+ broadcast is working
+
+### If Power/Cadence Shows 0/0
+- Discovery mode disabled in v0.0.55 (shows real sensor data)
+- Check if Peloton sensor interface is actually reading from bike
+- Try v0.0.54 temporarily (forces 180W/85rpm mock) to confirm broadcast mechanics work
+- Then debug sensor interface separately
+
+### Production Configuration
+```kotlin
+// In AntPlusHandler.kt
+DiscoveryModeEnabled = false  // broadcasts real data
+```
+
+To enable mock data for testing:
+```kotlin
+DiscoveryModeEnabled = true   // forces 180W/85rpm
+```
+Then rebuild: `gradlew assembleDebug`
+
+---
+
+**Never used before?** See `ANT_PLUS_BREAKTHROUGH.md` for full technical details.
+

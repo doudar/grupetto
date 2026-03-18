@@ -13,7 +13,9 @@ import android.content.pm.PackageManager
 import android.os.ParcelUuid
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
+import com.spop.poverlay.BuildConfig
 import com.spop.poverlay.sensor.interfaces.SensorInterface
+import com.spop.poverlay.util.BleDebugLogWriter
 import java.util.LinkedList
 import java.util.UUID
 import kotlinx.coroutines.*
@@ -106,6 +108,7 @@ class BleServer(
     private val servicesToRegister = LinkedList<BaseBleService>()
     private var currentlyRegisteringService: BaseBleService? = null
     private var serviceAddTimeoutJob: Job? = null
+    private val bleDebugLogWriter = BleDebugLogWriter(context.applicationContext)
     
     // Advertising state tracking
     private var isAdvertising = false
@@ -171,6 +174,26 @@ class BleServer(
         return characteristic.value ?: ByteArray(0)
     }
 
+    private fun toHex(value: ByteArray?): String {
+        if (value == null || value.isEmpty()) return "<empty>"
+        return value.joinToString(" ") { b -> "%02X".format(b.toInt() and 0xFF) }
+    }
+
+    fun logBleDebug(message: String) {
+        Timber.d(message)
+        bleDebugLogWriter.append("DEBUG", message)
+    }
+
+    fun logBleWarn(message: String, throwable: Throwable? = null) {
+        if (throwable == null) Timber.w(message) else Timber.w(throwable, message)
+        bleDebugLogWriter.append("WARN", message, throwable)
+    }
+
+    fun logBleError(message: String, throwable: Throwable? = null) {
+        if (throwable == null) Timber.e(message) else Timber.e(throwable, message)
+        bleDebugLogWriter.append("ERROR", message, throwable)
+    }
+
     //ADD OR EDIT SERVICES HERE
     private fun setupServices() {
         servicesToRegister.addAll(
@@ -189,6 +212,8 @@ class BleServer(
             Timber.d("BLE server already started, ignoring duplicate start()")
             return
         }
+        logBleDebug("BLE_DEBUG: Writing debug log to ${bleDebugLogWriter.describeLocation()}")
+        logBleDebug("BLE_DEBUG: App version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         val bluetoothAdapter = bluetoothManager.adapter
         if (bluetoothAdapter == null) {
             Timber.e("Bluetooth adapter is null")
@@ -349,7 +374,8 @@ class BleServer(
         }
 
         if (!isSubscribed) {
-             return
+            logBleDebug("BLE notify skipped (not subscribed) dev=${device.address} ch=${characteristic.uuid}")
+            return
         }
 
         try {
@@ -364,8 +390,11 @@ class BleServer(
                 @Suppress("DEPRECATION")
                 gattServer?.notifyCharacteristicChanged(device, characteristic, confirm)
             }
+            logBleDebug(
+                "BLE notify sent dev=${device.address} ch=${characteristic.uuid} len=${characteristicValue(characteristic).size}"
+            )
         } catch (e: SecurityException) {
-            Timber.e(e, "Missing bluetooth permissions")
+            logBleError("Missing bluetooth permissions while notifying ${characteristic.uuid}", e)
         }
     }
 
@@ -555,6 +584,8 @@ class BleServer(
                 advDataBuilder.addServiceUuid(uuid)
             }
 
+            logBleDebug("BLE advertising UUIDs: ${serviceUuids.joinToString { it.uuid.toString() }}")
+
             // Scan response: include device name and manufacturer specific data
             val scanResponseBuilder = AdvertiseData.Builder()
                 .setIncludeDeviceName(true)
@@ -565,6 +596,7 @@ class BleServer(
             // Keep payload concise to fit scan response size constraints
             val manufacturerData = "GRUP-$sn".toByteArray(Charsets.UTF_8)
             scanResponseBuilder.addManufacturerData(manufacturerId, manufacturerData)
+            logBleDebug("BLE scan response manufacturerId=0x${manufacturerId.toString(16)} data=${String(manufacturerData)}")
 
             advertiser?.startAdvertising(
                 settings,
@@ -596,7 +628,7 @@ class BleServer(
                     isAdvertising = true
                     lastAdvertisingStartTime = System.currentTimeMillis()
                     lastAdvertisingFailureCode = null
-                    Timber.i("BLE advertising started successfully")
+                    logBleDebug("BLE advertising started")
                 }
 
                 override fun onStartFailure(errorCode: Int) {
@@ -610,7 +642,7 @@ class BleServer(
                         AdvertiseCallback.ADVERTISE_FAILED_FEATURE_UNSUPPORTED -> "Feature unsupported"
                         else -> "Unknown error"
                     }
-                    Timber.e("BLE advertising failed: $errorCode ($errorMessage)")
+                    logBleError("BLE advertising failed: $errorCode ($errorMessage)")
                     if (errorCode == AdvertiseCallback.ADVERTISE_FAILED_ALREADY_STARTED) {
                         isAdvertising = true
                     }
@@ -640,9 +672,9 @@ class BleServer(
 
     override fun onConnectionStateChange(device: BluetoothDevice?, status: Int, newState: Int) {
         if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
-            device?.let { 
+            device?.let {
                 registeredServices.forEach { it.onConnected(device) }
-                Timber.d("Device connected: ${device.address}")
+                logBleDebug("BLE connected: ${device.address}")
                 
                 // Restart advertising to allow additional clients to connect (support multiple connections)
                 if (!isAdvertising && isServerStarted) {
@@ -661,9 +693,9 @@ class BleServer(
             synchronized(notificationSubscriptions) {
                 notificationSubscriptions.remove(device?.address)
             }
-            device?.let { 
+            device?.let {
                 registeredServices.forEach { it.onDisconnected(device) }
-                Timber.d("Device disconnected: ${device.address}")
+                logBleDebug("BLE disconnected: ${device.address}")
                 
                 // Restart advertising if no devices are connected anymore
                 if (!hasConnectedDevices() && !isAdvertising && isServerStarted) {
@@ -697,6 +729,9 @@ class BleServer(
             offset: Int,
             value: ByteArray?
     ) {
+        logBleDebug(
+            "BLE write req dev=${device.address} svc=${characteristic.service.uuid} ch=${characteristic.uuid} prepared=$preparedWrite resp=$responseNeeded offset=$offset value=${toHex(value)}"
+        )
         findServiceForCharacteristic(characteristic.service.uuid)
                 ?.onCharacteristicWriteRequest(
                         device,
@@ -717,20 +752,13 @@ class BleServer(
     ) {
         val service = findServiceForCharacteristic(characteristic.service.uuid)
         if (service == null) {
+            logBleWarn("BLE read req failed (service missing) dev=${device.address} svc=${characteristic.service.uuid} ch=${characteristic.uuid}")
             sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, offset, null)
             return
         }
-        sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, characteristicValue(characteristic))
-    }
-
-    override fun onDescriptorReadRequest(
-            device: BluetoothDevice,
-            requestId: Int,
-            offset: Int,
-            descriptor: BluetoothGattDescriptor
-    ) {
-        findServiceForCharacteristic(descriptor.characteristic.service.uuid)
-                ?.onDescriptorReadRequest(device, requestId, offset, descriptor)
+        val value = characteristicValue(characteristic)
+        logBleDebug("BLE read req dev=${device.address} svc=${characteristic.service.uuid} ch=${characteristic.uuid} offset=$offset value=${toHex(value)}")
+        sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)
     }
 
     override fun onDescriptorWriteRequest(
@@ -742,6 +770,9 @@ class BleServer(
             offset: Int,
             value: ByteArray?
     ) {
+        logBleDebug(
+            "BLE desc write req dev=${device.address} svc=${descriptor.characteristic.service.uuid} ch=${descriptor.characteristic.uuid} desc=${descriptor.uuid} value=${toHex(value)}"
+        )
         // Convention compliance: Track CCCD state
         if (descriptor.uuid == CLIENT_CHARACTERISTIC_CONFIG && value != null) {
             val isEnabled = value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) ||
@@ -753,13 +784,13 @@ class BleServer(
                 if (isEnabled) {
                     val uuidSet = notificationSubscriptions.getOrPut(deviceAddress) { mutableSetOf() }
                     uuidSet.add(descriptor.characteristic.uuid)
-                    Timber.d("Notifications enabled for ${descriptor.characteristic.uuid} on $deviceAddress")
+                    logBleDebug("BLE CCCD enabled ch=${descriptor.characteristic.uuid} dev=$deviceAddress")
                 } else if (isDisabled) {
                     notificationSubscriptions[deviceAddress]?.remove(descriptor.characteristic.uuid)
                     if (notificationSubscriptions[deviceAddress]?.isEmpty() == true) {
                         notificationSubscriptions.remove(deviceAddress)
                     }
-                    Timber.d("Notifications disabled for ${descriptor.characteristic.uuid} on $deviceAddress")
+                    logBleDebug("BLE CCCD disabled ch=${descriptor.characteristic.uuid} dev=$deviceAddress")
                 }
             }
         }
