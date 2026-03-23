@@ -9,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.spop.poverlay.MainActivity
 import com.spop.poverlay.sensor.DeadSensorDetector
+import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.sensor.interfaces.SensorInterface
 import com.spop.poverlay.util.smoothSensorValue
 import kotlinx.coroutines.Dispatchers
@@ -28,7 +29,7 @@ import kotlin.time.Duration.Companion.minutes
 private const val MphToKph = 1.60934
 
 enum class MetricType {
-    POWER, CADENCE, RESISTANCE, SPEED
+    POWER, CADENCE, RESISTANCE, SPEED, HEART_RATE
 }
 
 /**
@@ -115,6 +116,7 @@ class OverlaySensorViewModel(
     private val mutableMaxCadence = MutableStateFlow(0f)
     private val mutableMaxResistance = MutableStateFlow(0f)
     private val mutableMaxSpeed = MutableStateFlow(0f)
+    private val mutableMaxHeartRate = MutableStateFlow(0f)
     private var lastNonZeroTime = System.currentTimeMillis()
 
     // Session totals tracking
@@ -127,9 +129,12 @@ class OverlaySensorViewModel(
     private var sumSpeed = 0f // speed × time accumulator
     private var sumResistance = 0f // resistance × time accumulator
     private var sumCadence = 0f // cadence × time accumulator
+    private var sumHeartRate = 0f // heart rate × time accumulator
+    private var totalHeartRateTime = 0f // seconds with valid heart rate while moving
     private val mutableAvgSpeed = MutableStateFlow(0f)
     private val mutableAvgResistance = MutableStateFlow(0f)
     private val mutableAvgCadence = MutableStateFlow(0f)
+    private val mutableAvgHeartRate = MutableStateFlow(0f)
 
     // Movement tracking for timer auto-start/pause
     private val mutableIsMoving = MutableStateFlow(false)
@@ -143,6 +148,7 @@ class OverlaySensorViewModel(
     val maxCadence = mutableMaxCadence.asStateFlow()
     val maxResistance = mutableMaxResistance.asStateFlow()
     val maxSpeed = mutableMaxSpeed.asStateFlow()
+    val maxHeartRate = mutableMaxHeartRate.asStateFlow()
 
     val totalEnergy = mutableTotalEnergy.asStateFlow() // kilojoules
     val totalDistance = mutableTotalDistance.asStateFlow() // miles
@@ -150,8 +156,9 @@ class OverlaySensorViewModel(
     val avgSpeed = mutableAvgSpeed.asStateFlow() // mph
     val avgResistance = mutableAvgResistance.asStateFlow()
     val avgCadence = mutableAvgCadence.asStateFlow()
+    val avgHeartRate = mutableAvgHeartRate.asStateFlow()
 
-    private fun updateSessionStats(power: Float, cadence: Float, resistance: Float, speed: Float) {
+    private fun updateSessionStats(power: Float, cadence: Float, resistance: Float, speed: Float, heartRate: Float) {
         val currentTime = System.currentTimeMillis()
         val deltaSeconds = (currentTime - lastUpdateTime) / 1000f
         lastUpdateTime = currentTime
@@ -174,6 +181,7 @@ class OverlaySensorViewModel(
                 mutableMaxCadence.value = 0f
                 mutableMaxResistance.value = 0f
                 mutableMaxSpeed.value = 0f
+                mutableMaxHeartRate.value = 0f
                 mutableTotalEnergy.value = 0f
                 mutableTotalDistance.value = 0f
                 // Reset averages
@@ -181,9 +189,12 @@ class OverlaySensorViewModel(
                 sumSpeed = 0f
                 sumResistance = 0f
                 sumCadence = 0f
+                sumHeartRate = 0f
+                totalHeartRateTime = 0f
                 mutableAvgSpeed.value = 0f
                 mutableAvgResistance.value = 0f
                 mutableAvgCadence.value = 0f
+                mutableAvgHeartRate.value = 0f
                 // Signal session reset for timer
                 mutableSessionReset.value = currentTime
             }
@@ -196,6 +207,7 @@ class OverlaySensorViewModel(
             if (cadence > mutableMaxCadence.value) mutableMaxCadence.value = cadence
             if (resistance > mutableMaxResistance.value) mutableMaxResistance.value = resistance
             if (speed > mutableMaxSpeed.value) mutableMaxSpeed.value = speed
+            if (heartRate > mutableMaxHeartRate.value) mutableMaxHeartRate.value = heartRate
 
             // Only accumulate totals and averages when actively moving
             if (isCurrentlyMoving) {
@@ -210,12 +222,19 @@ class OverlaySensorViewModel(
                 sumSpeed += speed * deltaSeconds
                 sumResistance += resistance * deltaSeconds
                 sumCadence += cadence * deltaSeconds
+                if (heartRate > 0f) {
+                    sumHeartRate += heartRate * deltaSeconds
+                    totalHeartRateTime += deltaSeconds
+                }
 
                 // Update averages
                 if (totalActiveTime > 0f) {
                     mutableAvgSpeed.value = sumSpeed / totalActiveTime
                     mutableAvgResistance.value = sumResistance / totalActiveTime
                     mutableAvgCadence.value = sumCadence / totalActiveTime
+                }
+                if (totalHeartRateTime > 0f) {
+                    mutableAvgHeartRate.value = sumHeartRate / totalHeartRateTime
                 }
             }
         }
@@ -299,6 +318,7 @@ class OverlaySensorViewModel(
     val cadenceGraph = mutableStateListOf<Float>()
     val resistanceGraph = mutableStateListOf<Float>()
     val speedGraph = mutableStateListOf<Float>()
+    val heartRateGraph = mutableStateListOf<Float>()
 
     fun getGraphForMetric(metric: MetricType): List<Float> {
         return when (metric) {
@@ -306,6 +326,7 @@ class OverlaySensorViewModel(
             MetricType.CADENCE -> cadenceGraph
             MetricType.RESISTANCE -> resistanceGraph
             MetricType.SPEED -> speedGraph
+            MetricType.HEART_RATE -> heartRateGraph
         }
     }
 
@@ -373,6 +394,24 @@ class OverlaySensorViewModel(
                     }
                 })
         }
+
+        // Heart rate graph
+        viewModelScope.launch(Dispatchers.IO) {
+            HeartRateManager.heartRate
+                .map { (it ?: 0).toFloat() }
+                .smoothSensorValue()
+                .sample(UiUpdatePeriod)
+                .collect(object : FlowCollector<Float> {
+                    override suspend fun emit(value: Float) {
+                        withContext(Dispatchers.Main) {
+                            heartRateGraph.add(value)
+                            if (heartRateGraph.size > GraphMaxDataPoints) {
+                                heartRateGraph.removeFirst()
+                            }
+                        }
+                    }
+                })
+        }
     }
 
     private fun setupMaxTracking() {
@@ -381,13 +420,14 @@ class OverlaySensorViewModel(
                 sensorInterface.power,
                 sensorInterface.cadence,
                 sensorInterface.resistance,
-                sensorInterface.speed
-            ) { power, cadence, resistance, speed ->
-                arrayOf(power, cadence, resistance, speed)
-            }.collect(object : FlowCollector<Array<Float>> {
-                override suspend fun emit(value: Array<Float>) {
+                sensorInterface.speed,
+                HeartRateManager.heartRate.map { (it ?: 0).toFloat() }
+            ) { power, cadence, resistance, speed, heartRate ->
+                floatArrayOf(power, cadence, resistance, speed, heartRate)
+            }.collect(object : FlowCollector<FloatArray> {
+                override suspend fun emit(value: FloatArray) {
                     withContext(Dispatchers.Main) {
-                        updateSessionStats(value[0], value[1], value[2], value[3])
+                        updateSessionStats(value[0], value[1], value[2], value[3], value[4])
                     }
                 }
             })
