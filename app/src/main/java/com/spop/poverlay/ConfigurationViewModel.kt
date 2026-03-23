@@ -30,6 +30,7 @@ class ConfigurationViewModel(
     val finishActivity = MutableLiveData<Unit>()
     val requestOverlayPermission = MutableLiveData<Unit>()
     val requestRestart = MutableLiveData<Unit>()
+    val requestQuit = MutableLiveData<Unit>()
     val requestBluetoothPermissions = MutableLiveData<Array<String>>()
     val requestIgnoreBatteryOptimizations = MutableLiveData<Unit>()
     val showPermissionInfo = mutableStateOf(false)
@@ -174,6 +175,10 @@ class ConfigurationViewModel(
         requestRestart.value = Unit
     }
 
+    fun onQuitClicked() {
+        requestQuit.value = Unit
+    }
+
     fun onClickedRelease(release: Release) {
         val browserIntent = Intent(Intent.ACTION_VIEW, release.url)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -194,6 +199,10 @@ class ConfigurationViewModel(
 
     fun forgetHeartRateDevice(address: String) {
         HeartRateManager.forgetDevice(address)
+    }
+
+    fun disconnectHeartRateDevice() {
+        HeartRateManager.disconnectCurrent()
     }
 
     fun onResume() {

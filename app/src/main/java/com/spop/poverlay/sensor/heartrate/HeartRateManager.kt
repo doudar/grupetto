@@ -90,6 +90,8 @@ object HeartRateManager {
     private var autoReconnectJob: kotlinx.coroutines.Job? = null
     private var manageSessionJob: kotlinx.coroutines.Job? = null
     private var isManaging = false
+    @Volatile
+    private var manualDisconnectRequested = false
 
     @Volatile
     private var lastHeartRateAtMs: Long = 0L
@@ -245,9 +247,23 @@ object HeartRateManager {
     }
 
     fun connectTo(device: HeartRateDevice) {
+        manualDisconnectRequested = false
         saveDevice(device)
         selectedAddress = device.address
         connectToAddress(device.address)
+    }
+
+    fun disconnectCurrent() {
+        manualDisconnectRequested = true
+        autoReconnectJob?.cancel()
+        autoReconnectJob = null
+        stopDiscovery()
+        selectedAddress = null
+        _heartRate.value = null
+        _connectedDevice.value = null
+        lastConnectedAtMs = 0L
+        lastHeartRateAtMs = 0L
+        try { bluetoothGatt?.disconnect() } catch (_: Exception) {}
     }
 
     fun forgetDevice(address: String) {
@@ -299,6 +315,7 @@ object HeartRateManager {
     }
 
     private fun maybeAutoConnectSaved(device: BluetoothDevice): Boolean {
+        if (manualDisconnectRequested) return false
         if (_connectedDevice.value != null) return false
         val address = device.address ?: return false
         if (_savedDevices.value.none { it.address == address }) return false
@@ -332,7 +349,9 @@ object HeartRateManager {
                 if (status != BluetoothGatt.GATT_SUCCESS) {
                     try { gatt.close() } catch (_: Exception) {}
                     if (bluetoothGatt === gatt) bluetoothGatt = null
-                    scheduleReconnect()
+                    if (!manualDisconnectRequested) {
+                        scheduleReconnect()
+                    }
                     return
                 }
                 when (newState) {
@@ -348,7 +367,9 @@ object HeartRateManager {
                         _heartRate.value = null
                         _connectedDevice.value = null
                         lastConnectedAtMs = 0L
-                        scheduleReconnect()
+                        if (!manualDisconnectRequested) {
+                            scheduleReconnect()
+                        }
                     }
                 }
             }
@@ -386,6 +407,7 @@ object HeartRateManager {
 
     private fun scheduleReconnect() {
         if (stopped.get()) return
+        if (manualDisconnectRequested) return
         if (_savedDevices.value.isNotEmpty()) {
             startAutoReconnectScan()
             return

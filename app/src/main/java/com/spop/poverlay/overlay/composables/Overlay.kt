@@ -171,6 +171,7 @@ fun Overlay(
             heartRateLabel = heartRate?.toString() ?: SensorValuePlaceholderText,
             onTap = { timerViewModel.onTimerTap() },
             onLongPress = { timerViewModel.onTimerLongPress() },
+            onOpenSettings = { sensorViewModel.onOverlayDoubleTap() },
             onMinimizeToggle = { sensorViewModel.onOverlayPressed() },
             onLayout = onTimerLayout
         )

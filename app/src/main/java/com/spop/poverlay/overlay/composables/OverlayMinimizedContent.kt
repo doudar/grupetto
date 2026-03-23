@@ -13,6 +13,7 @@ import androidx.compose.material.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +48,7 @@ fun OverlayMinimizedContent(
     timerPaused: Boolean,
     onTap: () -> Unit,
     onLongPress: () -> Unit,
+    onOpenSettings: () -> Unit,
     onMinimizeToggle: () -> Unit,
     onLayout: (IntSize) -> Unit
 ) {
@@ -119,6 +121,16 @@ fun OverlayMinimizedContent(
                 iconDrawable = R.drawable.ic_timer
             )
         }
+
+        Spacer(modifier = Modifier.width(6.dp))
+        Icon(
+            imageVector = Icons.Filled.Settings,
+            contentDescription = "Open settings",
+            tint = Color.White,
+            modifier = Modifier
+                .size(20.dp)
+                .clickable { onOpenSettings() }
+        )
 
         // Minimize/Maximize button
         Spacer(modifier = Modifier.width(8.dp))

@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
+import android.os.Process
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -53,6 +54,9 @@ class MainActivity : ComponentActivity() {
         }
         viewModel.requestRestart.observe(this) {
             restartGrupetto()
+        }
+        viewModel.requestQuit.observe(this) {
+            quitGrupetto()
         }
         viewModel.requestIgnoreBatteryOptimizations.observe(this) {
             requestIgnoreBatteryOptimizations()
@@ -104,6 +108,19 @@ class MainActivity : ComponentActivity() {
             val mainIntent = Intent.makeRestartActivityTask(intent!!.component)
             applicationContext.startActivity(mainIntent)
             Runtime.getRuntime().exit(0)
+        }
+    }
+
+    private fun quitGrupetto() {
+        Toast.makeText(
+            this@MainActivity,
+            HtmlCompat.fromHtml("<big>Closing Grupetto</big>", HtmlCompat.FROM_HTML_MODE_LEGACY),
+            Toast.LENGTH_LONG
+        ).apply { setGravity(Gravity.CENTER, 0, 0) }.show()
+
+        CoroutineScope(Dispatchers.IO).launch {
+            delay(750L)
+            Process.killProcess(Process.myPid())
         }
     }
 
