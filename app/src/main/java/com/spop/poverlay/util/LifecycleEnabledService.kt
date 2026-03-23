@@ -42,7 +42,6 @@ abstract class LifecycleEnabledService : Service(), LifecycleOwner, SavedStateRe
         LifecycleRegistry(this)
     }
 
-    // Provide LifecycleOwner implementation explicitly to avoid override issues
     override fun getLifecycle(): Lifecycle = lifecycleRegistry
 
 

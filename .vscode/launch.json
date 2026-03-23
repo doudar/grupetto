@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Gradle: Assemble Debug",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": ".\\gradlew.bat :app:assembleDebug"
+    },
+    {
+      "name": "Gradle: Install Debug",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": ".\\gradlew.bat :app:installDebug"
+    },
+    {
+      "name": "ADB: Launch Grupetto",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "adb shell monkey -p com.spop.poverlay -c android.intent.category.LAUNCHER 1"
+    }
+  ]
+}
