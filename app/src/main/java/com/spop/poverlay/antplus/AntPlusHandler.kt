@@ -24,7 +24,7 @@ import com.dsi.ant.message.fromant.ChannelEventMessage
 import com.dsi.ant.message.fromant.MessageFromAntType
 import com.dsi.ant.message.ipc.AntMessageParcel
 import com.spop.poverlay.BuildConfig
-import com.spop.poverlay.util.AntDebugLogWriter
+
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import timber.log.Timber
@@ -52,7 +52,6 @@ class AntPlusHandler(
         private const val StrictVirtualPowerParityMode = false
     }
 
-    private val debugLogWriter = AntDebugLogWriter(context.applicationContext)
 
     private var antService: AntService? = null
     private var antChannelProvider: AntChannelProvider? = null
@@ -184,7 +183,6 @@ class AntPlusHandler(
             return
         }
 
-        logDebug("ANT_DEBUG: Writing debug log to ${debugLogWriter.describeLocation()}")
         logDebug("ANT_DEBUG: App version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         logDebug(
             "ANT_DEBUG: Flags discoveryMode=$DiscoveryModeEnabled strictParity=$StrictVirtualPowerParityMode device=${AntPlusConstants.DEVICE_NUMBER} txTypes=${AntPlusConstants.TRANSMISSION_TYPES_TO_TRY.joinToString()}"
@@ -926,27 +924,14 @@ class AntPlusHandler(
         }
     }
 
-    private fun logDebug(message: String) {
-        Timber.d(message)
-        debugLogWriter.append("DEBUG", message)
-    }
+    private fun logDebug(message: String) = Timber.d(message)
 
     private fun logWarn(message: String, throwable: Throwable? = null) {
-        if (throwable == null) {
-            Timber.w(message)
-        } else {
-            Timber.w(throwable, message)
-        }
-        debugLogWriter.append("WARN", message, throwable)
+        if (throwable == null) Timber.w(message) else Timber.w(throwable, message)
     }
 
     private fun logError(message: String, throwable: Throwable? = null) {
-        if (throwable == null) {
-            Timber.e(message)
-        } else {
-            Timber.e(throwable, message)
-        }
-        debugLogWriter.append("ERROR", message, throwable)
+        if (throwable == null) Timber.e(message) else Timber.e(throwable, message)
     }
 
     private fun setupCscChannel(channelProvider: AntChannelProvider, transmissionType: Int) {

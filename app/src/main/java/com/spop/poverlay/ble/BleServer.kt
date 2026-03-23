@@ -15,7 +15,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import com.spop.poverlay.BuildConfig
 import com.spop.poverlay.sensor.interfaces.SensorInterface
-import com.spop.poverlay.util.BleDebugLogWriter
+
 import java.util.LinkedList
 import java.util.UUID
 import kotlinx.coroutines.*
@@ -108,8 +108,7 @@ class BleServer(
     private val servicesToRegister = LinkedList<BaseBleService>()
     private var currentlyRegisteringService: BaseBleService? = null
     private var serviceAddTimeoutJob: Job? = null
-    private val bleDebugLogWriter = BleDebugLogWriter(context.applicationContext)
-    
+
     // Advertising state tracking
     private var isAdvertising = false
     private var lastAdvertisingStartTime = 0L
@@ -181,17 +180,14 @@ class BleServer(
 
     fun logBleDebug(message: String) {
         Timber.d(message)
-        bleDebugLogWriter.append("DEBUG", message)
     }
 
     fun logBleWarn(message: String, throwable: Throwable? = null) {
         if (throwable == null) Timber.w(message) else Timber.w(throwable, message)
-        bleDebugLogWriter.append("WARN", message, throwable)
     }
 
     fun logBleError(message: String, throwable: Throwable? = null) {
         if (throwable == null) Timber.e(message) else Timber.e(throwable, message)
-        bleDebugLogWriter.append("ERROR", message, throwable)
     }
 
     //ADD OR EDIT SERVICES HERE
@@ -212,7 +208,6 @@ class BleServer(
             Timber.d("BLE server already started, ignoring duplicate start()")
             return
         }
-        logBleDebug("BLE_DEBUG: Writing debug log to ${bleDebugLogWriter.describeLocation()}")
         logBleDebug("BLE_DEBUG: App version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         val bluetoothAdapter = bluetoothManager.adapter
         if (bluetoothAdapter == null) {

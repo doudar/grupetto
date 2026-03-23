@@ -17,8 +17,8 @@ android {
         applicationId "com.spop.poverlay.beta"
         minSdk 21
         targetSdk 34
-        versionCode 60
-        versionName "v0.0.60"
+        versionCode 64
+        versionName "v0.0.64"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
