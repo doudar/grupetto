@@ -25,6 +25,8 @@ import androidx.core.text.HtmlCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.spop.poverlay.overlay.OverlayService
+import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.releases.ReleaseChecker
 import com.spop.poverlay.ui.theme.PTONOverlayTheme
 import kotlinx.coroutines.CoroutineScope
@@ -118,9 +120,14 @@ class MainActivity : ComponentActivity() {
             Toast.LENGTH_LONG
         ).apply { setGravity(Gravity.CENTER, 0, 0) }.show()
 
-        CoroutineScope(Dispatchers.IO).launch {
+        CoroutineScope(Dispatchers.Main).launch {
+            // Explicitly stop long-running components before closing the task so Android won't revive it.
+            stopService(Intent(this@MainActivity, OverlayService::class.java))
+            HeartRateManager.stop()
+            (application as GrupettoApplication).bleServer.stop()
             delay(750L)
-            Process.killProcess(Process.myPid())
+            finishAffinity()
+            finishAndRemoveTask()
         }
     }
 

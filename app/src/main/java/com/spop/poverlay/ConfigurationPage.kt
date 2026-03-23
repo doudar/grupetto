@@ -7,6 +7,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,7 +33,7 @@ import kotlin.math.min
 private data class UiScale(
                 val value: Float
 ) {
-        fun sp(base: Float) = (base * value).sp
+        fun sp(base: Float) = max(base * value, 16f).sp
         fun dp(base: Float) = (base * value).dp
 }
 
@@ -76,6 +77,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         viewModel.hrSavedDevices.collectAsStateWithLifecycle(initialValue = emptyList())
                 val hrIsScanning by
                         viewModel.hrIsScanning.collectAsStateWithLifecycle(initialValue = false)
+                val isOverlayRunning by
+                        viewModel.isOverlayRunning.collectAsStateWithLifecycle(initialValue = false)
                 StartServicePage(
                         timerShownWhenMinimized,
                         viewModel::onShowTimerWhenMinimizedClicked,
@@ -91,6 +94,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         viewModel::connectHeartRateDevice,
                         viewModel::disconnectHeartRateDevice,
                         viewModel::forgetHeartRateDevice,
+                        isOverlayRunning,
                         uiScale,
                         viewModel::onStartServiceClicked,
                         viewModel::onQuitClicked,
@@ -118,6 +122,7 @@ private fun StartServicePage(
         onConnectHeartRateDevice: (HeartRateDevice) -> Unit,
         onDisconnectHeartRateDevice: () -> Unit,
         onForgetHeartRateDevice: (String) -> Unit,
+        isOverlayRunning: Boolean,
         uiScale: UiScale,
         onClickedStartOverlay: () -> Unit,
         onClickedQuitApp: () -> Unit,
@@ -134,13 +139,16 @@ private fun StartServicePage(
     val accentColor = Color(0xFF4DA3FF)
     val hrStatus = hrConnectedDevice?.let { "Connected to ${it.name ?: it.address}" } ?: "Disconnected"
 
-    Column(
-            modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = uiScale.dp(16f))
-                    .widthIn(max = contentWidth),
-            horizontalAlignment = Alignment.CenterHorizontally
+    CompositionLocalProvider(
+            LocalTextStyle provides LocalTextStyle.current.copy(fontSize = uiScale.sp(16f))
     ) {
+        Column(
+                modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = uiScale.dp(16f))
+                        .widthIn(max = contentWidth),
+                horizontalAlignment = Alignment.CenterHorizontally
+        ) {
         Text(
                 text = "Grupetto",
                 fontSize = uiScale.sp(40f),
@@ -167,7 +175,7 @@ private fun StartServicePage(
                         colors = ButtonDefaults.buttonColors(backgroundColor = accentColor)
                 ) {
                     Text(
-                            text = "Start Overlay",
+                            text = if (isOverlayRunning) "Restart Overlay" else "Start Overlay",
                             fontSize = uiScale.sp(18f),
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -197,7 +205,11 @@ private fun StartServicePage(
                         Text("Show timer when minimized", fontSize = uiScale.sp(16f), color = bodyColor)
                         Switch(
                                 checked = timerShownWhenMinimized,
-                                onCheckedChange = onTimerShownWhenMinimizedToggled
+                                onCheckedChange = onTimerShownWhenMinimizedToggled,
+                                colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color(0xFF22C55E),
+                                        checkedTrackColor = Color(0xFF22C55E)
+                                )
                         )
                     }
                 }
@@ -219,7 +231,11 @@ private fun StartServicePage(
                         Text("Enable BLE TX", fontSize = uiScale.sp(16f), color = bodyColor)
                         Switch(
                                 checked = bleTxEnabled,
-                                onCheckedChange = onBleTxEnabledToggled
+                                onCheckedChange = onBleTxEnabledToggled,
+                                colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color(0xFF22C55E),
+                                        checkedTrackColor = Color(0xFF22C55E)
+                                )
                         )
                     }
                     Spacer(modifier = Modifier.height(uiScale.dp(8f)))
@@ -315,7 +331,7 @@ private fun StartServicePage(
                     } else {
                         "New version: ${latestRelease.friendlyName} • $formattedDate"
                     }
-                    Text(text, color = bodyColor, fontSize = uiScale.sp(13f))
+                    Text(text, color = bodyColor, fontSize = uiScale.sp(16f))
                     TextButton(onClick = { onClickedRelease(latestRelease) }) {
                         Text("View release", color = accentColor)
                     }
@@ -349,6 +365,7 @@ private fun StartServicePage(
                 fontSize = uiScale.sp(12f),
                 color = LocalContentColor.current.copy(alpha = .55f)
         )
+        }
     }
 
     if (showHeartRateDialog) {
@@ -440,6 +457,9 @@ private fun HeartRateManagerDialog(
                 }
         }
 
+        CompositionLocalProvider(
+                LocalTextStyle provides LocalTextStyle.current.copy(fontSize = 16.sp)
+        ) {
         AlertDialog(
                         onDismissRequest = onDismiss,
                         backgroundColor = cardColor,
@@ -463,14 +483,14 @@ private fun HeartRateManagerDialog(
                                                          Column(modifier = Modifier.weight(1f)) {
                                                                  Text(
                                                                                  text = connectedDevice.name ?: "Unknown",
-                                                                                 fontSize = 14.sp,
+                                                                                 fontSize = 16.sp,
                                                                                  color = headingColor
-                                                                 )
-                                                                 Text(
+                                                                  )
+                                                                  Text(
                                                                                  text = connectedDevice.address,
-                                                                                 fontSize = 12.sp,
+                                                                                 fontSize = 16.sp,
                                                                                  color = bodyColor
-                                                                 )
+                                                                  )
                                                                  Row(
                                                                                  verticalAlignment = Alignment.CenterVertically
                                                                  ) {
@@ -483,10 +503,10 @@ private fun HeartRateManagerDialog(
                                                                          Spacer(modifier = Modifier.width(6.dp))
                                                                          Text(
                                                                                          text = "${currentHeartRate ?: "--"} bpm",
-                                                                                         fontSize = 14.sp,
+                                                                                         fontSize = 16.sp,
                                                                                          fontWeight = FontWeight.Bold,
                                                                                          color = headingColor
-                                                                         )
+                                                                          )
                                                                  }
                                                          }
                                                          Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -551,12 +571,12 @@ private fun HeartRateManagerDialog(
                                                                 Column(modifier = Modifier.weight(1f)) {
                                                                         Text(
                                                                                         text = device.name ?: "Unknown",
-                                                                                        fontSize = 14.sp,
+                                                                                        fontSize = 16.sp,
                                                                                         color = headingColor
                                                                         )
                                                                         Text(
                                                                                         text = device.address,
-                                                                                        fontSize = 12.sp,
+                                                                                        fontSize = 16.sp,
                                                                                         color = bodyColor
                                                                         )
                                                                 }
@@ -587,7 +607,7 @@ private fun HeartRateManagerDialog(
                                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                                         ) {
                                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                        Text("Zone 1-2", fontSize = 12.sp, color = bodyColor)
+                                                        Text("Zone 1-2", fontSize = 16.sp, color = bodyColor)
                                                         TextField(
                                                                 value = zone12.value,
                                                                 onValueChange = {
@@ -600,7 +620,7 @@ private fun HeartRateManagerDialog(
                                                         )
                                                 }
                                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                        Text("Zone 2-3", fontSize = 12.sp, color = bodyColor)
+                                                        Text("Zone 2-3", fontSize = 16.sp, color = bodyColor)
                                                         TextField(
                                                                 value = zone23.value,
                                                                 onValueChange = {
@@ -613,7 +633,7 @@ private fun HeartRateManagerDialog(
                                                         )
                                                 }
                                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                        Text("Zone 3-4", fontSize = 12.sp, color = bodyColor)
+                                                        Text("Zone 3-4", fontSize = 16.sp, color = bodyColor)
                                                         TextField(
                                                                 value = zone34.value,
                                                                 onValueChange = {
@@ -626,7 +646,7 @@ private fun HeartRateManagerDialog(
                                                         )
                                                 }
                                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                        Text("Zone 4-5", fontSize = 12.sp, color = bodyColor)
+                                                        Text("Zone 4-5", fontSize = 16.sp, color = bodyColor)
                                                         TextField(
                                                                 value = zone45.value,
                                                                 onValueChange = {
@@ -652,6 +672,7 @@ private fun HeartRateManagerDialog(
                                 }
                         }
         )
+        }
 }
 
 @Composable
@@ -659,7 +680,7 @@ private fun SectionHeader(title: String) {
         Text(
                         text = title,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
+                        fontSize = 16.sp,
                         color = Color(0xFFF2F2F2)
         )
         Spacer(modifier = Modifier.height(6.dp))
@@ -680,10 +701,10 @@ private fun HeartRateDeviceRow(
                         horizontalArrangement = Arrangement.SpaceBetween
         ) {
                 Column(modifier = Modifier.weight(1f)) {
-                        Text(text = device.name ?: "Unknown", fontSize = 14.sp, color = titleColor)
+                        Text(text = device.name ?: "Unknown", fontSize = 16.sp, color = titleColor)
                         Text(
                                         text = device.address,
-                                        fontSize = 12.sp,
+                                        fontSize = 16.sp,
                                         color = subtitleColor
                         )
                 }

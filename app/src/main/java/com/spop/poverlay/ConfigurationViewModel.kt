@@ -19,6 +19,7 @@ import com.spop.poverlay.releases.ReleaseChecker
 import com.spop.poverlay.sensor.heartrate.HeartRateDevice
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import timber.log.Timber
 
@@ -40,6 +41,7 @@ class ConfigurationViewModel(
     val hrDiscoveredDevices = HeartRateManager.discoveredDevices
     val hrSavedDevices = HeartRateManager.savedDevices
     val hrIsScanning = HeartRateManager.isScanning
+    val isOverlayRunning: StateFlow<Boolean> = OverlayService.isRunning
 
     var latestRelease = mutableStateOf<Release?>(null)
 
@@ -219,6 +221,14 @@ class ConfigurationViewModel(
     }
 
     fun onAppResumed() {
+        if (isOverlayRunning.value) {
+            ContextCompat.startForegroundService(
+                getApplication(),
+                Intent(getApplication(), OverlayService::class.java).apply {
+                    action = OverlayService.ActionMinimizeOverlay
+                }
+            )
+        }
         if (bleTxEnabled.value && !hasBluetoothPermissions()) {
             val permissions = getRequiredBluetoothPermissions()
             requestBluetoothPermissions.value = permissions
