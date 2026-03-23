@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
+import android.os.Process
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -24,6 +25,8 @@ import androidx.core.text.HtmlCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.spop.poverlay.overlay.OverlayService
+import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.releases.ReleaseChecker
 import com.spop.poverlay.ui.theme.PTONOverlayTheme
 import kotlinx.coroutines.CoroutineScope
@@ -53,6 +56,9 @@ class MainActivity : ComponentActivity() {
         }
         viewModel.requestRestart.observe(this) {
             restartGrupetto()
+        }
+        viewModel.requestQuit.observe(this) {
+            quitGrupetto()
         }
         viewModel.requestIgnoreBatteryOptimizations.observe(this) {
             requestIgnoreBatteryOptimizations()
@@ -104,6 +110,24 @@ class MainActivity : ComponentActivity() {
             val mainIntent = Intent.makeRestartActivityTask(intent!!.component)
             applicationContext.startActivity(mainIntent)
             Runtime.getRuntime().exit(0)
+        }
+    }
+
+    private fun quitGrupetto() {
+        Toast.makeText(
+            this@MainActivity,
+            HtmlCompat.fromHtml("<big>Closing Grupetto</big>", HtmlCompat.FROM_HTML_MODE_LEGACY),
+            Toast.LENGTH_LONG
+        ).apply { setGravity(Gravity.CENTER, 0, 0) }.show()
+
+        CoroutineScope(Dispatchers.Main).launch {
+            // Explicitly stop long-running components before closing the task so Android won't revive it.
+            stopService(Intent(this@MainActivity, OverlayService::class.java))
+            HeartRateManager.stop()
+            (application as GrupettoApplication).bleServer.stop()
+            delay(750L)
+            finishAffinity()
+            finishAndRemoveTask()
         }
     }
 

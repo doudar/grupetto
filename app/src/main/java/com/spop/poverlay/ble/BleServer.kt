@@ -13,6 +13,7 @@ import android.content.pm.PackageManager
 import android.os.ParcelUuid
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
+import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.sensor.interfaces.SensorInterface
 import java.util.LinkedList
 import java.util.UUID
@@ -99,6 +100,7 @@ class BleServer(
     override val coroutineContext = SupervisorJob() + Dispatchers.IO
     private var sensorDataJob: Job? = null
     private var watchdogJob: Job? = null
+    private var heartRateServiceWatcherJob: Job? = null
 
     private var gattServer: BluetoothGattServer? = null
     private var advertiser: BluetoothLeAdvertiser? = null
@@ -112,6 +114,7 @@ class BleServer(
     private var lastAdvertisingStartTime = 0L
     private var lastAdvertisingFailureCode: Int? = null
     private var isServerStarted = false
+    private var heartRateServiceEnabled = false
 
     // CCCD UUID for checking notification subscriptions
     private val CLIENT_CHARACTERISTIC_CONFIG = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
@@ -173,15 +176,21 @@ class BleServer(
 
     //ADD OR EDIT SERVICES HERE
     private fun setupServices() {
-        servicesToRegister.addAll(
-                listOf(
-                        FitnessMachineService(this),
-                        CyclingPowerService(this),
-                        CyclingSpeedAndCadenceService(this),
-                        DeviceInformationService(this)
-                )
-        )
+        servicesToRegister.addAll(baseServices(heartRateEnabled = heartRateServiceEnabled))
         registerNextService()
+    }
+
+    private fun baseServices(heartRateEnabled: Boolean): List<BaseBleService> {
+        val services = mutableListOf<BaseBleService>(
+            FitnessMachineService(this),
+            CyclingPowerService(this),
+            CyclingSpeedAndCadenceService(this),
+            DeviceInformationService(this)
+        )
+        if (heartRateEnabled) {
+            services.add(HeartRateService(this))
+        }
+        return services
     }
 
     fun start() {
@@ -238,9 +247,10 @@ class BleServer(
             // Register bond state receiver
             val bondFilter = IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
             context.registerReceiver(bondStateReceiver, bondFilter)
-            
+            heartRateServiceEnabled = HeartRateManager.connectedDevice.value != null
             setupServices()
             startWatchdog()
+            startHeartRateServiceWatcher()
             
             isServerStarted = true
         } catch (e: SecurityException) {
@@ -290,6 +300,7 @@ class BleServer(
             isServerStarted = false
             stopWatchdog()
             stopSensorDataUpdates()
+            stopHeartRateServiceWatcher()
             stopAdvertising()
             
             // Unregister Bluetooth state change receiver
@@ -312,6 +323,7 @@ class BleServer(
             registeredServices.clear()
             servicesToRegister.clear()
             currentlyRegisteringService = null
+            heartRateServiceEnabled = false
             
             // Reset state tracking
             isAdvertising = false
@@ -336,6 +348,40 @@ class BleServer(
         } catch (e: SecurityException) {
             Timber.e(e, "Missing bluetooth permissions")
         }
+    }
+
+    private fun startHeartRateServiceWatcher() {
+        heartRateServiceWatcherJob?.cancel()
+        heartRateServiceWatcherJob = launch {
+            HeartRateManager.connectedDevice
+                .collect { connectedDevice ->
+                    val shouldEnable = connectedDevice != null
+                    if (!isServerStarted || shouldEnable == heartRateServiceEnabled) {
+                        return@collect
+                    }
+                    updateHeartRateServiceRegistration(shouldEnable)
+                }
+        }
+    }
+
+    private fun stopHeartRateServiceWatcher() {
+        heartRateServiceWatcherJob?.cancel()
+        heartRateServiceWatcherJob = null
+    }
+
+    private fun updateHeartRateServiceRegistration(enable: Boolean) {
+        heartRateServiceEnabled = enable
+        Timber.i("Heart rate BLE service ${if (enable) "enabled" else "disabled"}")
+
+        stopSensorDataUpdates()
+        stopAdvertising()
+        gattServer?.clearServices()
+        registeredServices.clear()
+        servicesToRegister.clear()
+        currentlyRegisteringService = null
+
+        servicesToRegister.addAll(baseServices(heartRateEnabled = enable))
+        registerNextService()
     }
 
     fun notifyCharacteristicChanged(

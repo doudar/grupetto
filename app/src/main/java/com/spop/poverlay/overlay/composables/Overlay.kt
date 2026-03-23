@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.spop.poverlay.overlay.composables.OverlayMainContent
 import com.spop.poverlay.overlay.composables.OverlayMinimizedContent
+import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.drop
@@ -65,6 +66,8 @@ fun Overlay(
     val speed by sensorViewModel.speedValue.collectAsState(initial = SensorValuePlaceholderText)
     val speedLabel by sensorViewModel.speedLabel.collectAsState(initial = "")
     val calories by sensorViewModel.caloriesValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
+    val heartRate by HeartRateManager.heartRate.collectAsStateWithLifecycle(initialValue = null)
+    val connectedHeartRateDevice by HeartRateManager.connectedDevice.collectAsStateWithLifecycle(initialValue = null)
     val timerLabel by timerViewModel.timerLabel.collectAsState(initial = "")
     val isTimerPaused by timerViewModel.timerPaused.collectAsState(initial = false)
     val errorMessage by sensorViewModel.errorMessage.collectAsState(initial = null)
@@ -74,12 +77,14 @@ fun Overlay(
     val maxCadence by sensorViewModel.maxCadence.collectAsState()
     val maxResistance by sensorViewModel.maxResistance.collectAsState()
     val maxSpeed by sensorViewModel.maxSpeed.collectAsState()
+    val maxHeartRate by sensorViewModel.maxHeartRate.collectAsState()
 
     // Session totals and averages
     val totalEnergy by sensorViewModel.totalEnergy.collectAsState()
     val totalDistance by sensorViewModel.totalDistance.collectAsState()
     val avgCadence by sensorViewModel.avgCadence.collectAsState()
     val avgResistance by sensorViewModel.avgResistance.collectAsState()
+    val avgHeartRate by sensorViewModel.avgHeartRate.collectAsState()
 
     var isCurrentlyAnimating by remember { mutableStateOf(false) }
 
@@ -94,7 +99,14 @@ fun Overlay(
     }
 
     val minimized by sensorViewModel.isMinimized.collectAsState(initial = false)
+    val showHeartRateCard = connectedHeartRateDevice != null
     val location by locationState
+    LaunchedEffect(showHeartRateCard, selectedMetric) {
+        if (!showHeartRateCard && selectedMetric == MetricType.HEART_RATE) {
+            sensorViewModel.onMetricSelected(MetricType.POWER)
+        }
+    }
+
     val size = remember { mutableStateOf(IntSize.Zero) }
 
 
@@ -156,8 +168,10 @@ fun Overlay(
             cadenceLabel = rpm,
             speedLabel = speed,
             resistanceLabel = resistance,
+            heartRateLabel = heartRate?.toString() ?: SensorValuePlaceholderText,
             onTap = { timerViewModel.onTimerTap() },
             onLongPress = { timerViewModel.onTimerLongPress() },
+            onOpenSettings = { sensorViewModel.onOverlayDoubleTap() },
             onMinimizeToggle = { sensorViewModel.onOverlayPressed() },
             onLayout = onTimerLayout
         )
@@ -208,6 +222,7 @@ fun Overlay(
                 resistance = resistance,
                 speed = speed,
                 speedLabel = speedLabel,
+                heartRate = heartRate?.toString() ?: SensorValuePlaceholderText,
                 calories = calories,
                 maxPower = "%.0f".format(maxPower),
                 maxCadence = "%.0f".format(maxCadence),
@@ -222,6 +237,9 @@ fun Overlay(
                 distanceUnit = if (speedLabel == "mph") "mi" else "km",
                 avgCadence = "%.0f".format(avgCadence),
                 avgResistance = "%.0f".format(avgResistance),
+                maxHeartRate = "%.0f".format(maxHeartRate),
+                avgHeartRate = "%.0f".format(avgHeartRate),
+                showHeartRateCard = showHeartRateCard,
                 onMetricSelected = { sensorViewModel.onMetricSelected(it) },
                 onSpeedUnitClicked = { sensorViewModel.onClickedSpeedUnit() },
                 onChartClicked = { sensorViewModel.onOverlayPressed() }

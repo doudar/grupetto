@@ -46,6 +46,8 @@ import com.spop.poverlay.util.IsG700CrossTrainer
 import com.spop.poverlay.util.IsRunningOnPeloton
 import com.spop.poverlay.util.LifecycleEnabledService
 import com.spop.poverlay.util.disableAnimations
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -58,6 +60,7 @@ import kotlin.math.roundToInt
 
 class OverlayService : LifecycleEnabledService() {
     companion object {
+        const val ActionMinimizeOverlay = "com.spop.poverlay.action.MINIMIZE_OVERLAY"
         private const val DefaultOverlayFlags = (LayoutParams.FLAG_NOT_TOUCH_MODAL
                 or LayoutParams.FLAG_NOT_FOCUSABLE
                 or LayoutParams.FLAG_LAYOUT_NO_LIMITS)
@@ -79,6 +82,9 @@ class OverlayService : LifecycleEnabledService() {
 
         // Replace with DeadSensorInterface to simulate a dead sensor
         val EmulatorSensorInterface by lazy { DummySensorInterface() }
+
+        private val mutableIsRunning = MutableStateFlow(false)
+        val isRunning = mutableIsRunning.asStateFlow()
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -86,10 +92,12 @@ class OverlayService : LifecycleEnabledService() {
     private var overlayView: View? = null
     private var touchTargetView: View? = null
     private var windowManager: WindowManager? = null
+    private var sensorViewModel: OverlaySensorViewModel? = null
     private val bleServer by lazy { (application as GrupettoApplication).bleServer }
 
     override fun onCreate() {
         super.onCreate()
+        mutableIsRunning.value = true
         syncBackgroundExecutionGuards()
         val notification = prepareNotification(NotificationManagerCompat.from(this))
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -118,13 +126,18 @@ class OverlayService : LifecycleEnabledService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Timber.i("overlay service received intent")
+        if (intent?.action == ActionMinimizeOverlay) {
+            sensorViewModel?.minimizeOverlay()
+        }
         syncBackgroundExecutionGuards()
         return START_STICKY
     }
 
     override fun onDestroy() {
+        mutableIsRunning.value = false
         removeOverlayViews()
         releaseWakeLock()
+        sensorViewModel = null
         super.onDestroy()
     }
 
@@ -171,6 +184,7 @@ class OverlayService : LifecycleEnabledService() {
             DeadSensorDetector(sensorInterface, this.coroutineContext),
             timerViewModel
         )
+        this.sensorViewModel = sensorViewModel
         // Wire up timer to auto-start/pause based on movement
         timerViewModel.observeMovement(sensorViewModel.isMoving, sensorViewModel.sessionReset)
 
