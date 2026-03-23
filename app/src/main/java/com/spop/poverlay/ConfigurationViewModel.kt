@@ -15,6 +15,8 @@ import androidx.lifecycle.viewModelScope
 import com.spop.poverlay.overlay.OverlayService
 import com.spop.poverlay.releases.Release
 import com.spop.poverlay.releases.ReleaseChecker
+import com.spop.poverlay.sensor.heartrate.HeartRateDevice
+import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -30,6 +32,11 @@ class ConfigurationViewModel(
     val requestBluetoothPermissions = MutableLiveData<Array<String>>()
     val showPermissionInfo = mutableStateOf(false)
     val infoPopup = MutableLiveData<String>()
+
+    val hrConnectedDevice = HeartRateManager.connectedDevice
+    val hrDiscoveredDevices = HeartRateManager.discoveredDevices
+    val hrSavedDevices = HeartRateManager.savedDevices
+    val hrIsScanning = HeartRateManager.isScanning
 
     var latestRelease = mutableStateOf<Release?>(null)
 
@@ -49,6 +56,7 @@ class ConfigurationViewModel(
 
     init {
         updatePermissionState()
+        HeartRateManager.start(getApplication())
         if (bleTxEnabled.value && hasBluetoothPermissions()) {
             bleServer.start()
         }
@@ -164,6 +172,22 @@ class ConfigurationViewModel(
         val browserIntent = Intent(Intent.ACTION_VIEW, release.url)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         getApplication<Application>().startActivity(browserIntent)
+    }
+
+    fun startHeartRateDiscovery() {
+        HeartRateManager.startDiscovery()
+    }
+
+    fun stopHeartRateDiscovery() {
+        HeartRateManager.stopDiscovery()
+    }
+
+    fun connectHeartRateDevice(device: HeartRateDevice) {
+        HeartRateManager.connectTo(device)
+    }
+
+    fun forgetHeartRateDevice(address: String) {
+        HeartRateManager.forgetDevice(address)
     }
 
     fun onResume() {

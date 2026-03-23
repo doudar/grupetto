@@ -11,11 +11,11 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.ParcelUuid
 import androidx.core.content.edit
-import com.spop.poverlay.sensor.interfaces.SensorInterface
+import com.spop.poverlay.sensor.SensorSnapshot
+import com.spop.poverlay.sensor.SensorSnapshotRepository
 import java.util.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import timber.log.Timber
@@ -91,7 +91,7 @@ abstract class BaseBleService(val server: BleServer) : SensorDataListener {
 class BleServer(
         private val context: Context,
         private val bluetoothManager: BluetoothManager,
-        private val sensorInterface: SensorInterface,
+    private val sensorSnapshotRepository: SensorSnapshotRepository,
         private val timeProvider: TimeProvider = SystemTimeProvider()
 ) : BluetoothGattServerCallback(), CoroutineScope {
 
@@ -110,11 +110,21 @@ class BleServer(
     private var lastAdvertisingStartTime = 0L
     private var lastAdvertisingFailureCode: Int? = null
     private var isServerStarted = false
+
+    // CCCD UUID for checking notification subscriptions
+    private val CLIENT_CHARACTERISTIC_CONFIG = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+    
+    // Track notification subscriptions: Device Address -> Set of Characteristic UUIDs
+    private val notificationSubscriptions = mutableMapOf<String, MutableSet<UUID>>()
     
     // Watchdog configuration
     companion object {
         private const val WATCHDOG_INITIAL_DELAY_MS = 60_000L // 1 minute
         private const val WATCHDOG_CHECK_INTERVAL_MS = 120_000L // 2 minutes
+        
+        // Standard BLE sensors typically update at 1Hz. 
+        // We use a slight offset to avoid aliasing with sensor sampling rates.
+        private const val SENSOR_UPDATE_INTERVAL_MS = 709L 
     }
     
     // Bluetooth adapter state receiver
@@ -150,7 +160,6 @@ class BleServer(
         // Set the Bluetooth adapter name to "Grupetto"
         try {
             bluetoothAdapter.name = "Grupetto"
-            Timber.d("Bluetooth adapter name set to Grupetto")
         } catch (e: SecurityException) {
             Timber.e(e, "Missing bluetooth permissions to set adapter name")
         } catch (e: Exception) {
@@ -171,7 +180,6 @@ class BleServer(
             // Register Bluetooth state change receiver
             val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
             context.registerReceiver(bluetoothStateReceiver, filter)
-            Timber.d("Registered Bluetooth state change receiver")
             
             setupServices()
             startWatchdog()
@@ -207,10 +215,8 @@ class BleServer(
             // Unregister Bluetooth state change receiver
             try {
                 context.unregisterReceiver(bluetoothStateReceiver)
-                Timber.d("Unregistered Bluetooth state change receiver")
             } catch (e: IllegalArgumentException) {
                 // Receiver was not registered, this is normal if stop() called without start()
-                Timber.d("Bluetooth state receiver was not registered (normal if not started)")
             }
             
             gattServer?.clearServices()
@@ -234,6 +240,15 @@ class BleServer(
             characteristic: BluetoothGattCharacteristic,
             confirm: Boolean
     ) {
+        // Convention compliance: Only notify if subscribed (handled by tracking CCCD writes)
+        val isSubscribed = synchronized(notificationSubscriptions) {
+            notificationSubscriptions[device.address]?.contains(characteristic.uuid) == true
+        }
+
+        if (!isSubscribed) {
+             return
+        }
+
         try {
             gattServer?.notifyCharacteristicChanged(device, characteristic, confirm)
         } catch (e: SecurityException) {
@@ -269,11 +284,9 @@ class BleServer(
                 }
             }
             BluetoothAdapter.STATE_TURNING_OFF -> {
-                Timber.d("Bluetooth turning off")
                 isAdvertising = false
             }
             BluetoothAdapter.STATE_TURNING_ON -> {
-                Timber.d("Bluetooth turning on")
             }
         }
     }
@@ -294,13 +307,11 @@ class BleServer(
                 delay(WATCHDOG_CHECK_INTERVAL_MS)
             }
         }
-        Timber.d("Started advertising watchdog")
     }
     
     private fun stopWatchdog() {
         watchdogJob?.cancel()
         watchdogJob = null
-        Timber.d("Stopped advertising watchdog")
     }
     
     private fun hasConnectedDevices(): Boolean {
@@ -316,7 +327,6 @@ class BleServer(
         }
         
         if (!bluetoothAdapter.isEnabled) {
-            Timber.d("Watchdog: Bluetooth is disabled, waiting for it to be enabled")
             isAdvertising = false
             return
         }
@@ -329,7 +339,6 @@ class BleServer(
             
             if (hasConnectedDevices() && timeSinceLastStart < 5000) {
                 // Recent connection, advertising is being restarted automatically
-                Timber.d("Watchdog: Recent connection detected, waiting for automatic advertising restart")
                 return
             }
             
@@ -355,7 +364,6 @@ class BleServer(
             }
         } else if (isAdvertising) {
             val timeSinceStart = System.currentTimeMillis() - lastAdvertisingStartTime
-            Timber.d("Watchdog: Advertising active for ${timeSinceStart / 1000}s")
         }
     }
     
@@ -450,7 +458,6 @@ class BleServer(
         try {
             advertiser?.stopAdvertising(advertisingCallback)
             isAdvertising = false
-            Timber.d("Stopped advertising")
         } catch (e: SecurityException) {
             Timber.e(e, "Missing bluetooth permissions")
         }
@@ -491,7 +498,6 @@ class BleServer(
         }
 
         if (status == BluetoothGatt.GATT_SUCCESS) {
-            Timber.d("Service added ${service.uuid}")
             registeredServices.add(currentlyRegisteringService!!)
         } else {
             Timber.e("Failed to add service ${service.uuid}, status: $status")
@@ -500,10 +506,9 @@ class BleServer(
     }
 
     override fun onConnectionStateChange(device: BluetoothDevice?, status: Int, newState: Int) {
-        if (newState == BluetoothProfile.STATE_CONNECTED) {
+        if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
             device?.let { 
                 registeredServices.forEach { it.onConnected(device) }
-                Timber.d("Device connected: ${device.address}")
                 
                 // Restart advertising to allow additional clients to connect (support multiple connections)
                 if (!isAdvertising && isServerStarted) {
@@ -518,9 +523,12 @@ class BleServer(
                 }
             }
         } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+            // Clean up subscriptions
+            synchronized(notificationSubscriptions) {
+                notificationSubscriptions.remove(device?.address)
+            }
             device?.let { 
                 registeredServices.forEach { it.onDisconnected(device) }
-                Timber.d("Device disconnected: ${device.address}")
                 
                 // Restart advertising if no devices are connected anymore
                 if (!hasConnectedDevices() && !isAdvertising && isServerStarted) {
@@ -535,6 +543,10 @@ class BleServer(
                 }
             }
         }
+    }
+
+    override fun onMtuChanged(device: BluetoothDevice?, mtu: Int) {
+        Timber.d("onMtuChanged: $mtu for ${device?.address}")
     }
 
     private fun findServiceForCharacteristic(uuid: UUID?): BaseBleService? {
@@ -595,6 +607,28 @@ class BleServer(
             offset: Int,
             value: ByteArray?
     ) {
+        // Convention compliance: Track CCCD state
+        if (descriptor.uuid == CLIENT_CHARACTERISTIC_CONFIG && value != null) {
+            val isEnabled = Arrays.equals(value, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) ||
+                           Arrays.equals(value, BluetoothGattDescriptor.ENABLE_INDICATION_VALUE)
+            val isDisable = Arrays.equals(value, BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE)
+
+            synchronized(notificationSubscriptions) {
+                val deviceAddress = device.address
+                if (isEnabled) {
+                    val uuidSet = notificationSubscriptions.getOrPut(deviceAddress) { mutableSetOf() }
+                    uuidSet.add(descriptor.characteristic.uuid)
+                    Timber.d("Notifications enabled for ${descriptor.characteristic.uuid} on $deviceAddress")
+                } else if (isDisable) {
+                    notificationSubscriptions[deviceAddress]?.remove(descriptor.characteristic.uuid)
+                    if (notificationSubscriptions[deviceAddress]?.isEmpty() == true) {
+                        notificationSubscriptions.remove(deviceAddress)
+                    }
+                    Timber.d("Notifications disabled for ${descriptor.characteristic.uuid} on $deviceAddress")
+                }
+            }
+        }
+
         findServiceForCharacteristic(descriptor.characteristic.service.uuid)
                 ?.onDescriptorWriteRequest(
                         device,
@@ -625,25 +659,22 @@ class BleServer(
             val resistanceBuffer = mutableListOf<Float>()
 
             launch {
-                combine(
-                                sensorInterface.cadence,
-                                sensorInterface.power,
-                                sensorInterface.speed,
-                                sensorInterface.resistance
-                        ) { cadence, power, speed, resistance ->
-                            mutex.withLock {
-                                cadenceBuffer.add(cadence)
-                                powerBuffer.add(power)
-                                speedBuffer.add(speed)
-                                resistanceBuffer.add(resistance)
-                            }
-                        }
-                        .collect()
+                sensorSnapshotRepository.snapshot.collect { snapshot: SensorSnapshot ->
+                    mutex.withLock {
+                        cadenceBuffer.add(snapshot.cadence)
+                        powerBuffer.add(snapshot.power)
+                        speedBuffer.add(snapshot.speed)
+                        resistanceBuffer.add(snapshot.resistance)
+                    }
+                }
             }
 
             launch {
                 while (isActive) {
-                    delay(300)
+                    // Use a standard interval (~1Hz) to be consistent with typical clients.
+                    // The slight offset (e.g. 1003ms) prevents phase-locking/aliasing with incoming sensor data loops.
+                    delay(SENSOR_UPDATE_INTERVAL_MS)
+                    
                     val buffers =
                             mutex.withLock {
                                 if (cadenceBuffer.isEmpty()) null
@@ -733,22 +764,24 @@ class BleServer(
     private fun smooth(prev: Float?, value: Float, alpha: Float): Float =
         if (prev == null) value else (alpha * value + (1f - alpha) * prev)
 
-    private fun smoothCadence(v: Float, alpha: Float = 0.35f): Float {
+    // With 1Hz updates, we increase alpha (reduce smoothing) to maintain responsiveness.
+    // The previous 1-second buffering already provides significant noise reduction.
+    private fun smoothCadence(v: Float, alpha: Float = 0.7f): Float {
         smoothedCadence = smooth(smoothedCadence, v, alpha)
         return smoothedCadence!!
     }
 
-    private fun smoothPower(v: Float, alpha: Float = 0.25f): Float {
+    private fun smoothPower(v: Float, alpha: Float = 0.7f): Float {
         smoothedPower = smooth(smoothedPower, v, alpha)
         return smoothedPower!!
     }
 
-    private fun smoothSpeed(vMph: Float, alpha: Float = 0.4f): Float {
+    private fun smoothSpeed(vMph: Float, alpha: Float = 0.7f): Float {
         smoothedSpeedMph = smooth(smoothedSpeedMph, vMph, alpha)
         return smoothedSpeedMph!!
     }
 
-    private fun smoothResistance(v: Float, alpha: Float = 0.35f): Float {
+    private fun smoothResistance(v: Float, alpha: Float = 0.7f): Float {
         smoothedResistance = smooth(smoothedResistance, v, alpha)
         return smoothedResistance!!
     }

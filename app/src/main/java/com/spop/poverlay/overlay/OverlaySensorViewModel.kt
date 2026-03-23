@@ -1,4 +1,4 @@
-@file:OptIn(kotlinx.coroutines.InternalCoroutinesApi::class, kotlin.time.ExperimentalTime::class)
+@file:OptIn(kotlinx.coroutines.InternalCoroutinesApi::class, kotlin.time.ExperimentalTime::class, kotlinx.coroutines.FlowPreview::class)
 
 package com.spop.poverlay.overlay
 
@@ -9,9 +9,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.spop.poverlay.MainActivity
 import com.spop.poverlay.sensor.DeadSensorDetector
+import com.spop.poverlay.sensor.SensorSnapshot
+import com.spop.poverlay.sensor.SensorSnapshotRepository
 import com.spop.poverlay.sensor.interfaces.SensorInterface
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.util.smoothSensorValue
+import com.spop.poverlay.util.windowed
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,7 +33,7 @@ import kotlin.time.Duration.Companion.minutes
 private const val MphToKph = 1.60934
 
 enum class MetricType {
-    POWER, CADENCE, RESISTANCE, SPEED
+    POWER, CADENCE, RESISTANCE, SPEED, HEART
 }
 
 /**
@@ -53,16 +57,20 @@ private const val CaloriesPerJoule = 4184.0 // Joules per kcal (thermochemical c
 class OverlaySensorViewModel(
     application: Application,
     private val sensorInterface: SensorInterface,
+    private val sensorSnapshotRepository: SensorSnapshotRepository,
     private val deadSensorDetector: DeadSensorDetector,
     private val timerViewModel: OverlayTimerViewModel
 ) : AndroidViewModel(application) {
 
     companion object {
         // The sensor does not necessarily return new value this quickly
-        val GraphUpdatePeriod = 400.milliseconds
+        val GraphUpdatePeriod = 800.milliseconds
+
+        // Rolling average window for power smoothing
+        private const val PowerAverageWindowSize = 4
 
         // Max number of points before data starts to shift
-        const val GraphMaxDataPoints = 300
+        const val GraphMaxDataPoints = 150
 
         // Reset max values after all metrics are zero for this duration
         val MaxResetTimeout = 5.minutes
@@ -222,16 +230,25 @@ class OverlaySensorViewModel(
         }
     }
 
-    val powerValue = sensorInterface.power
-        .map { "%.0f".format(it) }
-    val rpmValue = sensorInterface.cadence
-        .map { "%.0f".format(it) }
+    private val smoothedPower = sensorInterface.power
+        .windowed(PowerAverageWindowSize, 1, true) { readings ->
+            readings.average().toFloat()
+        }
 
-    val resistanceValue = sensorInterface.resistance
-        .map { "%.0f".format(it) }
+    private val uiSensorSnapshot = sensorSnapshotRepository.uiSnapshot
+    private val rawSensorSnapshot = sensorSnapshotRepository.snapshot
+
+    val powerValue = uiSensorSnapshot
+        .map { "%.0f".format(it.power) }
+
+    val rpmValue = uiSensorSnapshot
+        .map { "%.0f".format(it.cadence) }
+
+    val resistanceValue = uiSensorSnapshot
+        .map { "%.0f".format(it.resistance) }
 
     val speedValue = combine(
-        sensorInterface.speed, useMph
+        uiSensorSnapshot.map { it.speed }, useMph
     ) { speed, isMph ->
         val value = if (isMph) {
             speed
@@ -255,20 +272,14 @@ class OverlaySensorViewModel(
 
     val heartAvailable = HeartRateManager.heartRate.map { it != null }
 
-    // UI toggles: whether calories and heart show fully on main overlay
+    // UI toggles: whether calories show fully on main overlay
     private val _showCaloriesOnMain = MutableStateFlow(true)
     val showCaloriesOnMain = _showCaloriesOnMain.asStateFlow()
-
-    private val _showHeartOnMain = MutableStateFlow(true)
-    val showHeartOnMain = _showHeartOnMain.asStateFlow()
 
     fun toggleShowCaloriesOnMain() {
         _showCaloriesOnMain.value = !_showCaloriesOnMain.value
     }
 
-    fun toggleShowHeartOnMain() {
-        _showHeartOnMain.value = !_showHeartOnMain.value
-    }
 
     // Peak and average heart rate tracking (session simple average)
     private val mutableHeartPeak = MutableStateFlow(0)
@@ -279,6 +290,18 @@ class OverlaySensorViewModel(
 
     val heartAvgValue = mutableHeartAvg
         .map { v -> if (v > 0) v.toString() else SensorValuePlaceholderText }
+
+    val heartPeakRaw = mutableHeartPeak.asStateFlow()
+
+    val heartRateZones = HeartRateManager.heartRateZones
+    val heartRateZoneThresholds = combine(
+        HeartRateManager.zone12,
+        HeartRateManager.zone23,
+        HeartRateManager.zone34,
+        HeartRateManager.zone45
+    ) { z12, z23, z34, z45 ->
+        listOf(z12, z23, z34, z45)
+    }
 
     fun onClickedSpeedUnit() {
         viewModelScope.launch {
@@ -300,7 +323,7 @@ class OverlaySensorViewModel(
         
         viewModelScope.launch(Dispatchers.IO) {
             combine(
-                sensorInterface.power,
+                rawSensorSnapshot.map { it.power },
                 timerViewModel.elapsedSeconds
             ) { watts, seconds -> 
                 Pair(watts, seconds)
@@ -327,6 +350,7 @@ class OverlaySensorViewModel(
     val cadenceGraph = mutableStateListOf<Float>()
     val resistanceGraph = mutableStateListOf<Float>()
     val speedGraph = mutableStateListOf<Float>()
+    val heartGraph = mutableStateListOf<Float>()
 
     fun getGraphForMetric(metric: MetricType): List<Float> {
         return when (metric) {
@@ -334,18 +358,25 @@ class OverlaySensorViewModel(
             MetricType.CADENCE -> cadenceGraph
             MetricType.RESISTANCE -> resistanceGraph
             MetricType.SPEED -> speedGraph
+            MetricType.HEART -> heartGraph
         }
     }
 
     private fun setupGraphData() {
         // Power graph
         viewModelScope.launch(Dispatchers.IO) {
-            sensorInterface.power.smoothSensorValue()
+            var wasMoving = true
+            smoothedPower.smoothSensorValue()
                 .sample(GraphUpdatePeriod)
-                .collect(object : FlowCollector<Float> {
-                    override suspend fun emit(value: Float) {
+                .combine(isMoving) { value, moving -> value to moving }
+                .collect(object : FlowCollector<Pair<Float, Boolean>> {
+                    override suspend fun emit(value: Pair<Float, Boolean>) {
+                        val (sensorValue, moving) = value
+                        val shouldAppend = moving || wasMoving != moving
+                        wasMoving = moving
+                        if (!shouldAppend) return
                         withContext(Dispatchers.Main) {
-                            powerGraph.add(value)
+                            powerGraph.add(sensorValue)
                             if (powerGraph.size > GraphMaxDataPoints) {
                                 powerGraph.removeFirst()
                             }
@@ -356,12 +387,18 @@ class OverlaySensorViewModel(
 
         // Cadence graph
         viewModelScope.launch(Dispatchers.IO) {
+            var wasMoving = true
             sensorInterface.cadence.smoothSensorValue()
                 .sample(GraphUpdatePeriod)
-                .collect(object : FlowCollector<Float> {
-                    override suspend fun emit(value: Float) {
+                .combine(isMoving) { value, moving -> value to moving }
+                .collect(object : FlowCollector<Pair<Float, Boolean>> {
+                    override suspend fun emit(value: Pair<Float, Boolean>) {
+                        val (sensorValue, moving) = value
+                        val shouldAppend = moving || wasMoving != moving
+                        wasMoving = moving
+                        if (!shouldAppend) return
                         withContext(Dispatchers.Main) {
-                            cadenceGraph.add(value)
+                            cadenceGraph.add(sensorValue)
                             if (cadenceGraph.size > GraphMaxDataPoints) {
                                 cadenceGraph.removeFirst()
                             }
@@ -372,12 +409,18 @@ class OverlaySensorViewModel(
 
         // Resistance graph
         viewModelScope.launch(Dispatchers.IO) {
+            var wasMoving = true
             sensorInterface.resistance.smoothSensorValue()
                 .sample(GraphUpdatePeriod)
-                .collect(object : FlowCollector<Float> {
-                    override suspend fun emit(value: Float) {
+                .combine(isMoving) { value, moving -> value to moving }
+                .collect(object : FlowCollector<Pair<Float, Boolean>> {
+                    override suspend fun emit(value: Pair<Float, Boolean>) {
+                        val (sensorValue, moving) = value
+                        val shouldAppend = moving || wasMoving != moving
+                        wasMoving = moving
+                        if (!shouldAppend) return
                         withContext(Dispatchers.Main) {
-                            resistanceGraph.add(value)
+                            resistanceGraph.add(sensorValue)
                             if (resistanceGraph.size > GraphMaxDataPoints) {
                                 resistanceGraph.removeFirst()
                             }
@@ -388,14 +431,44 @@ class OverlaySensorViewModel(
 
         // Speed graph
         viewModelScope.launch(Dispatchers.IO) {
+            var wasMoving = true
             sensorInterface.speed.smoothSensorValue()
                 .sample(GraphUpdatePeriod)
-                .collect(object : FlowCollector<Float> {
-                    override suspend fun emit(value: Float) {
+                .combine(isMoving) { value, moving -> value to moving }
+                .collect(object : FlowCollector<Pair<Float, Boolean>> {
+                    override suspend fun emit(value: Pair<Float, Boolean>) {
+                        val (sensorValue, moving) = value
+                        val shouldAppend = moving || wasMoving != moving
+                        wasMoving = moving
+                        if (!shouldAppend) return
                         withContext(Dispatchers.Main) {
-                            speedGraph.add(value)
+                            speedGraph.add(sensorValue)
                             if (speedGraph.size > GraphMaxDataPoints) {
                                 speedGraph.removeFirst()
+                            }
+                        }
+                    }
+                })
+        }
+
+        // Heart rate graph (tick-driven so the line advances even if value is steady)
+        viewModelScope.launch(Dispatchers.IO) {
+            var wasMoving = true
+            combine(
+                com.spop.poverlay.util.tickerFlow(GraphUpdatePeriod),
+                HeartRateManager.heartRate,
+                isMoving
+            ) { _, bpm, moving -> (bpm?.toFloat() ?: 0f) to moving }
+                .collect(object : FlowCollector<Pair<Float, Boolean>> {
+                    override suspend fun emit(value: Pair<Float, Boolean>) {
+                        val (sensorValue, moving) = value
+                        val shouldAppend = moving || wasMoving != moving
+                        wasMoving = moving
+                        if (!shouldAppend) return
+                        withContext(Dispatchers.Main) {
+                            heartGraph.add(sensorValue)
+                            if (heartGraph.size > GraphMaxDataPoints) {
+                                heartGraph.removeFirst()
                             }
                         }
                     }
@@ -405,17 +478,15 @@ class OverlaySensorViewModel(
 
     private fun setupMaxTracking() {
         viewModelScope.launch(Dispatchers.IO) {
-            combine(
-                sensorInterface.power,
-                sensorInterface.cadence,
-                sensorInterface.resistance,
-                sensorInterface.speed
-            ) { power, cadence, resistance, speed ->
-                arrayOf(power, cadence, resistance, speed)
-            }.collect(object : FlowCollector<Array<Float>> {
-                override suspend fun emit(value: Array<Float>) {
+            rawSensorSnapshot.collect(object : FlowCollector<SensorSnapshot> {
+                override suspend fun emit(value: SensorSnapshot) {
                     withContext(Dispatchers.Main) {
-                        updateSessionStats(value[0], value[1], value[2], value[3])
+                        updateSessionStats(
+                            value.power,
+                            value.cadence,
+                            value.resistance,
+                            value.speed
+                        )
                     }
                 }
             })
@@ -450,16 +521,17 @@ class OverlaySensorViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             var sum = 0L
             var count = 0L
-            HeartRateManager.heartRate.collect { bpm ->
-                if (bpm != null && bpm > 0) {
-                    // peak
-                    if (bpm > mutableHeartPeak.value) mutableHeartPeak.value = bpm
-                    // average (simple running average)
-                    sum += bpm
-                    count += 1
-                    mutableHeartAvg.value = (sum / count).toInt()
+            combine(HeartRateManager.heartRate, isMoving) { bpm, moving -> bpm to moving }
+                .collect { (bpm, moving) ->
+                    if (bpm != null && bpm > 0 && moving) {
+                        // peak
+                        if (bpm > mutableHeartPeak.value) mutableHeartPeak.value = bpm
+                        // average (simple running average)
+                        sum += bpm
+                        count += 1
+                        mutableHeartAvg.value = (sum / count).toInt()
+                    }
                 }
-            }
         }
     }
 }

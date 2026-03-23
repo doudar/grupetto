@@ -51,7 +51,6 @@ fun OverlayMinimizedContent(
     onTap: () -> Unit,
     onLongPress: () -> Unit,
     onMinimizeToggle: () -> Unit,
-    showHeartOnMain: Boolean = true,
     heartAvailable: Boolean = false,
     onLayout: (IntSize) -> Unit
 ) {
@@ -171,20 +170,20 @@ fun OverlayMinimizedContent(
                 timerLabel = speedLabel,
                 iconDrawable = R.drawable.ic_speed
             )
+            if (heartAvailable) {
+                Spacer(modifier = Modifier.width(4.dp))
+                OverlayTimerField(
+                    modifier = Modifier.width(62.dp),
+                    timerLabel = heartLabel,
+                    iconDrawable = R.drawable.ic_heart
+                )
+            }
             if (showCalories) {
                 Spacer(modifier = Modifier.width(4.dp))
                 OverlayTimerField(
                     modifier = Modifier.width(62.dp),
                     timerLabel = caloriesLabel,
                     iconDrawable = R.drawable.ic_calories
-                )
-            }
-            if (showHeartOnMain && heartAvailable) {
-                Spacer(modifier = Modifier.width(4.dp))
-                OverlayTimerField(
-                    modifier = Modifier.width(62.dp),
-                    timerLabel = heartLabel,
-                    iconDrawable = R.drawable.ic_heart
                 )
             }
         }

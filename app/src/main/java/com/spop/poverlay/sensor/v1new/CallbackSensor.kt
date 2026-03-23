@@ -44,7 +44,6 @@ abstract class CallbackSensor(
         try {
             registerCallback()
             isRegistered = true
-            Timber.d("Callback sensor started successfully")
         } catch (e: Exception) {
             Timber.e(e, "Failed to start callback sensor")
         }
@@ -58,7 +57,6 @@ abstract class CallbackSensor(
         try {
             unregisterCallback()
             isRegistered = false
-            Timber.d("Callback sensor stopped successfully")
         } catch (e: Exception) {
             Timber.e(e, "Failed to stop callback sensor")
         }
@@ -73,7 +71,6 @@ abstract class CallbackSensor(
             data.writeStrongBinder(createCallback())
             data.writeString("Grupetto") // Add identifier like the working version
             
-            Timber.d("Registering callback with interface: $interfaceDescriptor")
             val success = binder.transact(registerCallbackCode, data, reply, 0)
             if (success) {
                 reply.readException()
@@ -99,7 +96,6 @@ abstract class CallbackSensor(
             val success = binder.transact(unregisterCallbackCode, data, reply, 0)
             if (success) {
                 reply.readException()
-                Timber.d("Successfully unregistered callback")
             }
         } catch (e: Exception) {
             Timber.w(e, "Error unregistering callback")
@@ -111,22 +107,17 @@ abstract class CallbackSensor(
     
     private fun createCallback() = object : android.os.Binder() {
         override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
-            Timber.d("Callback onTransact called with code: $code")
             return when (code) {
                 1 -> { // onSensorDataChange
                     try {
                         data.enforceInterface("com.onepeloton.affernetservice.IV1Callback")
-                        Timber.d("Interface enforced successfully")
                         
                         val hasData = data.readInt()
-                        Timber.d("Has data flag: $hasData")
                         
                         val bikeData = if (hasData != 0) {
                             // Use the same pattern as the working V1Binding
-                            Timber.d("Creating BikeData from parcel")
                             BikeData.CREATOR.createFromParcel(data)
                         } else {
-                            Timber.d("No bike data received")
                             null
                         }
                         
@@ -158,7 +149,6 @@ abstract class CallbackSensor(
                         val status = data.readInt()
                         val success = data.readInt() != 0
                         val errorCode = data.readLong()
-                        Timber.d("Calibration status: status=$status success=$success error=$errorCode")
                         true
                     } catch (e: Exception) {
                         Timber.e(e, "Error processing calibration status")
@@ -166,7 +156,6 @@ abstract class CallbackSensor(
                     }
                 }
                 else -> {
-                    Timber.d("Unknown transaction code: $code, calling super")
                     super.onTransact(code, data, reply, flags)
                 }
             }

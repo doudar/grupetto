@@ -47,7 +47,6 @@ class CadenceWatchdog(
             sensorInterface.cadence.collect { cadence ->
                 if (cadence >= CADENCE_THRESHOLD) {
                     lastCadenceTime = System.currentTimeMillis()
-                    Timber.d("Watchdog: Cadence detected: $cadence RPM")
                 }
             }
         }
@@ -59,8 +58,6 @@ class CadenceWatchdog(
                 
                 val inactivityDuration = System.currentTimeMillis() - lastCadenceTime
                 val thresholdMillis = inactivityThreshold.inWholeMilliseconds
-                
-                Timber.d("Watchdog: Inactivity duration: ${inactivityDuration / 1000}s / ${thresholdMillis / 1000}s")
                 
                 if (inactivityDuration >= thresholdMillis) {
                     Timber.w("Watchdog: Inactivity threshold reached. Triggering restart.")

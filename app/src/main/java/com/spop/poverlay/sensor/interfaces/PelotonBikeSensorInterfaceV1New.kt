@@ -36,7 +36,6 @@ class PelotonBikeSensorInterfaceV1New(val context: Context) : SensorInterface, C
             try {
                 val service = getV1NewBinder(context)
                 binder.emit(service)
-                Timber.d("V1New service connected successfully")
             } catch (e: Exception) {
                 Timber.w(e, "Failed to connect to V1New service: ${e.message}")
                 // Don't crash the app if the bike service isn't available
