@@ -67,12 +67,22 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         viewModel.bleFtmsDeviceName.collectAsStateWithLifecycle(
                                 initialValue = "Grupetto FTMS"
                         )
+                val antPlusTxEnabled by
+                        viewModel.antPlusTxEnabled.collectAsStateWithLifecycle(initialValue = false)
+                val antPlusDeviceName by
+                        viewModel.antPlusDeviceName.collectAsStateWithLifecycle(
+                                initialValue = "Grupetto ANT+"
+                        )
                 StartServicePage(
                         timerShownWhenMinimized,
                         viewModel::onShowTimerWhenMinimizedClicked,
                         bleTxEnabled,
                         viewModel::onBleTxEnabledClicked,
                         bleFtmsDeviceName,
+                        antPlusTxEnabled,
+                        viewModel::onAntPlusTxEnabledClicked,
+                        antPlusDeviceName,
+                        viewModel::onAntPlusDeviceNameChanged,
                         uiScale,
                         viewModel::onStartServiceClicked,
                         viewModel::onRestartClicked,
@@ -91,6 +101,10 @@ private fun StartServicePage(
         bleTxEnabled: Boolean,
         onBleTxEnabledToggled: (Boolean) -> Unit,
         bleFtmsDeviceName: String,
+        antPlusTxEnabled: Boolean,
+        onAntPlusTxEnabledToggled: (Boolean) -> Unit,
+        antPlusDeviceName: String,
+        onAntPlusDeviceNameChanged: (String) -> Unit,
         uiScale: UiScale,
         onClickedStartOverlay: () -> Unit,
         onClickedRestartApp: () -> Unit,
@@ -175,7 +189,54 @@ private fun StartServicePage(
         )
     }
 
-    Spacer(modifier = Modifier.height(uiScale.dp(8f)))
+    Spacer(modifier = Modifier.height(uiScale.dp(20f)))
+
+    // ANT+ Settings
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+                text = "Enable ANT+ TX (Transmission)?",
+                fontSize = uiScale.sp(22f),
+                fontWeight = FontWeight.Bold
+        )
+        Checkbox(checked = antPlusTxEnabled, onCheckedChange = onAntPlusTxEnabledToggled)
+    }
+
+    if (antPlusTxEnabled) {
+        Card(
+                modifier = Modifier.padding(horizontal = uiScale.dp(12f), vertical = uiScale.dp(6f)),
+                elevation = uiScale.dp(6f),
+                backgroundColor = MaterialTheme.colors.primary.copy(alpha = 0.14f)
+        ) {
+            Column(modifier = Modifier.padding(horizontal = uiScale.dp(16f), vertical = uiScale.dp(12f))) {
+                Text(
+                        text = "✅ ANT+ TX is enabled",
+                        fontSize = uiScale.sp(16f),
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Green
+                )
+                Spacer(modifier = Modifier.height(uiScale.dp(6f)))
+                Text(
+                        text = "ANT+ Device: $antPlusDeviceName",
+                        fontSize = uiScale.sp(22f),
+                        fontWeight = FontWeight.ExtraBold
+                )
+                Spacer(modifier = Modifier.height(uiScale.dp(6f)))
+                Text(
+                        text = "📡 Broadcasting power and cadence data via ANT+ protocol",
+                        fontSize = uiScale.sp(14f),
+                        color = Color.Gray
+                )
+            }
+        }
+    } else {
+        Spacer(modifier = Modifier.height(uiScale.dp(8f)))
+
+        Text(
+                text = "📡 Enable to broadcast bike data via ANT+ (requires ANT+ Radio Service installed)",
+                fontSize = uiScale.sp(14f),
+                color = Color.Gray
+        )
+    }
 
     if (latestRelease == null) {
         Text(text = "Couldn't check for updates")

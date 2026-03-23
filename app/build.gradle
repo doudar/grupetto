@@ -14,11 +14,11 @@ android {
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.spop.poverlay"
+        applicationId "com.spop.poverlay.beta"
         minSdk 21
         targetSdk 34
-        versionCode 30
-        versionName "v0.0.28"
+        versionCode 64
+        versionName "v0.0.64"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -92,6 +92,8 @@ android {
         }
     }
 }
+
+
 dependencies {
 
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
@@ -116,6 +118,10 @@ dependencies {
     implementation "com.squareup.okhttp3:okhttp:4.12.0"
     implementation "ru.gildor.coroutines:kotlin-coroutines-okhttp:1.0"
     implementation 'com.github.Pfuster12:LiveChart:1.3.5'
+    
+    // ANT+ SDK Dependencies
+    implementation files('libs/android_antlib_4-16-0.aar')
+    implementation files('libs/antpluginlib_3-9-0.aar')
 
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
