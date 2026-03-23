@@ -16,6 +16,8 @@ import androidx.lifecycle.viewModelScope
 import com.spop.poverlay.overlay.OverlayService
 import com.spop.poverlay.releases.Release
 import com.spop.poverlay.releases.ReleaseChecker
+import com.spop.poverlay.sensor.heartrate.HeartRateDevice
+import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -33,6 +35,11 @@ class ConfigurationViewModel(
     val showPermissionInfo = mutableStateOf(false)
     val infoPopup = MutableLiveData<String>()
 
+    val hrConnectedDevice = HeartRateManager.connectedDevice
+    val hrDiscoveredDevices = HeartRateManager.discoveredDevices
+    val hrSavedDevices = HeartRateManager.savedDevices
+    val hrIsScanning = HeartRateManager.isScanning
+
     var latestRelease = mutableStateOf<Release?>(null)
 
     val showTimerWhenMinimized
@@ -49,6 +56,7 @@ class ConfigurationViewModel(
 
     init {
         updatePermissionState()
+        HeartRateManager.start(getApplication())
         if (bleTxEnabled.value && hasBluetoothPermissions()) {
             bleServer.start()
             requestBatteryOptimizationExemptionIfNeeded()
@@ -105,6 +113,7 @@ class ConfigurationViewModel(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             permissions.add(android.Manifest.permission.BLUETOOTH_ADVERTISE)
             permissions.add(android.Manifest.permission.BLUETOOTH_CONNECT)
+            permissions.add(android.Manifest.permission.BLUETOOTH_SCAN)
         }
 
         return permissions.toTypedArray()
@@ -128,6 +137,7 @@ class ConfigurationViewModel(
         // Check for Android 12+ permissions
         var bluetoothAdvertisePermission = true
         var bluetoothConnectPermission = true
+        var bluetoothScanPermission = true
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             bluetoothAdvertisePermission = ContextCompat.checkSelfPermission(
@@ -137,10 +147,14 @@ class ConfigurationViewModel(
             bluetoothConnectPermission = ContextCompat.checkSelfPermission(
                 context, android.Manifest.permission.BLUETOOTH_CONNECT
             ) == PackageManager.PERMISSION_GRANTED
+
+            bluetoothScanPermission = ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.BLUETOOTH_SCAN
+            ) == PackageManager.PERMISSION_GRANTED
         }
 
         return bluetoothPermission && bluetoothAdminPermission && locationPermission &&
-                bluetoothAdvertisePermission && bluetoothConnectPermission
+                bluetoothAdvertisePermission && bluetoothConnectPermission && bluetoothScanPermission
     }
 
     fun onStartServiceClicked() {
@@ -164,6 +178,22 @@ class ConfigurationViewModel(
         val browserIntent = Intent(Intent.ACTION_VIEW, release.url)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         getApplication<Application>().startActivity(browserIntent)
+    }
+
+    fun startHeartRateDiscovery() {
+        HeartRateManager.startDiscovery()
+    }
+
+    fun stopHeartRateDiscovery() {
+        HeartRateManager.stopDiscovery()
+    }
+
+    fun connectHeartRateDevice(device: HeartRateDevice) {
+        HeartRateManager.connectTo(device)
+    }
+
+    fun forgetHeartRateDevice(address: String) {
+        HeartRateManager.forgetDevice(address)
     }
 
     fun onResume() {
