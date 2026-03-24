@@ -33,7 +33,7 @@ import kotlin.math.min
 private data class UiScale(
                 val value: Float
 ) {
-        fun sp(base: Float) = max(base * value, 16f).sp
+        fun sp(base: Float) = (base * value).sp
         fun dp(base: Float) = (base * value).dp
 }
 
@@ -46,7 +46,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
         val widthScale = maxWidth.value / 1200f
         val heightScale = maxHeight.value / 800f
         val rawScale = min(widthScale, heightScale)
-        val uiScale = UiScale(max(0.58f, min(rawScale, 1.15f)))
+        val uiScale = UiScale(rawScale.coerceIn(0.45f, 1.15f))
 
         Column(
                 Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
@@ -138,7 +138,7 @@ private fun StartServicePage(
     var showHeartRateDialog by remember { mutableStateOf(false) }
 
     val contentWidth = 900.dp
-    val cardPadding = uiScale.dp(14f)
+    val cardPadding = uiScale.dp(10f)
     val cardColor = Color(0xFF1E1E1E)
     val headingColor = Color(0xFFF2F2F2)
     val bodyColor = Color(0xFFD0D0D0)
@@ -165,7 +165,7 @@ private fun StartServicePage(
                 fontSize = uiScale.sp(18f),
                 color = bodyColor
         )
-        Spacer(modifier = Modifier.height(uiScale.dp(16f)))
+        Spacer(modifier = Modifier.height(uiScale.dp(8f)))
 
         Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -187,7 +187,7 @@ private fun StartServicePage(
                 }
             }
         }
-        Spacer(modifier = Modifier.height(uiScale.dp(12f)))
+        Spacer(modifier = Modifier.height(uiScale.dp(8f)))
 
         Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -195,7 +195,7 @@ private fun StartServicePage(
         ) {
             Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(uiScale.dp(12f))
+                    verticalArrangement = Arrangement.spacedBy(uiScale.dp(8f))
             ) {
                 Card(
                         modifier = Modifier.fillMaxWidth(),
@@ -244,133 +244,132 @@ private fun StartServicePage(
                         }
                     }
                 }
-            }
-
-            Card(
-                    modifier = Modifier.weight(1f),
-                    backgroundColor = cardColor,
-                    elevation = uiScale.dp(4f)
-            ) {
-                Column(modifier = Modifier.padding(cardPadding)) {
-                    Text("BLE Preference", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
-                    Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Enable BLE TX", fontSize = uiScale.sp(16f), color = bodyColor)
-                        Switch(
-                                checked = bleTxEnabled,
-                                onCheckedChange = onBleTxEnabledToggled,
-                                colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color(0xFF22C55E),
-                                        checkedTrackColor = Color(0xFF22C55E)
-                                )
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(uiScale.dp(8f)))
-                    if (bleTxEnabled) {
-                        Text(
-                                text = "Broadcasting as:",
-                                fontSize = uiScale.sp(14f),
-                                color = bodyColor
-                        )
-                        Text(
-                                text = bleFtmsDeviceName,
-                                fontSize = uiScale.sp(20f),
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                        )
-                    } else {
-                        Text(
-                                text = "Enable BLE TX to broadcast bike data to apps like Zwift or TrainerRoad.",
-                                fontSize = uiScale.sp(13f),
-                                color = bodyColor
-                        )
-                    }
-                }
-            }
-        }
-        Spacer(modifier = Modifier.height(uiScale.dp(12f)))
-
-        Card(
-                modifier = Modifier.fillMaxWidth(),
-                backgroundColor = cardColor,
-                elevation = uiScale.dp(4f)
-        ) {
-            Column(modifier = Modifier.padding(cardPadding)) {
-                Text("Heart Rate Monitors", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
-                Spacer(modifier = Modifier.height(uiScale.dp(8f)))
-                OutlinedButton(
-                        onClick = { showHeartRateDialog = true },
-                        modifier = Modifier.fillMaxWidth()
+                Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = cardColor,
+                        elevation = uiScale.dp(4f)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                                imageVector = Icons.Default.Favorite,
-                                contentDescription = "Heart Rate",
-                                tint = Color.Red
-                        )
-                        Spacer(modifier = Modifier.width(uiScale.dp(10f)))
-                        Text("Manage Heart Rate Monitors")
+                    Column(modifier = Modifier.padding(cardPadding)) {
+                        Text("Heart Rate Monitors", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
+                        Spacer(modifier = Modifier.height(uiScale.dp(6f)))
+                        OutlinedButton(
+                                onClick = { showHeartRateDialog = true },
+                                modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                        imageVector = Icons.Default.Favorite,
+                                        contentDescription = "Heart Rate",
+                                        tint = Color.Red
+                                )
+                                Spacer(modifier = Modifier.width(uiScale.dp(8f)))
+                                Text("Manage HR Monitors")
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(uiScale.dp(6f)))
+                        if (hrConnectedDevice != null) {
+                            Text(
+                                    text = "Connected to",
+                                    fontSize = uiScale.sp(14f),
+                                    color = bodyColor
+                            )
+                            Text(
+                                    text = hrConnectedDevice.name ?: hrConnectedDevice.address,
+                                    fontSize = uiScale.sp(18f),
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                            )
+                        } else {
+                            Text(
+                                    text = hrStatus,
+                                    fontSize = uiScale.sp(14f),
+                                    color = bodyColor,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
-                Spacer(modifier = Modifier.height(uiScale.dp(6f)))
-                if (hrConnectedDevice != null) {
-                    Text(
-                            text = "Connected to",
-                            fontSize = uiScale.sp(14f),
-                            color = bodyColor
-                    )
-                    Text(
-                            text = hrConnectedDevice.name ?: hrConnectedDevice.address,
-                            fontSize = uiScale.sp(20f),
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                    )
-                } else {
-                    Text(
-                            text = hrStatus,
-                            fontSize = uiScale.sp(13f),
-                            color = bodyColor,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                    )
+            }
+
+            Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(uiScale.dp(8f))
+            ) {
+                Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = cardColor,
+                        elevation = uiScale.dp(4f)
+                ) {
+                    Column(modifier = Modifier.padding(cardPadding)) {
+                        Text("BLE Preference", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
+                        Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Enable BLE TX", fontSize = uiScale.sp(16f), color = bodyColor)
+                            Switch(
+                                    checked = bleTxEnabled,
+                                    onCheckedChange = onBleTxEnabledToggled,
+                                    colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color(0xFF22C55E),
+                                            checkedTrackColor = Color(0xFF22C55E)
+                                    )
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(uiScale.dp(8f)))
+                        if (bleTxEnabled) {
+                            Text(
+                                    text = "Broadcasting as:",
+                                    fontSize = uiScale.sp(14f),
+                                    color = bodyColor
+                            )
+                            Text(
+                                    text = bleFtmsDeviceName,
+                                    fontSize = uiScale.sp(20f),
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                            )
+                        } else {
+                            Text(
+                                    text = "Enable BLE TX to broadcast bike data to apps like Zwift or TrainerRoad.",
+                                    fontSize = uiScale.sp(13f),
+                                    color = bodyColor
+                            )
+                        }
+                    }
+                }
+
+                Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = cardColor,
+                        elevation = uiScale.dp(4f)
+                ) {
+                    Column(modifier = Modifier.padding(cardPadding)) {
+                        Text("Updates", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
+                        if (latestRelease == null) {
+                            Text("Couldn't check for updates", color = bodyColor)
+                        } else {
+                            val formattedDate = DateUtils.getRelativeTimeSpanString(latestRelease.createdAt.time)
+                            val text = if (latestRelease.isCurrentlyInstalled) {
+                                "Up to date: ${latestRelease.tagName} • $formattedDate"
+                            } else {
+                                "New version: ${latestRelease.friendlyName} • $formattedDate"
+                            }
+                            Text(text, color = bodyColor, fontSize = uiScale.sp(16f))
+                            TextButton(onClick = { onClickedRelease(latestRelease) }) {
+                                Text("View release", color = accentColor)
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(uiScale.dp(12f)))
-
-        Card(
-                modifier = Modifier.fillMaxWidth(),
-                backgroundColor = cardColor,
-                elevation = uiScale.dp(4f)
-        ) {
-            Column(modifier = Modifier.padding(cardPadding)) {
-                Text("Updates", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
-                Spacer(modifier = Modifier.height(uiScale.dp(8f)))
-                if (latestRelease == null) {
-                    Text("Couldn't check for updates", color = bodyColor)
-                } else {
-                    val formattedDate = DateUtils.getRelativeTimeSpanString(latestRelease.createdAt.time)
-                    val text = if (latestRelease.isCurrentlyInstalled) {
-                        "Up to date: ${latestRelease.tagName} • $formattedDate • ${latestRelease.friendlyName}"
-                    } else {
-                        "New version: ${latestRelease.friendlyName} • $formattedDate"
-                    }
-                    Text(text, color = bodyColor, fontSize = uiScale.sp(16f))
-                    TextButton(onClick = { onClickedRelease(latestRelease) }) {
-                        Text("View release", color = accentColor)
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(uiScale.dp(12f)))
-
+        Spacer(modifier = Modifier.height(uiScale.dp(8f)))
         Card(
                 modifier = Modifier.fillMaxWidth(),
                 backgroundColor = cardColor,
@@ -384,15 +383,14 @@ private fun StartServicePage(
                 ) {
                     Text("Quit App", color = Color.White, fontWeight = FontWeight.Bold)
                 }
+                Spacer(modifier = Modifier.height(uiScale.dp(4f)))
+                Text(
+                        "Device: ${Build.DEVICE} • SDK: ${Build.VERSION.RELEASE}",
+                        fontSize = uiScale.sp(16f),
+                        color = LocalContentColor.current.copy(alpha = .55f)
+                )
             }
         }
-
-        Spacer(modifier = Modifier.height(uiScale.dp(10f)))
-        Text(
-                "Device: ${Build.DEVICE} • SDK: ${Build.VERSION.RELEASE}",
-                fontSize = uiScale.sp(12f),
-                color = LocalContentColor.current.copy(alpha = .55f)
-        )
         }
     }
 

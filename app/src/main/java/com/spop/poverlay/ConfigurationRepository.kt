@@ -2,6 +2,8 @@ package com.spop.poverlay
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Build
+import android.provider.Settings
 import androidx.core.content.edit
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -21,12 +23,39 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
 
     companion object {
         const val SharedPrefsName = "configuration"
+        private const val LegacyBrokenAndroidId = "9774d56d682e549c"
         // This workaround is required since SharedPreferences
         // only stores weak references to objects
         val SharedPreferenceListeners =
             mutableListOf<SharedPreferences.OnSharedPreferenceChangeListener>()
+
+        fun generateDeviceSerialHex(context: Context): String {
+            val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+            val source = if (!androidId.isNullOrBlank() && androidId != LegacyBrokenAndroidId) {
+                androidId
+            } else {
+                "${Build.FINGERPRINT}:${context.packageName}"
+            }
+            val value = source.hashCode() and 0xFFFF
+            return value.toString(16).padStart(4, '0').uppercase()
+        }
+
+        fun ensureSerialNumber(
+            context: Context,
+            preferences: SharedPreferences
+        ): String {
+            val key = Preferences.SerialNumber.key
+            val existing = preferences.getString(key, null)
+            if (!existing.isNullOrBlank()) {
+                return existing
+            }
+            val serial = generateDeviceSerialHex(context)
+            preferences.edit { putString(key, serial) }
+            return serial
+        }
     }
 
+    private val appContext = context.applicationContext
     private val mutableShowTimerWhenMinimized = MutableStateFlow(true)
     private val mutableBleTxEnabled = MutableStateFlow(true)
     private val mutableBleFtmsDeviceName = MutableStateFlow("Grupetto FTMS")
@@ -52,7 +81,7 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
     private val listener : SharedPreferences.OnSharedPreferenceChangeListener
 
     init {
-        sharedPreferences = context.getSharedPreferences(SharedPrefsName, Context.MODE_PRIVATE)
+        sharedPreferences = appContext.getSharedPreferences(SharedPrefsName, Context.MODE_PRIVATE)
         updateFromSharedPrefs()
 
         listener = createSharedPreferencesListener()
@@ -108,11 +137,6 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         }
     }
 
-    private fun generateSerialHex(): String {
-        val value = kotlin.random.Random.nextInt(0x10000)
-        return value.toString(16).padStart(4, '0').uppercase()
-    }
-
     private fun updateFromSharedPrefs() {
         mutableShowTimerWhenMinimized.value =
             sharedPreferences
@@ -134,14 +158,7 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
             sharedPreferences
                 .getString(Preferences.AntPlusDeviceName.key, "Grupetto ANT+") ?: "Grupetto ANT+"
 
-        // Ensure a serial number exists and keep it in memory
-        val existingSerial = sharedPreferences.getString(Preferences.SerialNumber.key, null)
-        val ensuredSerial = if (existingSerial.isNullOrEmpty()) {
-            val sn = generateSerialHex()
-            sharedPreferences.edit { putString(Preferences.SerialNumber.key, sn) }
-            sn
-        } else existingSerial
-        mutableSerialNumber.value = ensuredSerial
+        mutableSerialNumber.value = ensureSerialNumber(appContext, sharedPreferences)
     }
 
     override fun close() {
