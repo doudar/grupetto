@@ -13,8 +13,10 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
     enum class Preferences(val key: String) {
         ShowTimerWhenMinimized("showTimerWhenMinimized"),
         BleTxEnabled("bleTxEnabled"),
-    BleFtmsDeviceName("bleFtmsDeviceName"),
-    SerialNumber("serialNumber")
+        BleFtmsDeviceName("bleFtmsDeviceName"),
+        AntPlusTxEnabled("antPlusTxEnabled"),
+        AntPlusDeviceName("antPlusDeviceName"),
+        SerialNumber("serialNumber")
     }
 
     companion object {
@@ -28,11 +30,15 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
     private val mutableShowTimerWhenMinimized = MutableStateFlow(true)
     private val mutableBleTxEnabled = MutableStateFlow(true)
     private val mutableBleFtmsDeviceName = MutableStateFlow("Grupetto FTMS")
+    private val mutableAntPlusTxEnabled = MutableStateFlow(false)
+    private val mutableAntPlusDeviceName = MutableStateFlow("Grupetto ANT+")
     private val mutableSerialNumber = MutableStateFlow("")
 
     val showTimerWhenMinimized = mutableShowTimerWhenMinimized
     val bleTxEnabled = mutableBleTxEnabled
     val bleFtmsDeviceName = mutableBleFtmsDeviceName
+    val antPlusTxEnabled = mutableAntPlusTxEnabled
+    val antPlusDeviceName = mutableAntPlusDeviceName
     val serialNumber = mutableSerialNumber
 
     private val sharedPreferences: SharedPreferences
@@ -80,6 +86,20 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         }
     }
 
+    fun setAntPlusTxEnabled(enabled: Boolean) {
+        mutableAntPlusTxEnabled.value = enabled
+        sharedPreferences.edit {
+            putBoolean(Preferences.AntPlusTxEnabled.key, enabled)
+        }
+    }
+
+    fun setAntPlusDeviceName(name: String) {
+        mutableAntPlusDeviceName.value = name
+        sharedPreferences.edit {
+            putString(Preferences.AntPlusDeviceName.key, name)
+        }
+    }
+
     fun setSerialNumber(serial: String) {
         val normalized = serial.trim().uppercase()
         mutableSerialNumber.value = normalized
@@ -105,6 +125,14 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         mutableBleFtmsDeviceName.value =
             sharedPreferences
                 .getString(Preferences.BleFtmsDeviceName.key, "Grupetto FTMS") ?: "Grupetto FTMS"
+
+        mutableAntPlusTxEnabled.value =
+            sharedPreferences
+                .getBoolean(Preferences.AntPlusTxEnabled.key, false)
+
+        mutableAntPlusDeviceName.value =
+            sharedPreferences
+                .getString(Preferences.AntPlusDeviceName.key, "Grupetto ANT+") ?: "Grupetto ANT+"
 
         // Ensure a serial number exists and keep it in memory
         val existingSerial = sharedPreferences.getString(Preferences.SerialNumber.key, null)

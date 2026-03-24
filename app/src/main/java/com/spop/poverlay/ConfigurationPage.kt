@@ -69,6 +69,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         viewModel.bleFtmsDeviceName.collectAsStateWithLifecycle(
                                 initialValue = "Grupetto FTMS"
                         )
+                val antPlusTxEnabled by
+                        viewModel.antPlusTxEnabled.collectAsStateWithLifecycle(initialValue = false)
                 val hrConnectedDevice by
                         viewModel.hrConnectedDevice.collectAsStateWithLifecycle(initialValue = null)
                 val hrDiscoveredDevices by
@@ -85,6 +87,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         bleTxEnabled,
                         viewModel::onBleTxEnabledClicked,
                         bleFtmsDeviceName,
+                        antPlusTxEnabled,
+                        viewModel::onAntPlusTxEnabledClicked,
                         hrConnectedDevice,
                         hrDiscoveredDevices,
                         hrSavedDevices,
@@ -113,6 +117,8 @@ private fun StartServicePage(
         bleTxEnabled: Boolean,
         onBleTxEnabledToggled: (Boolean) -> Unit,
         bleFtmsDeviceName: String,
+        antPlusTxEnabled: Boolean,
+        onAntPlusTxEnabledToggled: (Boolean) -> Unit,
         hrConnectedDevice: HeartRateDevice?,
         hrDiscoveredDevices: List<HeartRateDevice>,
         hrSavedDevices: List<HeartRateDevice>,
@@ -167,15 +173,13 @@ private fun StartServicePage(
                 elevation = uiScale.dp(4f)
         ) {
             Column(modifier = Modifier.padding(cardPadding)) {
-                Text("Overlay", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
-                Spacer(modifier = Modifier.height(uiScale.dp(8f)))
                 Button(
                         onClick = onClickedStartOverlay,
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(backgroundColor = accentColor)
                 ) {
                     Text(
-                            text = if (isOverlayRunning) "Restart Overlay" else "Start Overlay",
+                            text = if (isOverlayRunning) "Resume Overlay" else "Start Overlay",
                             fontSize = uiScale.sp(18f),
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -189,28 +193,55 @@ private fun StartServicePage(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(uiScale.dp(12f))
         ) {
-            Card(
+            Column(
                     modifier = Modifier.weight(1f),
-                    backgroundColor = cardColor,
-                    elevation = uiScale.dp(4f)
+                    verticalArrangement = Arrangement.spacedBy(uiScale.dp(12f))
             ) {
-                Column(modifier = Modifier.padding(cardPadding)) {
-                    Text("Timer Preference", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
-                    Spacer(modifier = Modifier.height(uiScale.dp(8f)))
-                    Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Show timer when minimized", fontSize = uiScale.sp(16f), color = bodyColor)
-                        Switch(
-                                checked = timerShownWhenMinimized,
-                                onCheckedChange = onTimerShownWhenMinimizedToggled,
-                                colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color(0xFF22C55E),
-                                        checkedTrackColor = Color(0xFF22C55E)
-                                )
-                        )
+                Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = cardColor,
+                        elevation = uiScale.dp(4f)
+                ) {
+                    Column(modifier = Modifier.padding(cardPadding)) {
+                        Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Show timer when minimized", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
+                            Switch(
+                                    checked = timerShownWhenMinimized,
+                                    onCheckedChange = onTimerShownWhenMinimizedToggled,
+                                    colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color(0xFF22C55E),
+                                            checkedTrackColor = Color(0xFF22C55E)
+                                    )
+                            )
+                        }
+                    }
+                }
+
+                Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = cardColor,
+                        elevation = uiScale.dp(4f)
+                ) {
+                    Column(modifier = Modifier.padding(cardPadding)) {
+                        Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Enable ANT+ TX", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
+                            Switch(
+                                    checked = antPlusTxEnabled,
+                                    onCheckedChange = onAntPlusTxEnabledToggled,
+                                    colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color(0xFF22C55E),
+                                            checkedTrackColor = Color(0xFF22C55E)
+                                    )
+                            )
+                        }
                     }
                 }
             }
@@ -222,7 +253,6 @@ private fun StartServicePage(
             ) {
                 Column(modifier = Modifier.padding(cardPadding)) {
                     Text("BLE Preference", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
-                    Spacer(modifier = Modifier.height(uiScale.dp(8f)))
                     Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -241,7 +271,7 @@ private fun StartServicePage(
                     Spacer(modifier = Modifier.height(uiScale.dp(8f)))
                     if (bleTxEnabled) {
                         Text(
-                                text = "Broadcasting as",
+                                text = "Broadcasting as:",
                                 fontSize = uiScale.sp(14f),
                                 color = bodyColor
                         )
@@ -347,8 +377,6 @@ private fun StartServicePage(
                 elevation = uiScale.dp(4f)
         ) {
             Column(modifier = Modifier.padding(cardPadding)) {
-                Text("App Actions", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
-                Spacer(modifier = Modifier.height(uiScale.dp(8f)))
                 Button(
                         onClick = onClickedQuitApp,
                         colors = ButtonDefaults.buttonColors(backgroundColor = ErrorColor),
