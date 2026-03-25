@@ -54,14 +54,7 @@ class ConfigurationViewModel(
     val bleFtmsDeviceName
         get() = configurationRepository.bleFtmsDeviceName
 
-    val antPlusTxEnabled
-        get() = configurationRepository.antPlusTxEnabled
-
-    val antPlusDeviceName
-        get() = configurationRepository.antPlusDeviceName
-
     private val bleServer = (application as GrupettoApplication).bleServer
-    private val antPlusServer = (application as GrupettoApplication).antPlusServer
     private var batteryOptimizationPromptShownThisSession = false
 
     init {
@@ -70,9 +63,6 @@ class ConfigurationViewModel(
         if (bleTxEnabled.value && hasBluetoothPermissions()) {
             bleServer.start()
             requestBatteryOptimizationExemptionIfNeeded()
-        }
-        if (antPlusTxEnabled.value && hasAntPlusPermissions()) {
-            antPlusServer.start()
         }
     }
 
@@ -103,23 +93,6 @@ class ConfigurationViewModel(
         }
     }
 
-    fun onAntPlusTxEnabledClicked(isChecked: Boolean) {
-        configurationRepository.setAntPlusTxEnabled(isChecked)
-        if (isChecked) {
-            if (hasAntPlusPermissions()) {
-                antPlusServer.start()
-            } else {
-                requestBluetoothPermissions.value = getRequiredAntPlusPermissions()
-            }
-        } else {
-            antPlusServer.stop()
-        }
-    }
-
-    fun onAntPlusDeviceNameChanged(newName: String) {
-        configurationRepository.setAntPlusDeviceName(newName)
-    }
-
     fun onBluetoothPermissionsResult(granted: Boolean) {
         if (granted) {
             bleServer.start()
@@ -147,17 +120,6 @@ class ConfigurationViewModel(
         }
 
         return permissions.toTypedArray()
-    }
-
-    private fun getRequiredAntPlusPermissions(): Array<String> {
-        return arrayOf(android.Manifest.permission.BODY_SENSORS)
-    }
-
-    private fun hasAntPlusPermissions(): Boolean {
-        val context = getApplication<Application>()
-        return ContextCompat.checkSelfPermission(
-            context, android.Manifest.permission.BODY_SENSORS
-        ) == PackageManager.PERMISSION_GRANTED
     }
 
     private fun hasBluetoothPermissions(): Boolean {
@@ -216,7 +178,6 @@ class ConfigurationViewModel(
     }
 
     fun onQuitClicked() {
-        antPlusServer.stop()
         requestQuit.value = Unit
     }
 
@@ -273,11 +234,6 @@ class ConfigurationViewModel(
             requestBluetoothPermissions.value = permissions
         } else if (bleTxEnabled.value && hasBluetoothPermissions()) {
             requestBatteryOptimizationExemptionIfNeeded()
-        }
-        if (antPlusTxEnabled.value && !hasAntPlusPermissions()) {
-            requestBluetoothPermissions.value = getRequiredAntPlusPermissions()
-        } else if (antPlusTxEnabled.value && hasAntPlusPermissions()) {
-            antPlusServer.start()
         }
     }
 

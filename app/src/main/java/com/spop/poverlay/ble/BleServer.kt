@@ -12,7 +12,7 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.ParcelUuid
 import androidx.core.content.ContextCompat
-import com.spop.poverlay.ConfigurationRepository
+import androidx.core.content.edit
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.sensor.interfaces.SensorInterface
 import java.util.LinkedList
@@ -1033,12 +1033,21 @@ class BleServer(
     }
 
 
+    //Function checks userprefs to see if serial number has been generated on previous ones, and if not, It creates one.
     fun serialNumber(): String {
+        // Use the same shared preferences as ConfigurationRepository
         val prefs = context.getSharedPreferences(
-            ConfigurationRepository.SharedPrefsName,
+            com.spop.poverlay.ConfigurationRepository.SharedPrefsName,
             Context.MODE_PRIVATE
         )
-        return ConfigurationRepository.ensureSerialNumber(context.applicationContext, prefs)
+        val key = com.spop.poverlay.ConfigurationRepository.Preferences.SerialNumber.key
+        var existing = prefs.getString(key, null)
+        if (existing.isNullOrEmpty()) {
+            val value = kotlin.random.Random.nextInt(0x10000)
+            existing = value.toString(16).padStart(4, '0').uppercase()
+            prefs.edit { putString(key, existing) }
+        }
+        return existing
     }
     
 }

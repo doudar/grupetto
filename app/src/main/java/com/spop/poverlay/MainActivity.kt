@@ -125,7 +125,6 @@ class MainActivity : ComponentActivity() {
             stopService(Intent(this@MainActivity, OverlayService::class.java))
             HeartRateManager.stop()
             (application as GrupettoApplication).bleServer.stop()
-            (application as GrupettoApplication).antPlusServer.stop()
             delay(750L)
             finishAffinity()
             finishAndRemoveTask()
