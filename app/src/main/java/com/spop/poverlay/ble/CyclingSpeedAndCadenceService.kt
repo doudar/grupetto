@@ -42,19 +42,12 @@ class CyclingSpeedAndCadenceService(server: BleServer) : BaseBleService(server) 
         )
     }
 
-    private val sensorLocationCharacteristic = BluetoothGattCharacteristic(
-        CyclingSpeedAndCadenceConstants.SensorLocationUUID,
-        BluetoothGattCharacteristic.PROPERTY_READ,
-        BluetoothGattCharacteristic.PERMISSION_READ
-    ).apply { value = byteArrayOf(0x0D) } // Rear Wheel
-
     override val service = BluetoothGattService(
         CyclingSpeedAndCadenceConstants.ServiceUUID,
         BluetoothGattService.SERVICE_TYPE_PRIMARY
     ).apply {
         addCharacteristic(measurementCharacteristic)
         addCharacteristic(featureCharacteristic)
-        addCharacteristic(sensorLocationCharacteristic)
     }
 
     override fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float) {
