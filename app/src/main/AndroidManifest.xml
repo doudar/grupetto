@@ -51,6 +51,21 @@
         android:name="android.hardware.bluetooth_le"
         android:required="true" />
 
+    <!-- ANT+ permissions -->
+    <uses-permission android:name="android.permission.BODY_SENSORS" />
+    <uses-permission android:name="com.dsi.ant.permission.ANT" />
+    <uses-permission android:name="com.dsi.ant.permission.ANT_ADMIN" />
+    <uses-permission android:name="com.dsi.ant.permission.ANT_COMMUNICATION" />
+
+    <queries>
+        <intent>
+            <action android:name="com.dsi.ant.service.socket.AntService" />
+        </intent>
+        <package android:name="com.dsi.ant.service.socket" />
+        <package android:name="com.dsi.ant.usbservice" />
+        <package android:name="com.dsi.ant.plugins.antplus" />
+    </queries>
+
 
 
     <application
