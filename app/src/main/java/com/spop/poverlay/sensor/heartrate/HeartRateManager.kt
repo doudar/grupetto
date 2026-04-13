@@ -40,6 +40,7 @@ object HeartRateManager {
     private const val PrefZone23 = "hr_zone_23"
     private const val PrefZone34 = "hr_zone_34"
     private const val PrefZone45 = "hr_zone_45"
+    private const val PrefMatchByName = "hr_match_by_name"
 
     private const val ReconnectDelayMs = 3_000L
     private const val AutoReconnectScanMs = 10_000L
@@ -75,6 +76,9 @@ object HeartRateManager {
     private val _heartRateZones = MutableStateFlow<List<Int>?>(null)
     val heartRateZones: StateFlow<List<Int>?> = _heartRateZones
 
+    private val _matchByName = MutableStateFlow(false)
+    val matchByName: StateFlow<Boolean> = _matchByName
+
     @Volatile
     private var bluetoothGatt: BluetoothGatt? = null
 
@@ -108,6 +112,7 @@ object HeartRateManager {
             appContext = context.applicationContext
             prefs = appContext?.getSharedPreferences(PrefsName, Context.MODE_PRIVATE)
             loadHeartRateZones()
+            _matchByName.value = prefs?.getBoolean(PrefMatchByName, false) ?: false
             stopped.set(false)
             loadSavedDevices()
             selectedAddress = prefs?.getString(PrefSelectedDevice, null)
@@ -162,6 +167,11 @@ object HeartRateManager {
         _zone34.value = zone34
         _zone45.value = zone45
         updateHeartRateZones()
+    }
+
+    fun setMatchByName(enabled: Boolean) {
+        _matchByName.value = enabled
+        prefs?.edit { putBoolean(PrefMatchByName, enabled) }
     }
 
     private fun updateHeartRateZones() {
@@ -318,11 +328,46 @@ object HeartRateManager {
         if (manualDisconnectRequested) return false
         if (_connectedDevice.value != null) return false
         val address = device.address ?: return false
-        if (_savedDevices.value.none { it.address == address }) return false
-        selectedAddress = address
-        connectToAddress(address)
-        stopDiscovery()
-        return true
+
+        // Exact MAC match
+        if (_savedDevices.value.any { it.address == address }) {
+            selectedAddress = address
+            connectToAddress(address)
+            stopDiscovery()
+            return true
+        }
+
+        // Name-only match (handles randomized/changed MAC addresses)
+        if (_matchByName.value) {
+            val deviceName = device.name?.takeIf { it.isNotBlank() } ?: return false
+            val matched = _savedDevices.value.firstOrNull {
+                !it.name.isNullOrBlank() && it.name == deviceName
+            } ?: return false
+            updateSavedDeviceAddress(oldAddress = matched.address, newAddress = address, name = deviceName)
+            selectedAddress = address
+            connectToAddress(address)
+            stopDiscovery()
+            return true
+        }
+
+        return false
+    }
+
+    private fun updateSavedDeviceAddress(oldAddress: String, newAddress: String, name: String) {
+        val p = prefs ?: return
+        val saved = p.getStringSet(PrefSavedDevices, emptySet()).orEmpty().toMutableSet()
+        saved.remove(oldAddress)
+        saved.add(newAddress)
+        val wasSelected = p.getString(PrefSelectedDevice, null) == oldAddress
+        p.edit {
+            putStringSet(PrefSavedDevices, saved)
+            remove(PrefNamePrefix + oldAddress)
+            putString(PrefNamePrefix + newAddress, name)
+            if (wasSelected) putString(PrefSelectedDevice, newAddress)
+        }
+        Timber.i("HR device name-matched '%s': updated address %s → %s", name, oldAddress, newAddress)
+        loadSavedDevices()
+        pruneDiscovered()
     }
 
     private fun pruneDiscovered() {

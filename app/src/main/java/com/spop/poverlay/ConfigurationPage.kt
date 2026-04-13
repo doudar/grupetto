@@ -77,6 +77,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         viewModel.hrSavedDevices.collectAsStateWithLifecycle(initialValue = emptyList())
                 val hrIsScanning by
                         viewModel.hrIsScanning.collectAsStateWithLifecycle(initialValue = false)
+                val hrMatchByName by
+                        viewModel.hrMatchByName.collectAsStateWithLifecycle(initialValue = false)
                 val isOverlayRunning by
                         viewModel.isOverlayRunning.collectAsStateWithLifecycle(initialValue = false)
                 StartServicePage(
@@ -89,11 +91,13 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         hrDiscoveredDevices,
                         hrSavedDevices,
                         hrIsScanning,
+                        hrMatchByName,
                         viewModel::startHeartRateDiscovery,
                         viewModel::stopHeartRateDiscovery,
                         viewModel::connectHeartRateDevice,
                         viewModel::disconnectHeartRateDevice,
                         viewModel::forgetHeartRateDevice,
+                        viewModel::setHrMatchByName,
                         isOverlayRunning,
                         uiScale,
                         viewModel::onStartServiceClicked,
@@ -117,11 +121,13 @@ private fun StartServicePage(
         hrDiscoveredDevices: List<HeartRateDevice>,
         hrSavedDevices: List<HeartRateDevice>,
         hrIsScanning: Boolean,
+        hrMatchByName: Boolean,
         onStartHeartRateDiscovery: () -> Unit,
         onStopHeartRateDiscovery: () -> Unit,
         onConnectHeartRateDevice: (HeartRateDevice) -> Unit,
         onDisconnectHeartRateDevice: () -> Unit,
         onForgetHeartRateDevice: (String) -> Unit,
+        onSetHrMatchByName: (Boolean) -> Unit,
         isOverlayRunning: Boolean,
         uiScale: UiScale,
         onClickedStartOverlay: () -> Unit,
@@ -374,11 +380,13 @@ private fun StartServicePage(
                 discoveredDevices = hrDiscoveredDevices,
                 savedDevices = hrSavedDevices,
                 isScanning = hrIsScanning,
+                matchByName = hrMatchByName,
                 onStartDiscovery = onStartHeartRateDiscovery,
                 onStopDiscovery = onStopHeartRateDiscovery,
                 onConnectDevice = onConnectHeartRateDevice,
                 onDisconnectConnectedDevice = onDisconnectHeartRateDevice,
                 onForgetDevice = onForgetHeartRateDevice,
+                onSetMatchByName = onSetHrMatchByName,
                 onDismiss = { showHeartRateDialog = false }
         )
     }
@@ -408,11 +416,13 @@ private fun HeartRateManagerDialog(
                 discoveredDevices: List<HeartRateDevice>,
                 savedDevices: List<HeartRateDevice>,
                 isScanning: Boolean,
+                matchByName: Boolean,
                 onStartDiscovery: () -> Unit,
                 onStopDiscovery: () -> Unit,
                 onConnectDevice: (HeartRateDevice) -> Unit,
                 onDisconnectConnectedDevice: () -> Unit,
                 onForgetDevice: (String) -> Unit,
+                onSetMatchByName: (Boolean) -> Unit,
                 onDismiss: () -> Unit
 ) {
         val zone12 = remember { mutableStateOf("") }
@@ -591,6 +601,40 @@ private fun HeartRateManagerDialog(
                                                         }
                                                 }
                                         }
+                                                }
+                                        }
+
+                                        Divider(modifier = Modifier.padding(vertical = 8.dp), color = bodyColor.copy(alpha = 0.25f))
+
+                                        Card(
+                                                        backgroundColor = Color(0xFF252525),
+                                                        modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                                Column(modifier = Modifier.padding(10.dp)) {
+                                                        SectionHeader("Connection Options")
+                                                        Row(
+                                                                modifier = Modifier.fillMaxWidth(),
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                                horizontalArrangement = Arrangement.SpaceBetween
+                                                        ) {
+                                                                Column(modifier = Modifier.weight(1f)) {
+                                                                        Text("Match by name only", fontSize = 16.sp, color = headingColor)
+                                                                        Text(
+                                                                                "Reconnect using device name instead of MAC address. Useful when the MAC changes.",
+                                                                                fontSize = 13.sp,
+                                                                                color = bodyColor
+                                                                        )
+                                                                }
+                                                                Spacer(modifier = Modifier.width(8.dp))
+                                                                Switch(
+                                                                        checked = matchByName,
+                                                                        onCheckedChange = onSetMatchByName,
+                                                                        colors = SwitchDefaults.colors(
+                                                                                checkedThumbColor = Color(0xFF22C55E),
+                                                                                checkedTrackColor = Color(0xFF22C55E)
+                                                                        )
+                                                                )
+                                                        }
                                                 }
                                         }
 

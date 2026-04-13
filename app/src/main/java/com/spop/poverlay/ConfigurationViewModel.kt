@@ -41,6 +41,7 @@ class ConfigurationViewModel(
     val hrDiscoveredDevices = HeartRateManager.discoveredDevices
     val hrSavedDevices = HeartRateManager.savedDevices
     val hrIsScanning = HeartRateManager.isScanning
+    val hrMatchByName = HeartRateManager.matchByName
     val isOverlayRunning: StateFlow<Boolean> = OverlayService.isRunning
 
     var latestRelease = mutableStateOf<Release?>(null)
@@ -205,6 +206,10 @@ class ConfigurationViewModel(
 
     fun disconnectHeartRateDevice() {
         HeartRateManager.disconnectCurrent()
+    }
+
+    fun setHrMatchByName(enabled: Boolean) {
+        HeartRateManager.setMatchByName(enabled)
     }
 
     fun onResume() {
