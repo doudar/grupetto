@@ -67,15 +67,6 @@ fun OverlayMainContent(
                 MetricType.HEART_RATE -> MetricHeartRateColor
             }
 
-    val chartLabel =
-            when (selectedMetric) {
-                MetricType.POWER -> "Power"
-                MetricType.CADENCE -> "Cadence"
-                MetricType.RESISTANCE -> "Resistance"
-                MetricType.SPEED -> "Speed"
-                MetricType.HEART_RATE -> "Heart Rate"
-            }
-
     // Define minimum thresholds to prevent chart from getting too compressed at low values
     // Use session max if higher than threshold, otherwise use threshold
     val chartMaxValue =
