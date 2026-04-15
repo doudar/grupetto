@@ -61,8 +61,6 @@ import kotlin.math.roundToInt
 class OverlayService : LifecycleEnabledService() {
     companion object {
         const val ActionMinimizeOverlay = "com.spop.poverlay.action.MINIMIZE_OVERLAY"
-        const val ActionOpenConfiguration = "com.spop.poverlay.action.OPEN_CONFIGURATION"
-        const val ActionCloseConfiguration = "com.spop.poverlay.action.CLOSE_CONFIGURATION"
         private const val DefaultOverlayFlags = (LayoutParams.FLAG_NOT_TOUCH_MODAL
                 or LayoutParams.FLAG_NOT_FOCUSABLE
                 or LayoutParams.FLAG_LAYOUT_NO_LIMITS)
@@ -95,8 +93,6 @@ class OverlayService : LifecycleEnabledService() {
     private var touchTargetView: View? = null
     private var windowManager: WindowManager? = null
     private var sensorViewModel: OverlaySensorViewModel? = null
-    private var clipDisabledForOverlay = false
-    private var minimizedStateBeforeConfiguration: Boolean? = null
     private val bleServer by lazy { (application as GrupettoApplication).bleServer }
 
     override fun onCreate() {
@@ -130,22 +126,8 @@ class OverlayService : LifecycleEnabledService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Timber.i("overlay service received intent")
-        when (intent?.action) {
-            ActionMinimizeOverlay -> sensorViewModel?.minimizeOverlay()
-            ActionOpenConfiguration -> {
-                sensorViewModel?.let { viewModel ->
-                    if (minimizedStateBeforeConfiguration == null) {
-                        minimizedStateBeforeConfiguration = viewModel.isMinimized.value
-                    }
-                    viewModel.minimizeOverlay()
-                }
-            }
-            ActionCloseConfiguration -> {
-                minimizedStateBeforeConfiguration?.let { previousState ->
-                    sensorViewModel?.setMinimized(previousState)
-                    minimizedStateBeforeConfiguration = null
-                }
-            }
+        if (intent?.action == ActionMinimizeOverlay) {
+            sensorViewModel?.minimizeOverlay()
         }
         syncBackgroundExecutionGuards()
         return START_STICKY
@@ -290,17 +272,13 @@ class OverlayService : LifecycleEnabledService() {
         val overlay = overlayView!!
         val touchTarget = touchTargetView!!
         wm.addView(overlay, overlayParams)
+
         wm.addView(touchTarget, touchTargetParams)
-        disableClipOnParents(overlay)
-        clipDisabledForOverlay = true
         //touchTarget.clipChildren = false
         //touchTarget.clipToPadding = false
         //Subscribe to Dialog view model and update views
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
-                var lastOverlayVisibility = touchTarget.visibility
-                var lastOverlayLayoutSnapshot: OverlayLayoutSnapshot? = null
-                var lastTouchLayoutSnapshot: TouchLayoutSnapshot? = null
                 combine(
                     dialogViewModel.dialogOrigin,
                     dialogViewModel.dialogGravity,
@@ -336,63 +314,18 @@ class OverlayService : LifecycleEnabledService() {
                         Timber.d("Overlay views cleared before update; skipping layout application")
                         return@combine
                     }
-                    val nextVisibility = if (touchTargetHeight > 0f){
+                    currentTouchTarget.visibility = if (touchTargetHeight > 0f){
                         View.VISIBLE
                     }else{
                         View.GONE
                     }
-                    if (nextVisibility != lastOverlayVisibility) {
-                        currentTouchTarget.visibility = nextVisibility
-                        lastOverlayVisibility = nextVisibility
-                    }
-                    if (!clipDisabledForOverlay) {
-                        disableClipOnParents(currentOverlay)
-                        clipDisabledForOverlay = true
-                    }
-                    val overlaySnapshot = OverlayLayoutSnapshot(
-                        x = overlayParams.x,
-                        y = overlayParams.y,
-                        flags = overlayParams.flags,
-                        gravity = overlayParams.gravity,
-                        width = overlayParams.width,
-                        height = overlayParams.height
-                    )
-                    if (overlaySnapshot != lastOverlayLayoutSnapshot) {
-                        wm.updateViewLayout(currentOverlay, overlayParams)
-                        lastOverlayLayoutSnapshot = overlaySnapshot
-                    }
-                    val touchSnapshot = TouchLayoutSnapshot(
-                        x = touchTargetParams.x,
-                        y = touchTargetParams.y,
-                        gravity = touchTargetParams.gravity,
-                        width = touchTargetParams.width,
-                        height = touchTargetParams.height
-                    )
-                    if (touchSnapshot != lastTouchLayoutSnapshot) {
-                        wm.updateViewLayout(currentTouchTarget, touchTargetParams)
-                        lastTouchLayoutSnapshot = touchSnapshot
-                    }
+                    disableClipOnParents(currentOverlay)
+                    wm.updateViewLayout(currentOverlay, overlayParams)
+                    wm.updateViewLayout(currentTouchTarget, touchTargetParams)
                 }.collect {}
             }
         }
     }
-
-    private data class OverlayLayoutSnapshot(
-        val x: Int,
-        val y: Int,
-        val flags: Int,
-        val gravity: Int,
-        val width: Int,
-        val height: Int
-    )
-
-    private data class TouchLayoutSnapshot(
-        val x: Int,
-        val y: Int,
-        val gravity: Int,
-        val width: Int,
-        val height: Int
-    )
 
     private fun disableClipOnParents(v: View) {
         if (v.parent == null) {
@@ -565,7 +498,5 @@ class OverlayService : LifecycleEnabledService() {
         overlayView = null
         touchTargetView = null
         windowManager = null
-        clipDisabledForOverlay = false
-        minimizedStateBeforeConfiguration = null
     }
 }
