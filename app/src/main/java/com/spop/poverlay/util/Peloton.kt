@@ -12,7 +12,12 @@ val IsRunningOnPeloton = Build.BRAND == PelotonBrand
  * Check if the device is a G700 CrossTrainer bike.
  * The G700 uses a different sensor interface than the regular Bike+.
  */
-val IsG700CrossTrainer = Build.MODEL.contains("G700", ignoreCase = true)
+/** G700 model strings include either legacy "G700" or newer "PLTN-ATR" prefixes. */
+internal fun isG700CrossTrainerModel(model: String): Boolean {
+    return model.contains("G700", ignoreCase = true) || model.startsWith("PLTN-ATR", ignoreCase = true)
+}
+
+val IsG700CrossTrainer = isG700CrossTrainerModel(Build.MODEL)
 
 /**
  * All Peloton bikes start with model "PLTN-T". Treadmills start with "PLTN-TR", so this might also
