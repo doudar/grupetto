@@ -94,6 +94,11 @@ class MainActivity : ComponentActivity() {
         viewModel.onAppResumed()
     }
 
+    override fun onStop() {
+        super.onStop()
+        viewModel.onAppStopped()
+    }
+
     private fun restartGrupetto() {
         Toast.makeText(
             this@MainActivity,

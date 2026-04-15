@@ -91,6 +91,10 @@ class OverlaySensorViewModel(
         mutableIsMinimized.value = true
     }
 
+    fun setMinimized(minimized: Boolean) {
+        mutableIsMinimized.value = minimized
+    }
+
     fun onOverlayDoubleTap() {
         getApplication<Application>().apply {
             val intent = Intent(this, MainActivity::class.java)
