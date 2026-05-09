@@ -466,13 +466,17 @@ object HeartRateManager {
 
     private fun startAutoReconnectScan() {
         if (stopped.get()) return
-        if (_isScanning.value) return
         autoReconnectJob?.cancel()
         autoReconnectJob = scope.launch {
-            startDiscovery()
-            delay(AutoReconnectScanMs)
-            if (_isScanning.value && _connectedDevice.value == null) {
-                stopDiscovery()
+            while (!stopped.get() && _connectedDevice.value == null && !manualDisconnectRequested) {
+                if (!_isScanning.value) {
+                    startDiscovery()
+                }
+                delay(AutoReconnectScanMs)
+                if (_connectedDevice.value == null && !stopped.get() && !manualDisconnectRequested) {
+                    stopDiscovery()
+                    delay(ReconnectDelayMs)
+                }
             }
         }
     }
