@@ -61,6 +61,7 @@ import kotlin.math.roundToInt
 class OverlayService : LifecycleEnabledService() {
     companion object {
         const val ActionMinimizeOverlay = "com.spop.poverlay.action.MINIMIZE_OVERLAY"
+        const val ActionRestoreOverlay = "com.spop.poverlay.action.RESTORE_OVERLAY"
         private const val DefaultOverlayFlags = (LayoutParams.FLAG_NOT_TOUCH_MODAL
                 or LayoutParams.FLAG_NOT_FOCUSABLE
                 or LayoutParams.FLAG_LAYOUT_NO_LIMITS)
@@ -93,6 +94,7 @@ class OverlayService : LifecycleEnabledService() {
     private var touchTargetView: View? = null
     private var windowManager: WindowManager? = null
     private var sensorViewModel: OverlaySensorViewModel? = null
+    private var minimizedStateBeforeConfiguration: Boolean? = null
     private val bleServer by lazy { (application as GrupettoApplication).bleServer }
 
     override fun onCreate() {
@@ -126,8 +128,21 @@ class OverlayService : LifecycleEnabledService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Timber.i("overlay service received intent")
-        if (intent?.action == ActionMinimizeOverlay) {
-            sensorViewModel?.minimizeOverlay()
+        when (intent?.action) {
+            ActionMinimizeOverlay -> {
+                sensorViewModel?.let { viewModel ->
+                    if (minimizedStateBeforeConfiguration == null) {
+                        minimizedStateBeforeConfiguration = viewModel.isMinimized.value
+                    }
+                    viewModel.minimizeOverlay()
+                }
+            }
+            ActionRestoreOverlay -> {
+                minimizedStateBeforeConfiguration?.let { previousState ->
+                    sensorViewModel?.setMinimized(previousState)
+                    minimizedStateBeforeConfiguration = null
+                }
+            }
         }
         syncBackgroundExecutionGuards()
         return START_STICKY

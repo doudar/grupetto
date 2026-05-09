@@ -242,6 +242,17 @@ class ConfigurationViewModel(
         }
     }
 
+    fun onAppStopped() {
+        if (isOverlayRunning.value) {
+            ContextCompat.startForegroundService(
+                getApplication(),
+                Intent(getApplication(), OverlayService::class.java).apply {
+                    action = OverlayService.ActionRestoreOverlay
+                }
+            )
+        }
+    }
+
     private fun isIgnoringBatteryOptimizations(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
             return true
