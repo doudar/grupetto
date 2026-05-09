@@ -57,9 +57,11 @@ class AntPlusHandler(
     private var antChannelProvider: AntChannelProvider? = null
     private var antChannel: AntChannel? = null  // Power meter channel
     private var cscChannel: AntChannel? = null  // Speed/Cadence channel
+    private var hrmChannel: AntChannel? = null  // Heart Rate Monitor channel
     private var isServiceBound = false
     private var isChannelOpen = false
     private var isCscChannelOpen = false
+    private var isHrmChannelOpen = false
 
     @Volatile
     private var latestPowerWatts: Int = 0
@@ -69,6 +71,9 @@ class AntPlusHandler(
 
     @Volatile
     private var latestSpeedKmh: Float = 0.0f
+
+    @Volatile
+    private var latestHeartRateBpm: Int = 0
 
     private var eventCount: Int = 0
     private var cscCumulativeWheelRevolutions: Int = 0 // uint16
@@ -80,6 +85,11 @@ class AntPlusHandler(
     private var cscCrankResidual: Double = 0.0
     private var cscLastUpdateMs: Long = SystemClock.elapsedRealtime()
     private var cscMessageCounter: Int = 0
+    private var hrmMessageCounter: Int = 0
+    private var hrmBeatCount: Int = 0
+    private var hrmLastBeatTime: Int = 0
+    private var hrmBeatResidual: Double = 0.0
+    private var hrmLastUpdateMs: Long = SystemClock.elapsedRealtime()
     private var messageCounter: Int = 0
     private var hasSentInitializationPage: Boolean = false
     private var lastBroadcastPowerWatts: Int = 0
@@ -172,6 +182,31 @@ class AntPlusHandler(
                     }
                 }
 
+                else -> Unit
+            }
+        }
+    }
+
+    private val hrmChannelEventHandler = object : IAntChannelEventHandler {
+        override fun onChannelDeath() {
+            logWarn("ANT_DEBUG: ANT HRM channel died")
+            hrmChannel = null
+            isHrmChannelOpen = false
+        }
+
+        override fun onReceiveMessage(messageType: MessageFromAntType, messageParcel: AntMessageParcel) {
+            when (messageType) {
+                MessageFromAntType.CHANNEL_EVENT -> {
+                    val eventCode = ChannelEventMessage(messageParcel).eventCode
+                    when (eventCode) {
+                        EventCode.TX -> pushHrmPayload()
+                        EventCode.CHANNEL_CLOSED -> {
+                            logDebug("ANT_DEBUG: ANT HRM channel closed")
+                            isHrmChannelOpen = false
+                        }
+                        else -> {}
+                    }
+                }
                 else -> Unit
             }
         }
@@ -313,8 +348,9 @@ class AntPlusHandler(
                 pushCurrentPayload()
                 logDebug("ANT_DEBUG: ✓ ANT+ LIVE on networkId=1 txType=$transmissionType")
                 
-                // Also set up CSC (Speed/Cadence) channel on separate device
+                // Also set up CSC (Speed/Cadence) and HRM channels on separate devices
                 setupCscChannel(channelProvider, transmissionType)
+                setupHrmChannel(channelProvider, transmissionType)
                 
                 if (DiscoveryModeEnabled) {
                     logDebug("ANT_DEBUG: Discovery mode active (mock: power=${DiscoveryModePowerWatts}W cadence=${DiscoveryModeCadenceRpm}rpm)")
@@ -590,6 +626,14 @@ class AntPlusHandler(
         latestSpeedKmh = speedKmh.coerceAtLeast(0.0f)
     }
 
+    /**
+     * Updates heart rate data to be broadcast via ANT+ HRM profile (device type 120).
+     */
+    @Synchronized
+    fun broadcastHrmData(bpm: Int) {
+        latestHeartRateBpm = bpm.coerceAtLeast(0)
+    }
+
     fun hasConnectedDevices(): Boolean = isServiceBound && isChannelOpen
 
     fun shutdown() {
@@ -828,6 +872,7 @@ class AntPlusHandler(
     private fun cleanupChannel() {
         isChannelOpen = false
         isCscChannelOpen = false
+        isHrmChannelOpen = false
         hasSentInitializationPage = false
         eventCount = 0
         cscCumulativeWheelRevolutions = 0
@@ -839,6 +884,11 @@ class AntPlusHandler(
         cscCrankResidual = 0.0
         cscLastUpdateMs = SystemClock.elapsedRealtime()
         cscMessageCounter = 0
+        hrmBeatCount = 0
+        hrmLastBeatTime = 0
+        hrmBeatResidual = 0.0
+        hrmLastUpdateMs = SystemClock.elapsedRealtime()
+        hrmMessageCounter = 0
         messageCounter = 0
 
         try {
@@ -853,8 +903,15 @@ class AntPlusHandler(
             logWarn("ANT_DEBUG: Error releasing CSC channel", e)
         }
 
+        try {
+            hrmChannel?.release()
+        } catch (e: Exception) {
+            logWarn("ANT_DEBUG: Error releasing HRM channel", e)
+        }
+
         antChannel = null
         cscChannel = null
+        hrmChannel = null
     }
 
     private fun ByteArray.toHexString(): String = joinToString(separator = " ") { byte ->
@@ -970,6 +1027,91 @@ class AntPlusHandler(
         } catch (e: Exception) {
             val cause = (e as? java.lang.reflect.InvocationTargetException)?.targetException ?: e
             logWarn("ANT_DEBUG: Failed to setup CSC channel — ${cause.javaClass.simpleName}: ${cause.message}", e)
+        }
+    }
+
+    private fun setupHrmChannel(channelProvider: AntChannelProvider, transmissionType: Int) {
+        try {
+            val hrmChannelAcquired = acquireChannelByNetworkId(channelProvider, networkId = 1)
+                ?: throw IllegalStateException("Failed to acquire HRM channel")
+
+            hrmChannelAcquired.setChannelEventHandler(hrmChannelEventHandler)
+            hrmChannelAcquired.assign(ChannelType.BIDIRECTIONAL_MASTER)
+            hrmChannelAcquired.setPeriod(AntPlusConstants.HRM_PERIOD)
+
+            try {
+                hrmChannelAcquired.setRfFrequency(AntPlusConstants.ANT_RF_FREQ)
+            } catch (e: AntCommandFailedException) {
+                logDebug("ANT_DEBUG: HRM RF frequency rejected (managed network)")
+            }
+
+            try {
+                val maxTxPower = hrmChannelAcquired.getCapabilities().maxOutputPowerLevelSetting
+                hrmChannelAcquired.setTransmitPower(maxTxPower)
+            } catch (e: Exception) {
+                logWarn("ANT_DEBUG: Failed to set HRM transmit power", e)
+            }
+
+            hrmChannelAcquired.setChannelId(
+                ChannelId(3, AntPlusConstants.DEVICE_TYPE_HRM, transmissionType)
+            )
+
+            hrmChannelAcquired.open()
+            hrmChannel = hrmChannelAcquired
+            isHrmChannelOpen = true
+            logDebug("ANT_DEBUG: HRM channel opened on networkId=1 as device 3")
+        } catch (e: Exception) {
+            val cause = (e as? java.lang.reflect.InvocationTargetException)?.targetException ?: e
+            logWarn("ANT_DEBUG: Failed to setup HRM channel — ${cause.javaClass.simpleName}: ${cause.message}", e)
+        }
+    }
+
+    @Synchronized
+    private fun buildHrmPayload(): ByteArray {
+        val bpm = if (DiscoveryModeEnabled) 140 else latestHeartRateBpm
+
+        val nowMs = SystemClock.elapsedRealtime()
+        val deltaMs = (nowMs - hrmLastUpdateMs).coerceAtLeast(0L)
+        hrmLastUpdateMs = nowMs
+
+        if (bpm > 0) {
+            val beatsPerMs = bpm / 60000.0
+            hrmBeatResidual += beatsPerMs * deltaMs
+            val beatsToAdd = kotlin.math.floor(hrmBeatResidual).toInt()
+            if (beatsToAdd > 0) {
+                hrmBeatResidual -= beatsToAdd
+                hrmBeatCount = (hrmBeatCount + beatsToAdd) and 0xFF
+                val ticksPerBeat = (60.0 * 1024.0) / bpm
+                hrmLastBeatTime = (hrmLastBeatTime + (ticksPerBeat * beatsToAdd).toInt().coerceAtLeast(1)) and 0xFFFF
+            }
+        }
+
+        val payload = ByteArray(AntPlusConstants.ANT_MESSAGE_SIZE)
+        payload[0] = AntPlusConstants.HRM_PAGE_DATA.toByte()
+        payload[1] = 0xFF.toByte()
+        payload[2] = 0xFF.toByte()
+        payload[3] = 0xFF.toByte()
+        payload[4] = (hrmLastBeatTime and 0xFF).toByte()
+        payload[5] = ((hrmLastBeatTime shr 8) and 0xFF).toByte()
+        payload[6] = (hrmBeatCount and 0xFF).toByte()
+        payload[7] = bpm.coerceIn(0, 255).toByte()
+        return payload
+    }
+
+    @Synchronized
+    private fun pushHrmPayload() {
+        val channel = hrmChannel ?: return
+        if (!isHrmChannelOpen) return
+        try {
+            channel.setBroadcastData(buildHrmPayload())
+            hrmMessageCounter = (hrmMessageCounter + 1) and 0xFFFF
+            if (hrmMessageCounter % PayloadDebugEveryNMessages == 0) {
+                logDebug("ANT_DEBUG: HRM payload queued (bpm=$latestHeartRateBpm, beatCount=$hrmBeatCount, beatTime=$hrmLastBeatTime)")
+            }
+        } catch (e: RemoteException) {
+            logError("ANT_DEBUG: Failed to queue HRM payload", e)
+        } catch (e: AntCommandFailedException) {
+            logError("ANT_DEBUG: ANT command failed while queuing HRM payload", e)
         }
     }
 

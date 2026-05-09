@@ -8,6 +8,7 @@ object AntPlusConstants {
     // ANT+ Device Type IDs
     const val DEVICE_TYPE_POWER_METER = 11 // FIXED: Correct ID for Bicycle Power
     const val DEVICE_TYPE_SPEED_CADENCE = 121
+    const val DEVICE_TYPE_HRM = 120
 
     // ANT+ Managed Network Key (Standard for Garmin/Wahoo/etc)
     val ANT_PLUS_NETWORK_KEY = byteArrayOf(
@@ -25,6 +26,7 @@ object AntPlusConstants {
     // Channel Periods (Hz = 32768 / Period)
     const val POWER_METER_PERIOD = 8182 // ANT+ Bike Power profile period (~4.00Hz)
     const val SPEED_CADENCE_PERIOD = 8086 // ~4.052Hz
+    const val HRM_PERIOD = 8070 // ANT+ HRM standard period (~4.06Hz)
 
     // Message IDs
     const val MESG_BROADCAST_DATA_ID = 0x4E
@@ -51,6 +53,9 @@ object AntPlusConstants {
 
     // Speed/Cadence sensor specific
     const val SPEED_CADENCE_PAGE_DATA = 1
+
+    // HRM specific
+    const val HRM_PAGE_DATA = 0 // Main HRM data page (page 0)
 
     // ANT+ message sizes
     const val ANT_MESSAGE_SIZE = 8 // Standard ANT message payload is 8 bytes

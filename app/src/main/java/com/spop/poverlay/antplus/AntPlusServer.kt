@@ -3,6 +3,7 @@ package com.spop.poverlay.antplus
 import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
+import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.sensor.interfaces.SensorInterface
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.combine
@@ -82,6 +83,7 @@ class AntPlusServer(
                     antPlusHandler?.initialize()
                     // Start sensor data updates after initialization
                     startSensorDataUpdates()
+                    startHrmDataUpdates()
                     Timber.d("ANT+ server started successfully")
                 } catch (e: Exception) {
                     Timber.e(e, "Failed to initialize ANT+ server")
@@ -165,6 +167,14 @@ class AntPlusServer(
                 if (!(e.message?.contains("Job was cancelled") ?: false)) {
                     Timber.e(e, "Error in ANT+ sensor data collection")
                 }
+            }
+        }
+    }
+
+    private fun startHrmDataUpdates() {
+        launch {
+            HeartRateManager.heartRate.collect { bpm ->
+                bpm?.let { antPlusHandler?.broadcastHrmData(it) }
             }
         }
     }
