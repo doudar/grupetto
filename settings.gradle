@@ -11,6 +11,9 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         maven { url 'https://jitpack.io' }
+        flatDir {
+            dirs 'C:/ANT_SDK/lib'  // ANT SDK AAR location
+        }
     }
 }
 rootProject.name = "PTON Overlay"
