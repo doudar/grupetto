@@ -33,6 +33,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.spop.poverlay.ConfigurationRepository
 import com.spop.poverlay.GrupettoApplication
+import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.MainActivity
 import com.spop.poverlay.R
 
@@ -96,24 +97,34 @@ class OverlayService : LifecycleEnabledService() {
     private var sensorViewModel: OverlaySensorViewModel? = null
     private var minimizedStateBeforeConfiguration: Boolean? = null
     private val bleServer by lazy { (application as GrupettoApplication).bleServer }
+    private val antPlusServer by lazy { (application as GrupettoApplication).antPlusServer }
 
     override fun onCreate() {
         super.onCreate()
         mutableIsRunning.value = true
+        HeartRateManager.start(this)
+        val prefs = getSharedPreferences(ConfigurationRepository.SharedPrefsName, MODE_PRIVATE)
+        val antPlusPref = prefs.getBoolean(ConfigurationRepository.Preferences.AntPlusTxEnabled.key, false)
+        Timber.d("BOOT_DIAG: antPlusTxEnabled=%b allPrefs=%s", antPlusPref, prefs.all.keys.joinToString())
+        if (antPlusPref) {
+            antPlusServer.start()
+        }
         syncBackgroundExecutionGuards()
         val notification = prepareNotification(NotificationManagerCompat.from(this))
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
-                OverlayServiceId, 
+                OverlayServiceId,
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
             )
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 OverlayServiceId,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
             )
         } else {
             startForeground(OverlayServiceId, notification)

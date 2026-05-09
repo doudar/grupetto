@@ -61,6 +61,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
             } else {
                 val autoStartOnBoot by
                         viewModel.autoStartOnBoot.collectAsStateWithLifecycle(initialValue = false)
+                val backgroundLocationGranted by
+                        viewModel.backgroundLocationGranted.collectAsStateWithLifecycle(initialValue = true)
                 val timerShownWhenMinimized by
                         viewModel.showTimerWhenMinimized.collectAsStateWithLifecycle(
                                 initialValue = true
@@ -91,6 +93,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         )
                 StartServicePage(
                         autoStartOnBoot,
+                        backgroundLocationGranted,
                         viewModel::onAutoStartOnBootClicked,
                         timerShownWhenMinimized,
                         viewModel::onShowTimerWhenMinimizedClicked,
@@ -127,6 +130,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
 @Composable
 private fun StartServicePage(
         autoStartOnBoot: Boolean,
+        backgroundLocationGranted: Boolean,
         onAutoStartOnBootToggled: (Boolean) -> Unit,
         timerShownWhenMinimized: Boolean,
         onTimerShownWhenMinimizedToggled: (Boolean) -> Unit,
@@ -221,6 +225,14 @@ private fun StartServicePage(
                                     checkedThumbColor = Color(0xFF22C55E),
                                     checkedTrackColor = Color(0xFF22C55E)
                             )
+                    )
+                }
+                if (autoStartOnBoot && !backgroundLocationGranted) {
+                    Spacer(modifier = Modifier.height(uiScale.dp(4f)))
+                    Text(
+                        "For HRM to scan at boot, grant \"Allow all the time\" location in app permissions.",
+                        fontSize = uiScale.sp(12f),
+                        color = Color(0xFFFFCC44)
                     )
                 }
             }

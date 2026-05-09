@@ -62,6 +62,7 @@ class AntPlusHandler(
     private var isChannelOpen = false
     private var isCscChannelOpen = false
     private var isHrmChannelOpen = false
+    private var currentTransmissionType: Int = -1
 
     @Volatile
     private var latestPowerWatts: Int = 0
@@ -218,7 +219,7 @@ class AntPlusHandler(
             return
         }
 
-        logDebug("ANT_DEBUG: App version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+        logDebug("ANT_DEBUG: initialize() called — version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         logDebug(
             "ANT_DEBUG: Flags discoveryMode=$DiscoveryModeEnabled strictParity=$StrictVirtualPowerParityMode device=${AntPlusConstants.DEVICE_NUMBER} txTypes=${AntPlusConstants.TRANSMISSION_TYPES_TO_TRY.joinToString()}"
         )
@@ -345,9 +346,10 @@ class AntPlusHandler(
 
                 antChannel = acquiredChannel
                 isChannelOpen = true
+                currentTransmissionType = transmissionType
                 pushCurrentPayload()
                 logDebug("ANT_DEBUG: ✓ ANT+ LIVE on networkId=1 txType=$transmissionType")
-                
+
                 // Also set up CSC (Speed/Cadence) and HRM channels on separate devices
                 setupCscChannel(channelProvider, transmissionType)
                 setupHrmChannel(channelProvider, transmissionType)
@@ -873,6 +875,7 @@ class AntPlusHandler(
         isChannelOpen = false
         isCscChannelOpen = false
         isHrmChannelOpen = false
+        currentTransmissionType = -1
         hasSentInitializationPage = false
         eventCount = 0
         cscCumulativeWheelRevolutions = 0
@@ -978,8 +981,22 @@ class AntPlusHandler(
 
         if (!isChannelOpen && !isChannelSetupInProgress) {
             setupAntChannel()
+        } else if (isChannelOpen && currentTransmissionType >= 0) {
+            // Power channel open; opportunistically retry any missing secondary channels
+            val provider = antChannelProvider ?: return
+            if (!isCscChannelOpen) setupCscChannel(provider, currentTransmissionType)
+            if (!isHrmChannelOpen) setupHrmChannel(provider, currentTransmissionType)
         }
     }
+
+    fun retryChannelSetupIfNeeded() {
+        if (isChannelOpen || isChannelSetupInProgress) return
+        logDebug("ANT_DEBUG: boot-retry: no channel open, reconnecting ANT service")
+        shutdown()
+        initialize()
+    }
+
+    fun isChannelReady(): Boolean = isChannelOpen
 
     private fun logDebug(message: String) = Timber.d(message)
 

@@ -85,6 +85,13 @@ class AntPlusServer(
                     startSensorDataUpdates()
                     startHrmDataUpdates()
                     Timber.d("ANT+ server started successfully")
+                    // At boot the ANT Radio Service reports 0 channels and never broadcasts
+                    // readiness. Reconnect every 15s until a channel opens (max 3 minutes).
+                    repeat(12) {
+                        delay(15_000)
+                        if (!isRunning.get() || antPlusHandler?.isChannelReady() == true) return@launch
+                        antPlusHandler?.retryChannelSetupIfNeeded()
+                    }
                 } catch (e: Exception) {
                     Timber.e(e, "Failed to initialize ANT+ server")
                     isRunning.set(false)

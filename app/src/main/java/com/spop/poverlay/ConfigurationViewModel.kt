@@ -18,6 +18,7 @@ import com.spop.poverlay.releases.ReleaseChecker
 import com.spop.poverlay.sensor.heartrate.HeartRateDevice
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -33,6 +34,10 @@ class ConfigurationViewModel(
     val requestQuit = MutableLiveData<Unit>()
     val requestBluetoothPermissions = MutableLiveData<Array<String>>()
     val requestIgnoreBatteryOptimizations = MutableLiveData<Unit>()
+    val requestBackgroundLocationPermission = MutableLiveData<Unit>()
+
+    private val _backgroundLocationGranted = MutableStateFlow(hasBackgroundLocationPermission())
+    val backgroundLocationGranted: StateFlow<Boolean> = _backgroundLocationGranted
     val showPermissionInfo = mutableStateOf(false)
     val infoPopup = MutableLiveData<String>()
 
@@ -87,10 +92,32 @@ class ConfigurationViewModel(
         } else {
             showPermissionInfo.value = false
         }
+        _backgroundLocationGranted.value = hasBackgroundLocationPermission()
+    }
+
+    private fun hasBackgroundLocationPermission(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true
+        return ContextCompat.checkSelfPermission(
+            getApplication(),
+            android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    fun onBackgroundLocationPermissionResult(granted: Boolean) {
+        _backgroundLocationGranted.value = hasBackgroundLocationPermission()
+        val msg = if (granted) {
+            "Background location granted. HRM will auto-connect at boot."
+        } else {
+            "Background location not granted. Open the app once after boot for HRM to connect."
+        }
+        infoPopup.postValue(msg)
     }
 
     fun onAutoStartOnBootClicked(isChecked: Boolean) {
         configurationRepository.setAutoStartOnBoot(isChecked)
+        if (isChecked && !hasBackgroundLocationPermission()) {
+            requestBackgroundLocationPermission.value = Unit
+        }
     }
 
     fun onShowTimerWhenMinimizedClicked(isChecked: Boolean) {
