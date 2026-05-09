@@ -45,6 +45,9 @@ class ConfigurationViewModel(
 
     var latestRelease = mutableStateOf<Release?>(null)
 
+    val autoStartOnBoot
+        get() = configurationRepository.autoStartOnBoot
+
     val showTimerWhenMinimized
         get() = configurationRepository.showTimerWhenMinimized
 
@@ -84,6 +87,10 @@ class ConfigurationViewModel(
         } else {
             showPermissionInfo.value = false
         }
+    }
+
+    fun onAutoStartOnBootClicked(isChecked: Boolean) {
+        configurationRepository.setAutoStartOnBoot(isChecked)
     }
 
     fun onShowTimerWhenMinimizedClicked(isChecked: Boolean) {

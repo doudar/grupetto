@@ -59,6 +59,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         uiScale = uiScale
                 )
             } else {
+                val autoStartOnBoot by
+                        viewModel.autoStartOnBoot.collectAsStateWithLifecycle(initialValue = false)
                 val timerShownWhenMinimized by
                         viewModel.showTimerWhenMinimized.collectAsStateWithLifecycle(
                                 initialValue = true
@@ -88,6 +90,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                                 initialValue = "Grupetto ANT+"
                         )
                 StartServicePage(
+                        autoStartOnBoot,
+                        viewModel::onAutoStartOnBootClicked,
                         timerShownWhenMinimized,
                         viewModel::onShowTimerWhenMinimizedClicked,
                         bleTxEnabled,
@@ -122,6 +126,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
 
 @Composable
 private fun StartServicePage(
+        autoStartOnBoot: Boolean,
+        onAutoStartOnBootToggled: (Boolean) -> Unit,
         timerShownWhenMinimized: Boolean,
         onTimerShownWhenMinimizedToggled: (Boolean) -> Unit,
         bleTxEnabled: Boolean,
@@ -199,6 +205,22 @@ private fun StartServicePage(
                             fontSize = uiScale.sp(18f),
                             fontWeight = FontWeight.Bold,
                             color = Color.White
+                    )
+                }
+                Spacer(modifier = Modifier.height(uiScale.dp(8f)))
+                Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Start on boot", fontSize = uiScale.sp(16f), color = bodyColor)
+                    Switch(
+                            checked = autoStartOnBoot,
+                            onCheckedChange = onAutoStartOnBootToggled,
+                            colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color(0xFF22C55E),
+                                    checkedTrackColor = Color(0xFF22C55E)
+                            )
                     )
                 }
             }

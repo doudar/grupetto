@@ -13,10 +13,11 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
     enum class Preferences(val key: String) {
         ShowTimerWhenMinimized("showTimerWhenMinimized"),
         BleTxEnabled("bleTxEnabled"),
-    BleFtmsDeviceName("bleFtmsDeviceName"),
-    AntPlusTxEnabled("antPlusTxEnabled"),
-    AntPlusDeviceName("antPlusDeviceName"),
-    SerialNumber("serialNumber")
+        BleFtmsDeviceName("bleFtmsDeviceName"),
+        AntPlusTxEnabled("antPlusTxEnabled"),
+        AntPlusDeviceName("antPlusDeviceName"),
+        AutoStartOnBoot("autoStartOnBoot"),
+        SerialNumber("serialNumber")
     }
 
     companion object {
@@ -32,6 +33,7 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
     private val mutableBleFtmsDeviceName = MutableStateFlow("Grupetto FTMS")
     private val mutableAntPlusTxEnabled = MutableStateFlow(false)
     private val mutableAntPlusDeviceName = MutableStateFlow("Grupetto ANT+")
+    private val mutableAutoStartOnBoot = MutableStateFlow(false)
     private val mutableSerialNumber = MutableStateFlow("")
 
     val showTimerWhenMinimized = mutableShowTimerWhenMinimized
@@ -39,6 +41,7 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
     val bleFtmsDeviceName = mutableBleFtmsDeviceName
     val antPlusTxEnabled = mutableAntPlusTxEnabled
     val antPlusDeviceName = mutableAntPlusDeviceName
+    val autoStartOnBoot = mutableAutoStartOnBoot
     val serialNumber = mutableSerialNumber
 
     private val sharedPreferences: SharedPreferences
@@ -93,6 +96,13 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         }
     }
 
+    fun setAutoStartOnBoot(enabled: Boolean) {
+        mutableAutoStartOnBoot.value = enabled
+        sharedPreferences.edit {
+            putBoolean(Preferences.AutoStartOnBoot.key, enabled)
+        }
+    }
+
     fun setAntPlusDeviceName(name: String) {
         mutableAntPlusDeviceName.value = name
         sharedPreferences.edit {
@@ -133,6 +143,9 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         mutableAntPlusDeviceName.value =
             sharedPreferences
                 .getString(Preferences.AntPlusDeviceName.key, "Grupetto ANT+") ?: "Grupetto ANT+"
+
+        mutableAutoStartOnBoot.value =
+            sharedPreferences.getBoolean(Preferences.AutoStartOnBoot.key, false)
 
         // Ensure a serial number exists and keep it in memory
         val existingSerial = sharedPreferences.getString(Preferences.SerialNumber.key, null)
