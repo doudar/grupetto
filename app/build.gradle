@@ -14,7 +14,7 @@ android {
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.spop.poverlay.beta"
+        applicationId "com.spop.poverlay"
         minSdk 21
         targetSdk 34
         versionCode 35
