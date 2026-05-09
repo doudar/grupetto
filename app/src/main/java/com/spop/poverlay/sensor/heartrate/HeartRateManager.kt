@@ -400,6 +400,8 @@ object HeartRateManager {
                 if (status != BluetoothGatt.GATT_SUCCESS) {
                     try { gatt.close() } catch (_: Exception) {}
                     if (bluetoothGatt === gatt) bluetoothGatt = null
+                    _connectedDevice.value = null
+                    _heartRate.value = null
                     if (!manualDisconnectRequested) {
                         scheduleReconnect()
                     }
