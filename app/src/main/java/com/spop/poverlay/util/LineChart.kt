@@ -24,8 +24,9 @@ fun LineChart(
     lineColor: Color = Color.DarkGray,
     zoneBands: List<ZoneBand>? = null,
 ) {
-    // Use key to force recreation when colors, maxValue, data source, or zone bands change
-    key(lineColor, fillColor, maxValue, data, zoneBands) {
+    // Exclude lineColor/fillColor from key when zone bands are set — coloring is per-segment
+    val keyColors = if (zoneBands != null) Unit else Pair(lineColor, fillColor)
+    key(keyColors, maxValue, data, zoneBands) {
         AndroidView(
             modifier = modifier,
             factory = { context ->

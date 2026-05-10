@@ -151,8 +151,10 @@ fun OverlayMainContent(
                             Modifier.requiredWidth(chartWidth)
                                     .requiredHeight(90.dp)
                                     .padding(horizontal = chartPadding),
-                    fillColor = chartColor.copy(alpha = 0.6f),
-                    lineColor = chartColor,
+                    fillColor = if (selectedMetric == MetricType.HEART_RATE) Color.Transparent
+                               else chartColor.copy(alpha = 0.6f),
+                    lineColor = if (selectedMetric == MetricType.HEART_RATE) Color.White
+                                else chartColor,
                     zoneBands = if (selectedMetric == MetricType.HEART_RATE) heartRateZoneBands else null,
             )
         }

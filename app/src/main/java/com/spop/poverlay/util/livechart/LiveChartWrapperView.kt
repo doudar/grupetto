@@ -726,25 +726,21 @@ open class LiveChartView(context: Context, attrs: AttributeSet?) : View(context,
                 secondDatasetPaint)
         }
 
-        // Draw zone bands behind the dataset line
-        for (band in zoneBands) {
-            val topY = band.upperBound.coerceIn(lowerBound, upperBound).yPointToPixels()
-            val bottomY = band.lowerBound.coerceIn(lowerBound, upperBound).yPointToPixels()
-            if (bottomY > topY) {
-                zoneBandPaint.color = band.color
-                canvas.drawRect(
-                    chartBounds.start,
-                    topY,
-                    if (drawYBounds) chartBounds.end - chartStyle.chartEndPadding else chartBounds.end,
-                    bottomY,
-                    zoneBandPaint
+        // Draw dataset — per-segment zone coloring if zone bands are set, otherwise single color
+        if (zoneBands.isNotEmpty() && dataset.points.size > 1) {
+            val segmentPaint = Paint(datasetLinePaint)
+            dataset.points.zipWithNext().forEach { (p1, p2) ->
+                segmentPaint.color = zoneBands.lastOrNull { p1.y >= it.lowerBound }?.color
+                    ?: datasetLinePaint.color
+                canvas.drawLine(
+                    chartBounds.start + p1.x.xPointToPixels(), p1.y.yPointToPixels(),
+                    chartBounds.start + p2.x.xPointToPixels(), p2.y.yPointToPixels(),
+                    segmentPaint
                 )
             }
+        } else {
+            canvas.drawPath(datasetPath, datasetLinePaint)
         }
-
-        // draw dataset
-        canvas.drawPath(datasetPath,
-            datasetLinePaint)
 
         if (drawFill) {
             canvas.drawPath(datasetFillPath,
