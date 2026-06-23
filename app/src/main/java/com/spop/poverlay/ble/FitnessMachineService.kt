@@ -179,7 +179,8 @@ class FitnessMachineService(server: BleServer) : BaseBleService(server) {
         FitnessMachineConstants.IndoorBikeDataFlags.InstantaneousPowerPresent or
         FitnessMachineConstants.IndoorBikeDataFlags.ResistanceLevelPresent
 
-        val speedValue = (speed * 100).toInt()
+        val speedKmh = speed * 1.60934f // fixes the Issue #30 in the doudar fork of grupetto
+        val speedValue = (speedKmh * 100).toInt() // fixes the Issue #30 in the doudar fork of grupetto
         val cadenceValue = (cadence * 2).toInt()
         val powerValue = power.toInt()
         val resistanceValue = resistance.toInt()
