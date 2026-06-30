@@ -29,6 +29,14 @@ import androidx.compose.ui.zIndex
 import com.spop.poverlay.overlay.composables.OverlayMainContent
 import com.spop.poverlay.overlay.composables.OverlayMinimizedContent
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
+import androidx.compose.ui.graphics.toArgb
+import com.spop.poverlay.ui.theme.HrZone1Color
+import com.spop.poverlay.ui.theme.HrZone2Color
+import com.spop.poverlay.ui.theme.HrZone3Color
+import com.spop.poverlay.ui.theme.HrZone4Color
+import com.spop.poverlay.ui.theme.HrZone5Color
+import com.spop.poverlay.ui.theme.MetricHeartRateColor
+import com.spop.poverlay.util.livechart.ZoneBand
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.drop
@@ -44,6 +52,14 @@ val BackgroundColorDefault = Color(20, 20, 20)
 
 // Shown when a sensor hasn't reported a value yet
 const val SensorValuePlaceholderText = "-"
+
+private fun heartRateZoneColor(bpm: Int, zones: List<Int>): Color = when {
+    bpm < zones[0] -> HrZone1Color
+    bpm < zones[1] -> HrZone2Color
+    bpm < zones[2] -> HrZone3Color
+    bpm < zones[3] -> HrZone4Color
+    else -> HrZone5Color
+}
 
 @Composable
 fun Overlay(
@@ -67,7 +83,24 @@ fun Overlay(
     val speedLabel by sensorViewModel.speedLabel.collectAsState(initial = "")
     val calories by sensorViewModel.caloriesValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
     val heartRate by HeartRateManager.heartRate.collectAsStateWithLifecycle(initialValue = null)
+    val heartRateZones by HeartRateManager.heartRateZones.collectAsStateWithLifecycle(initialValue = null)
     val connectedHeartRateDevice by HeartRateManager.connectedDevice.collectAsStateWithLifecycle(initialValue = null)
+    val heartRateColor = remember(heartRate, heartRateZones) {
+        val bpm = heartRate
+        val zones = heartRateZones
+        if (bpm != null && bpm > 0 && zones != null) heartRateZoneColor(bpm, zones)
+        else MetricHeartRateColor
+    }
+    val heartRateZoneBands = remember(heartRateZones) {
+        val zones = heartRateZones ?: return@remember null
+        listOf(
+            ZoneBand(0f,          zones[0].toFloat(), HrZone1Color.copy(alpha = 0.3f).toArgb()),
+            ZoneBand(zones[0].toFloat(), zones[1].toFloat(), HrZone2Color.copy(alpha = 0.3f).toArgb()),
+            ZoneBand(zones[1].toFloat(), zones[2].toFloat(), HrZone3Color.copy(alpha = 0.3f).toArgb()),
+            ZoneBand(zones[2].toFloat(), zones[3].toFloat(), HrZone4Color.copy(alpha = 0.3f).toArgb()),
+            ZoneBand(zones[3].toFloat(), 220f,         HrZone5Color.copy(alpha = 0.3f).toArgb()),
+        )
+    }
     val timerLabel by timerViewModel.timerLabel.collectAsState(initial = "")
     val isTimerPaused by timerViewModel.timerPaused.collectAsState(initial = false)
     val errorMessage by sensorViewModel.errorMessage.collectAsState(initial = null)
@@ -169,6 +202,7 @@ fun Overlay(
             speedLabel = speed,
             resistanceLabel = resistance,
             heartRateLabel = heartRate?.toString() ?: SensorValuePlaceholderText,
+            heartRateColor = heartRateColor,
             onTap = { timerViewModel.onTimerTap() },
             onLongPress = { timerViewModel.onTimerLongPress() },
             onOpenSettings = { sensorViewModel.onOverlayDoubleTap() },
@@ -223,6 +257,8 @@ fun Overlay(
                 speed = speed,
                 speedLabel = speedLabel,
                 heartRate = heartRate?.toString() ?: SensorValuePlaceholderText,
+                heartRateColor = heartRateColor,
+                heartRateZoneBands = heartRateZoneBands,
                 calories = calories,
                 maxPower = "%.0f".format(maxPower),
                 maxCadence = "%.0f".format(maxCadence),

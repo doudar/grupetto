@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Color.Companion.White
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.painterResource
@@ -43,6 +44,7 @@ fun OverlayMinimizedContent(
     speedLabel: String,
     resistanceLabel: String,
     heartRateLabel: String,
+    heartRateColor: Color,
     contentAlpha: Float,
     timerLabel: String,
     timerPaused: Boolean,
@@ -182,7 +184,8 @@ fun OverlayMinimizedContent(
             OverlayTimerField(
                 modifier = Modifier.width(58.dp),
                 timerLabel = heartRateLabel,
-                iconDrawable = R.drawable.ic_hrm
+                iconDrawable = R.drawable.ic_hrm,
+                textColor = heartRateColor
             )
         }
     }
@@ -193,6 +196,7 @@ private fun OverlayTimerField(
     modifier: Modifier,
     timerLabel: String,
     iconDrawable: Int,
+    textColor: Color = White,
 ) {
     Row(
         modifier = modifier
@@ -210,7 +214,7 @@ private fun OverlayTimerField(
         )
         Text(
             timerLabel,
-            color = Color.White,
+            color = textColor,
             fontSize = 19.sp,
             textAlign = TextAlign.Center,
             modifier = Modifier

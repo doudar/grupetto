@@ -15,6 +15,8 @@ import com.yabu.livechart.view.LiveChartStyle
 import kotlin.math.max
 import kotlin.math.min
 
+data class ZoneBand(val lowerBound: Float, val upperBound: Float, val color: Int)
+
 /**
  * Base [View] subclass handling the drawing of dataset paths and chart bounds.
  */
@@ -34,6 +36,17 @@ open class LiveChartView(context: Context, attrs: AttributeSet?) : View(context,
      * Baseline to determine paint color from data end point.
      */
     private var chartStyle: LiveChartStyle = LiveChartStyle()
+
+    private var zoneBands: List<ZoneBand> = emptyList()
+
+    private val zoneBandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+
+    fun setZoneBands(bands: List<ZoneBand>): LiveChartView {
+        zoneBands = bands
+        return this
+    }
 
     /**
      * Baseline to determine paint color from data end point.
@@ -713,9 +726,21 @@ open class LiveChartView(context: Context, attrs: AttributeSet?) : View(context,
                 secondDatasetPaint)
         }
 
-        // draw dataset
-        canvas.drawPath(datasetPath,
-            datasetLinePaint)
+        // Draw dataset — per-segment zone coloring if zone bands are set, otherwise single color
+        if (zoneBands.isNotEmpty() && dataset.points.size > 1) {
+            val segmentPaint = Paint(datasetLinePaint)
+            dataset.points.zipWithNext().forEach { (p1, p2) ->
+                segmentPaint.color = zoneBands.lastOrNull { p1.y >= it.lowerBound }?.color
+                    ?: datasetLinePaint.color
+                canvas.drawLine(
+                    chartBounds.start + p1.x.xPointToPixels(), p1.y.yPointToPixels(),
+                    chartBounds.start + p2.x.xPointToPixels(), p2.y.yPointToPixels(),
+                    segmentPaint
+                )
+            }
+        } else {
+            canvas.drawPath(datasetPath, datasetLinePaint)
+        }
 
         if (drawFill) {
             canvas.drawPath(datasetFillPath,

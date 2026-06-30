@@ -42,12 +42,21 @@ class CyclingSpeedAndCadenceService(server: BleServer) : BaseBleService(server) 
         )
     }
 
+    private val sensorLocationCharacteristic = BluetoothGattCharacteristic(
+        CyclingSpeedAndCadenceConstants.SensorLocationUUID,
+        BluetoothGattCharacteristic.PROPERTY_READ,
+        BluetoothGattCharacteristic.PERMISSION_READ
+    ).apply {
+        value = byteArrayOf(CyclingSpeedAndCadenceConstants.SensorLocation.RearWheel.toByte())
+    }
+
     override val service = BluetoothGattService(
         CyclingSpeedAndCadenceConstants.ServiceUUID,
         BluetoothGattService.SERVICE_TYPE_PRIMARY
     ).apply {
         addCharacteristic(measurementCharacteristic)
         addCharacteristic(featureCharacteristic)
+        addCharacteristic(sensorLocationCharacteristic)
     }
 
     override fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float) {
@@ -80,6 +89,10 @@ class CyclingSpeedAndCadenceService(server: BleServer) : BaseBleService(server) 
             bytes.add(((crankTime shr 8) and 0xFF).toByte())
         }
         measurementCharacteristic.setValue(bytes.toByteArray())
+        server.logBleDebug(
+            "BLE CSC notify flags=0x${flags.toString(16)} wheelRev=${server.cscCumulativeWheelRev} " +
+                "crankRev=${server.cscCumulativeCrankRev} payloadLen=${bytes.size} devices=${connectedDevices.size}"
+        )
 
         for (device in connectedDevices) {
             server.notifyCharacteristicChanged(device, measurementCharacteristic, false)

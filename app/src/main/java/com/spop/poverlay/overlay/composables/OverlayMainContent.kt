@@ -14,13 +14,14 @@ import com.spop.poverlay.overlay.PowerChartFullWidth
 import com.spop.poverlay.overlay.PowerChartShrunkWidth
 import com.spop.poverlay.overlay.StatCard
 import com.spop.poverlay.overlay.StatCardWidth
+import androidx.compose.ui.graphics.Color
 import com.spop.poverlay.ui.theme.MetricCadenceColor
 import com.spop.poverlay.ui.theme.MetricCalorieColor
-import com.spop.poverlay.ui.theme.MetricHeartRateColor
 import com.spop.poverlay.ui.theme.MetricPowerColor
 import com.spop.poverlay.ui.theme.MetricResistanceColor
 import com.spop.poverlay.ui.theme.MetricSpeedColor
 import com.spop.poverlay.util.LineChart
+import com.spop.poverlay.util.livechart.ZoneBand
 
 @Composable
 fun OverlayMainContent(
@@ -34,6 +35,8 @@ fun OverlayMainContent(
         speed: String,
         speedLabel: String,
         heartRate: String,
+        heartRateColor: Color,
+        heartRateZoneBands: List<ZoneBand>?,
         calories: String,
         pauseChart: Boolean,
         maxPower: String,
@@ -64,7 +67,7 @@ fun OverlayMainContent(
                 MetricType.CADENCE -> MetricCadenceColor
                 MetricType.RESISTANCE -> MetricResistanceColor
                 MetricType.SPEED -> MetricSpeedColor
-                MetricType.HEART_RATE -> MetricHeartRateColor
+                MetricType.HEART_RATE -> heartRateColor
             }
 
     // Define minimum thresholds to prevent chart from getting too compressed at low values
@@ -148,8 +151,11 @@ fun OverlayMainContent(
                             Modifier.requiredWidth(chartWidth)
                                     .requiredHeight(90.dp)
                                     .padding(horizontal = chartPadding),
-                    fillColor = chartColor.copy(alpha = 0.6f),
-                    lineColor = chartColor,
+                    fillColor = if (selectedMetric == MetricType.HEART_RATE) Color.Transparent
+                               else chartColor.copy(alpha = 0.6f),
+                    lineColor = if (selectedMetric == MetricType.HEART_RATE) Color.White
+                                else chartColor,
+                    zoneBands = if (selectedMetric == MetricType.HEART_RATE) heartRateZoneBands else null,
             )
         }
 
@@ -190,7 +196,7 @@ fun OverlayMainContent(
                         maxValue = maxHeartRate,
                         totalValue = avgHeartRate,
                         totalUnit = "avg",
-                        color = MetricHeartRateColor,
+                        color = heartRateColor,
                         onClick = { onMetricSelected(MetricType.HEART_RATE) }
                 )
         }

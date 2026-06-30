@@ -1,7 +1,6 @@
 package com.spop.poverlay
 
 import android.app.Application
-import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -19,6 +18,7 @@ import com.spop.poverlay.releases.ReleaseChecker
 import com.spop.poverlay.sensor.heartrate.HeartRateDevice
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -34,6 +34,10 @@ class ConfigurationViewModel(
     val requestQuit = MutableLiveData<Unit>()
     val requestBluetoothPermissions = MutableLiveData<Array<String>>()
     val requestIgnoreBatteryOptimizations = MutableLiveData<Unit>()
+    val requestBackgroundLocationPermission = MutableLiveData<Unit>()
+
+    private val _backgroundLocationGranted = MutableStateFlow(hasBackgroundLocationPermission())
+    val backgroundLocationGranted: StateFlow<Boolean> = _backgroundLocationGranted
     val showPermissionInfo = mutableStateOf(false)
     val infoPopup = MutableLiveData<String>()
 
@@ -46,6 +50,9 @@ class ConfigurationViewModel(
 
     var latestRelease = mutableStateOf<Release?>(null)
 
+    val autoStartOnBoot
+        get() = configurationRepository.autoStartOnBoot
+
     val showTimerWhenMinimized
         get() = configurationRepository.showTimerWhenMinimized
 
@@ -55,7 +62,14 @@ class ConfigurationViewModel(
     val bleFtmsDeviceName
         get() = configurationRepository.bleFtmsDeviceName
 
+    val antPlusTxEnabled
+        get() = configurationRepository.antPlusTxEnabled
+
+    val antPlusDeviceName
+        get() = configurationRepository.antPlusDeviceName
+
     private val bleServer = (application as GrupettoApplication).bleServer
+    private val antPlusServer = (application as GrupettoApplication).antPlusServer
     private var batteryOptimizationPromptShownThisSession = false
 
     init {
@@ -65,6 +79,11 @@ class ConfigurationViewModel(
             bleServer.start()
             requestBatteryOptimizationExemptionIfNeeded()
         }
+        if (antPlusTxEnabled.value && hasAntPlusPermissions()) {
+            antPlusServer.start()
+        } else if (antPlusTxEnabled.value) {
+            requestBluetoothPermissions.value = getRequiredAntPlusPermissions()
+        }
     }
 
     private fun updatePermissionState() {
@@ -72,6 +91,32 @@ class ConfigurationViewModel(
             showPermissionInfo.value = !Settings.canDrawOverlays(getApplication())
         } else {
             showPermissionInfo.value = false
+        }
+        _backgroundLocationGranted.value = hasBackgroundLocationPermission()
+    }
+
+    private fun hasBackgroundLocationPermission(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true
+        return ContextCompat.checkSelfPermission(
+            getApplication(),
+            android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    fun onBackgroundLocationPermissionResult(granted: Boolean) {
+        _backgroundLocationGranted.value = hasBackgroundLocationPermission()
+        val msg = if (granted) {
+            "Background location granted. HRM will auto-connect at boot."
+        } else {
+            "Background location not granted. Open the app once after boot for HRM to connect."
+        }
+        infoPopup.postValue(msg)
+    }
+
+    fun onAutoStartOnBootClicked(isChecked: Boolean) {
+        configurationRepository.setAutoStartOnBoot(isChecked)
+        if (isChecked && !hasBackgroundLocationPermission()) {
+            requestBackgroundLocationPermission.value = Unit
         }
     }
 
@@ -94,60 +139,100 @@ class ConfigurationViewModel(
         }
     }
 
+    fun onAntPlusTxEnabledClicked(isChecked: Boolean) {
+        configurationRepository.setAntPlusTxEnabled(isChecked)
+        if (isChecked) {
+            if (hasAntPlusPermissions()) {
+                antPlusServer.start()
+            } else {
+                requestBluetoothPermissions.value = getRequiredAntPlusPermissions()
+            }
+        } else {
+            antPlusServer.stop()
+        }
+    }
+
+    fun onAntPlusDeviceNameChanged(newName: String) {
+        configurationRepository.setAntPlusDeviceName(newName)
+    }
+
     fun onBluetoothPermissionsResult(granted: Boolean) {
-        if (granted) {
+        if (bleTxEnabled.value && hasBluetoothPermissions()) {
             bleServer.start()
             requestBatteryOptimizationExemptionIfNeeded()
-            infoPopup.postValue("Bluetooth permissions granted. BLE service started.")
-        } else {
-            configurationRepository.setBleTxEnabled(false)
-            infoPopup.postValue("Bluetooth permissions are required for BLE functionality.")
+        }
+        
+        if (!granted) {
+            infoPopup.value = "Some permissions were denied. ANT+ logging to Downloads may not work on older Android versions."
+        }
+
+        if (antPlusTxEnabled.value && hasAntPlusPermissions()) {
+            antPlusServer.start()
         }
     }
 
     private fun getRequiredBluetoothPermissions(): Array<String> {
         val permissions = mutableListOf<String>()
-
-        // Always required permissions
         permissions.add(android.Manifest.permission.BLUETOOTH)
         permissions.add(android.Manifest.permission.BLUETOOTH_ADMIN)
         permissions.add(android.Manifest.permission.ACCESS_FINE_LOCATION)
-
-        // Android 12+ permissions
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             permissions.add(android.Manifest.permission.BLUETOOTH_ADVERTISE)
             permissions.add(android.Manifest.permission.BLUETOOTH_CONNECT)
             permissions.add(android.Manifest.permission.BLUETOOTH_SCAN)
         }
-
         return permissions.toTypedArray()
+    }
+
+    private fun getRequiredAntPlusPermissions(): Array<String> {
+        val permissions = mutableListOf<String>()
+        permissions.add("com.dsi.ant.permission.ANT_COMMUNICATION")
+        permissions.add("com.dsi.ant.permission.ANT_ADMIN")
+        permissions.add(android.Manifest.permission.BODY_SENSORS)
+        if (Build.VERSION.SDK_INT in Build.VERSION_CODES.M..Build.VERSION_CODES.P) {
+            permissions.add(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+        return permissions.toTypedArray()
+    }
+
+    private fun hasAntPlusPermissions(): Boolean {
+        val context = getApplication<Application>()
+        val bodySensorPermission = ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.BODY_SENSORS
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val storagePermission = if (Build.VERSION.SDK_INT in Build.VERSION_CODES.M..Build.VERSION_CODES.P) {
+            ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+
+        return bodySensorPermission && storagePermission
     }
 
     private fun hasBluetoothPermissions(): Boolean {
         val context = getApplication<Application>()
-
         val bluetoothPermission = ContextCompat.checkSelfPermission(
             context, android.Manifest.permission.BLUETOOTH
         ) == PackageManager.PERMISSION_GRANTED
-
         val bluetoothAdminPermission = ContextCompat.checkSelfPermission(
             context, android.Manifest.permission.BLUETOOTH_ADMIN
         ) == PackageManager.PERMISSION_GRANTED
-
         val locationPermission = ContextCompat.checkSelfPermission(
             context, android.Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
-
-        // Check for Android 12+ permissions
         var bluetoothAdvertisePermission = true
         var bluetoothConnectPermission = true
         var bluetoothScanPermission = true
+
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             bluetoothAdvertisePermission = ContextCompat.checkSelfPermission(
                 context, android.Manifest.permission.BLUETOOTH_ADVERTISE
             ) == PackageManager.PERMISSION_GRANTED
-
             bluetoothConnectPermission = ContextCompat.checkSelfPermission(
                 context, android.Manifest.permission.BLUETOOTH_CONNECT
             ) == PackageManager.PERMISSION_GRANTED
@@ -156,7 +241,6 @@ class ConfigurationViewModel(
                 context, android.Manifest.permission.BLUETOOTH_SCAN
             ) == PackageManager.PERMISSION_GRANTED
         }
-
         return bluetoothPermission && bluetoothAdminPermission && locationPermission &&
                 bluetoothAdvertisePermission && bluetoothConnectPermission && bluetoothScanPermission
     }
@@ -240,6 +324,10 @@ class ConfigurationViewModel(
         } else if (bleTxEnabled.value && hasBluetoothPermissions()) {
             requestBatteryOptimizationExemptionIfNeeded()
         }
+        if (antPlusTxEnabled.value && !hasAntPlusPermissions()) {
+            val permissions = getRequiredAntPlusPermissions()
+            requestBluetoothPermissions.value = permissions
+        }
     }
 
     fun onAppStopped() {
@@ -257,7 +345,6 @@ class ConfigurationViewModel(
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
             return true
         }
-
         val context = getApplication<Application>()
         val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
         return powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true
@@ -267,7 +354,6 @@ class ConfigurationViewModel(
         if (!bleTxEnabled.value || batteryOptimizationPromptShownThisSession) {
             return
         }
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !isIgnoringBatteryOptimizations()) {
             batteryOptimizationPromptShownThisSession = true
             requestIgnoreBatteryOptimizations.postValue(Unit)
@@ -278,7 +364,6 @@ class ConfigurationViewModel(
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
             return
         }
-
         val prompt = if (isIgnoringBatteryOptimizations()) {
             "Battery optimization disabled for Grupetto. BLE reliability should improve while idle."
         } else {

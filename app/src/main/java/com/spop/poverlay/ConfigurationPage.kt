@@ -59,6 +59,10 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         uiScale = uiScale
                 )
             } else {
+                val autoStartOnBoot by
+                        viewModel.autoStartOnBoot.collectAsStateWithLifecycle(initialValue = false)
+                val backgroundLocationGranted by
+                        viewModel.backgroundLocationGranted.collectAsStateWithLifecycle(initialValue = true)
                 val timerShownWhenMinimized by
                         viewModel.showTimerWhenMinimized.collectAsStateWithLifecycle(
                                 initialValue = true
@@ -81,7 +85,16 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         viewModel.hrMatchByName.collectAsStateWithLifecycle(initialValue = false)
                 val isOverlayRunning by
                         viewModel.isOverlayRunning.collectAsStateWithLifecycle(initialValue = false)
+                val antPlusTxEnabled by
+                        viewModel.antPlusTxEnabled.collectAsStateWithLifecycle(initialValue = false)
+                val antPlusDeviceName by
+                        viewModel.antPlusDeviceName.collectAsStateWithLifecycle(
+                                initialValue = "Grupetto ANT+"
+                        )
                 StartServicePage(
+                        autoStartOnBoot,
+                        backgroundLocationGranted,
+                        viewModel::onAutoStartOnBootClicked,
                         timerShownWhenMinimized,
                         viewModel::onShowTimerWhenMinimizedClicked,
                         bleTxEnabled,
@@ -99,6 +112,10 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         viewModel::forgetHeartRateDevice,
                         viewModel::setHrMatchByName,
                         isOverlayRunning,
+                        antPlusTxEnabled,
+                        viewModel::onAntPlusTxEnabledClicked,
+                        antPlusDeviceName,
+                        viewModel::onAntPlusDeviceNameChanged,
                         uiScale,
                         viewModel::onStartServiceClicked,
                         viewModel::onQuitClicked,
@@ -112,6 +129,9 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
 
 @Composable
 private fun StartServicePage(
+        autoStartOnBoot: Boolean,
+        backgroundLocationGranted: Boolean,
+        onAutoStartOnBootToggled: (Boolean) -> Unit,
         timerShownWhenMinimized: Boolean,
         onTimerShownWhenMinimizedToggled: (Boolean) -> Unit,
         bleTxEnabled: Boolean,
@@ -129,6 +149,10 @@ private fun StartServicePage(
         onForgetHeartRateDevice: (String) -> Unit,
         onSetHrMatchByName: (Boolean) -> Unit,
         isOverlayRunning: Boolean,
+        antPlusTxEnabled: Boolean,
+        onAntPlusTxEnabledToggled: (Boolean) -> Unit,
+        antPlusDeviceName: String,
+        onAntPlusDeviceNameChanged: (String) -> Unit,
         uiScale: UiScale,
         onClickedStartOverlay: () -> Unit,
         onClickedQuitApp: () -> Unit,
@@ -185,6 +209,30 @@ private fun StartServicePage(
                             fontSize = uiScale.sp(18f),
                             fontWeight = FontWeight.Bold,
                             color = Color.White
+                    )
+                }
+                Spacer(modifier = Modifier.height(uiScale.dp(8f)))
+                Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Start on boot", fontSize = uiScale.sp(16f), color = bodyColor)
+                    Switch(
+                            checked = autoStartOnBoot,
+                            onCheckedChange = onAutoStartOnBootToggled,
+                            colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color(0xFF22C55E),
+                                    checkedTrackColor = Color(0xFF22C55E)
+                            )
+                    )
+                }
+                if (autoStartOnBoot && !backgroundLocationGranted) {
+                    Spacer(modifier = Modifier.height(uiScale.dp(4f)))
+                    Text(
+                        "For HRM to scan at boot, grant \"Allow all the time\" location in app permissions.",
+                        fontSize = uiScale.sp(12f),
+                        color = Color(0xFFFFCC44)
                     )
                 }
             }
@@ -313,6 +361,54 @@ private fun StartServicePage(
                             color = bodyColor,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(uiScale.dp(12f)))
+
+        Card(
+                modifier = Modifier.fillMaxWidth(),
+                backgroundColor = cardColor,
+                elevation = uiScale.dp(4f)
+        ) {
+            Column(modifier = Modifier.padding(cardPadding)) {
+                Text("ANT+ TX", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
+                Spacer(modifier = Modifier.height(uiScale.dp(8f)))
+                Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Enable ANT+ TX", fontSize = uiScale.sp(16f), color = bodyColor)
+                    Switch(
+                            checked = antPlusTxEnabled,
+                            onCheckedChange = onAntPlusTxEnabledToggled,
+                            colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color(0xFF22C55E),
+                                    checkedTrackColor = Color(0xFF22C55E)
+                            )
+                    )
+                }
+                Spacer(modifier = Modifier.height(uiScale.dp(8f)))
+                if (antPlusTxEnabled) {
+                    Text(
+                            text = "Broadcasting as",
+                            fontSize = uiScale.sp(14f),
+                            color = bodyColor
+                    )
+                    Text(
+                            text = antPlusDeviceName,
+                            fontSize = uiScale.sp(20f),
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                    )
+                } else {
+                    Text(
+                            text = "Enable ANT+ TX to broadcast bike data to Garmin, Wahoo, and other ANT+ devices.",
+                            fontSize = uiScale.sp(13f),
+                            color = bodyColor
                     )
                 }
             }

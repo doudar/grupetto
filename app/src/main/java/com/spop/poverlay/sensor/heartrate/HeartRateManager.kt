@@ -46,6 +46,12 @@ object HeartRateManager {
     private const val AutoReconnectScanMs = 10_000L
     private const val StaleHeartRateTimeoutMs = 12_000L
 
+    // Default zones based on 180 bpm max HR (typical 40-year-old), 10% bands
+    private const val DefaultZone12 = 108
+    private const val DefaultZone23 = 126
+    private const val DefaultZone34 = 144
+    private const val DefaultZone45 = 162
+
     private val HR_SERVICE: UUID = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
     private val HR_MEASUREMENT: UUID = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
     private val CCC_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
@@ -148,10 +154,10 @@ object HeartRateManager {
     }
 
     private fun loadHeartRateZones() {
-        _zone12.value = readIntOrNull(PrefZone12)
-        _zone23.value = readIntOrNull(PrefZone23)
-        _zone34.value = readIntOrNull(PrefZone34)
-        _zone45.value = readIntOrNull(PrefZone45)
+        _zone12.value = readIntOrNull(PrefZone12) ?: DefaultZone12
+        _zone23.value = readIntOrNull(PrefZone23) ?: DefaultZone23
+        _zone34.value = readIntOrNull(PrefZone34) ?: DefaultZone34
+        _zone45.value = readIntOrNull(PrefZone45) ?: DefaultZone45
         updateHeartRateZones()
     }
 
@@ -394,6 +400,8 @@ object HeartRateManager {
                 if (status != BluetoothGatt.GATT_SUCCESS) {
                     try { gatt.close() } catch (_: Exception) {}
                     if (bluetoothGatt === gatt) bluetoothGatt = null
+                    _connectedDevice.value = null
+                    _heartRate.value = null
                     if (!manualDisconnectRequested) {
                         scheduleReconnect()
                     }
@@ -466,13 +474,17 @@ object HeartRateManager {
 
     private fun startAutoReconnectScan() {
         if (stopped.get()) return
-        if (_isScanning.value) return
         autoReconnectJob?.cancel()
         autoReconnectJob = scope.launch {
-            startDiscovery()
-            delay(AutoReconnectScanMs)
-            if (_isScanning.value && _connectedDevice.value == null) {
-                stopDiscovery()
+            while (!stopped.get() && _connectedDevice.value == null && !manualDisconnectRequested) {
+                if (!_isScanning.value) {
+                    startDiscovery()
+                }
+                delay(AutoReconnectScanMs)
+                if (_connectedDevice.value == null && !stopped.get() && !manualDisconnectRequested) {
+                    stopDiscovery()
+                    delay(ReconnectDelayMs)
+                }
             }
         }
     }

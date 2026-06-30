@@ -237,10 +237,15 @@ class LiveChart(context: Context, attrs: AttributeSet? = null) : FrameLayout(con
         return this
     }
 
+    fun setZoneBands(bands: List<ZoneBand>): LiveChart {
+        livechart.setZoneBands(bands)
+        return this
+    }
+
     /**
      * Draw on chart and bind overlay to dataset.
      */
-    
+
     fun drawDataset() {
         livechart.drawDataset()
         if (!disableTouchOverlay) {
