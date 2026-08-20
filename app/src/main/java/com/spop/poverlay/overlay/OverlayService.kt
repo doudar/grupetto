@@ -38,12 +38,12 @@ import com.spop.poverlay.R
 
 import com.spop.poverlay.sensor.CadenceWatchdog
 import com.spop.poverlay.sensor.DeadSensorDetector
+import com.spop.poverlay.sensor.SensorSelection
 import com.spop.poverlay.sensor.interfaces.DummySensorInterface
 import com.spop.poverlay.sensor.interfaces.PelotonBikeSensorInterfaceV1New
 import com.spop.poverlay.sensor.interfaces.PelotonBikePlusSensorInterface
-import com.spop.poverlay.util.IsBikePlus
-import com.spop.poverlay.util.IsG700CrossTrainer
-import com.spop.poverlay.util.IsRunningOnPeloton
+import com.spop.poverlay.sensor.interfaces.PelotonTreadSensorInterface
+import com.spop.poverlay.sensor.selectSensorForCurrentDevice
 import com.spop.poverlay.util.LifecycleEnabledService
 import com.spop.poverlay.util.disableAnimations
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -164,28 +164,30 @@ class OverlayService : LifecycleEnabledService() {
             resources.displayMetrics.heightPixels.toFloat()
         )
 
-        val sensorInterface = if (IsRunningOnPeloton) {
-            if (IsG700CrossTrainer || IsBikePlus) {
-                PelotonBikePlusSensorInterface(this).also {
-                    lifecycle.addObserver(LifecycleEventObserver { _, event ->
-                        if (event == Lifecycle.Event.ON_DESTROY) {
-                            it.stop()
-                        }
-                    })
-                }
-            } else {
-                PelotonBikeSensorInterfaceV1New(this).also {
-                    lifecycle.addObserver(LifecycleEventObserver { _, event ->
-                        if (event == Lifecycle.Event.ON_DESTROY) {
-                            it.stop()
-                        }
-                    })
+        // Detection is synchronous and reads Settings.Global["peloton_platform"]
+        // ("prism" = Tread, "titan" = Bike+, "caesar" = Row); the shared Topaz tablet
+        // model (PLTN-TTR01) cannot discriminate. The correct interface (and metric set)
+        // is chosen from the first frame with zero delay and no ANR risk. A bind-probe
+        // was unreliable — AffernetService returns a non-null ITreadInterface binder on
+        // a bike too, so it misdetected bikes as Treads (Incline+Speed HUD on a bike).
+        val sensorInterface = when (
+            selectSensorForCurrentDevice(this)
+        ) {
+            SensorSelection.Tread -> PelotonTreadSensorInterface(this)
+            SensorSelection.BikePlus -> PelotonBikePlusSensorInterface(this)
+            SensorSelection.BikeV1 -> PelotonBikeSensorInterfaceV1New(this)
+            SensorSelection.Dummy -> EmulatorSensorInterface
+        }
+        // Stop the sensor interface when the service is destroyed to release bindings.
+        lifecycle.addObserver(LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_DESTROY) {
+                when (sensorInterface) {
+                    is PelotonTreadSensorInterface -> sensorInterface.stop()
+                    is PelotonBikeSensorInterfaceV1New -> sensorInterface.stop()
+                    is PelotonBikePlusSensorInterface -> sensorInterface.stop()
                 }
             }
-
-        } else {
-            EmulatorSensorInterface
-        }
+        })
 
         val timerViewModel = OverlayTimerViewModel(
             application,

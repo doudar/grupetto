@@ -59,7 +59,8 @@ class DeviceInformationService(server: BleServer) : BaseBleService(server) {
             cadence: Float,
             power: Float,
             speed: Float,
-            resistance: Float
+            resistance: Float,
+            incline: Float
     ) {
 
         // Populate characteristic values (UTF-8 strings)

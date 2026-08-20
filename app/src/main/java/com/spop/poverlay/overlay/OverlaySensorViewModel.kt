@@ -9,17 +9,21 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.spop.poverlay.MainActivity
 import com.spop.poverlay.sensor.DeadSensorDetector
+import com.spop.poverlay.sensor.interfaces.DeviceType
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.sensor.interfaces.SensorInterface
 import com.spop.poverlay.util.smoothSensorValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.sample
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration
@@ -29,8 +33,28 @@ import kotlin.time.Duration.Companion.minutes
 private const val MphToKph = 1.60934
 
 enum class MetricType {
-    POWER, CADENCE, RESISTANCE, SPEED, HEART_RATE
+    POWER, CADENCE, RESISTANCE, SPEED, HEART_RATE, INCLINE
 }
+
+/**
+ * The device-appropriate set of primary metric cards, in display order.
+ *
+ * A treadmill reports real speed and incline but always 0 for cadence/resistance,
+ * and its power is only a rough derived approximation, so those cards are hidden.
+ * A bike shows the full power/cadence/resistance/speed set. This is the single
+ * source of truth for which metrics appear and which are selectable for the chart,
+ * keeping the main and minimized overlays consistent. Heart rate (runtime-gated on
+ * a connected monitor) and calories are common to both and handled separately.
+ */
+fun deviceMetrics(deviceType: DeviceType): List<MetricType> = when (deviceType) {
+    DeviceType.Tread -> listOf(MetricType.SPEED, MetricType.INCLINE)
+    DeviceType.Bike -> listOf(
+        MetricType.POWER, MetricType.CADENCE, MetricType.RESISTANCE, MetricType.SPEED
+    )
+}
+
+/** The metric shown on the chart by default: the device's primary metric. */
+fun defaultMetricFor(deviceType: DeviceType): MetricType = deviceMetrics(deviceType).first()
 
 /**
  * Calorie calculation constants using Gross Mechanical Efficiency (GME) method:
@@ -69,6 +93,47 @@ class OverlaySensorViewModel(
     }
 
 
+    // Reactive device type. Detection is model-based and synchronous, so the interface
+    // is fixed at construction and this flow emits a single, correct value; deriving the
+    // metric set from it keeps the overlay's cards consistent with the chosen device.
+    private val deviceType: StateFlow<DeviceType> =
+        sensorInterface.deviceTypeFlow.stateIn(
+            viewModelScope, SharingStarted.Eagerly, sensorInterface.deviceType
+        )
+
+    // Device-appropriate metric set (single source of truth). See deviceMetrics().
+    private val visibleMetrics: StateFlow<List<MetricType>> =
+        deviceType.map(::deviceMetrics).stateIn(
+            viewModelScope, SharingStarted.Eagerly, deviceMetrics(sensorInterface.deviceType)
+        )
+
+    /** Default chart metric for this device (Power on a bike, Speed on a tread). */
+    val defaultMetric: StateFlow<MetricType> =
+        deviceType.map(::defaultMetricFor).stateIn(
+            viewModelScope, SharingStarted.Eagerly, defaultMetricFor(sensorInterface.deviceType)
+        )
+
+    /** Which primary metric cards to show, derived reactively from [visibleMetrics]. */
+    val showPowerCard: StateFlow<Boolean> = visibleMetricFlow(MetricType.POWER)
+    val showCadenceCard: StateFlow<Boolean> = visibleMetricFlow(MetricType.CADENCE)
+    val showResistanceCard: StateFlow<Boolean> = visibleMetricFlow(MetricType.RESISTANCE)
+    val showSpeedCard: StateFlow<Boolean> = visibleMetricFlow(MetricType.SPEED)
+
+    // A treadmill reports incline; a bike does not, so only show the card for a Tread.
+    val showInclineCard: StateFlow<Boolean> = visibleMetricFlow(MetricType.INCLINE)
+
+    // True while a treadmill is active. Drives the overlay's tread-specific spatial
+    // layout (incline left, chart center, speed right) mirroring the Tread's physical
+    // controls; the bike layout is used otherwise.
+    val isTread: StateFlow<Boolean> = deviceType.map { it == DeviceType.Tread }.stateIn(
+        viewModelScope, SharingStarted.Eagerly, sensorInterface.deviceType == DeviceType.Tread
+    )
+
+    private fun visibleMetricFlow(metric: MetricType): StateFlow<Boolean> =
+        visibleMetrics.map { metric in it }.stateIn(
+            viewModelScope, SharingStarted.Eagerly, metric in visibleMetrics.value
+        )
+
     //TODO: Move this logic to dialog view model
     private val mutableIsMinimized = MutableStateFlow(false)
     val isMinimized = mutableIsMinimized.asStateFlow()
@@ -76,7 +141,7 @@ class OverlaySensorViewModel(
     private val mutableErrorMessage = MutableStateFlow<String?>(null)
     val errorMessage = mutableErrorMessage.asStateFlow()
 
-    private val mutableSelectedMetric = MutableStateFlow(MetricType.POWER)
+    private val mutableSelectedMetric = MutableStateFlow(defaultMetric.value)
     val selectedMetric = mutableSelectedMetric.asStateFlow()
 
     fun onDismissErrorPressed() {
@@ -278,6 +343,10 @@ class OverlaySensorViewModel(
         }
     }
 
+    val inclineValue = sensorInterface.incline
+        .sample(UiUpdatePeriod)
+        .map { "%.1f".format(it) }
+
     fun onClickedSpeedUnit() {
         viewModelScope.launch {
             useMph.emit(!useMph.value)
@@ -328,6 +397,7 @@ class OverlaySensorViewModel(
     val resistanceGraph = mutableStateListOf<Float>()
     val speedGraph = mutableStateListOf<Float>()
     val heartRateGraph = mutableStateListOf<Float>()
+    val inclineGraph = mutableStateListOf<Float>()
 
     fun getGraphForMetric(metric: MetricType): List<Float> {
         return when (metric) {
@@ -336,6 +406,7 @@ class OverlaySensorViewModel(
             MetricType.RESISTANCE -> resistanceGraph
             MetricType.SPEED -> speedGraph
             MetricType.HEART_RATE -> heartRateGraph
+            MetricType.INCLINE -> inclineGraph
         }
     }
 
@@ -421,6 +492,22 @@ class OverlaySensorViewModel(
                     }
                 })
         }
+
+        // Incline graph
+        viewModelScope.launch(Dispatchers.IO) {
+            sensorInterface.incline.smoothSensorValue()
+                .sample(UiUpdatePeriod)
+                .collect(object : FlowCollector<Float> {
+                    override suspend fun emit(value: Float) {
+                        withContext(Dispatchers.Main) {
+                            inclineGraph.add(value)
+                            if (inclineGraph.size > GraphMaxDataPoints) {
+                                inclineGraph.removeFirst()
+                            }
+                        }
+                    }
+                })
+        }
     }
 
     private fun setupMaxTracking() {
@@ -448,6 +535,19 @@ class OverlaySensorViewModel(
         setupGraphData()
         setupCaloriesAccumulation()
         setupMaxTracking()
+
+        // When the active device swaps (Bike->Tread), reset the chart selection if the
+        // previously selected metric no longer applies to the new device. Heart rate is
+        // gated separately (on a connected monitor), so leave that selection alone.
+        viewModelScope.launch {
+            deviceType.collect { type ->
+                val selected = mutableSelectedMetric.value
+                if (selected != MetricType.HEART_RATE && selected !in deviceMetrics(type)) {
+                    mutableSelectedMetric.value = defaultMetricFor(type)
+                }
+            }
+        }
+
         viewModelScope.launch(Dispatchers.IO) {
             deadSensorDetector.deadSensorDetected.collect(object : FlowCollector<Unit> {
                 override suspend fun emit(value: Unit) {

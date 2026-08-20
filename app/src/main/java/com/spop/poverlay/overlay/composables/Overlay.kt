@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -59,12 +60,21 @@ fun Overlay(
 ) {
     val power by sensorViewModel.powerValue.collectAsState(initial = SensorValuePlaceholderText)
 
-    val selectedMetric by sensorViewModel.selectedMetric.collectAsState(initial = MetricType.POWER)
+    val defaultMetric by sensorViewModel.defaultMetric.collectAsState()
+    val selectedMetric by sensorViewModel.selectedMetric.collectAsState(initial = defaultMetric)
     val currentGraph = remember(selectedMetric) { sensorViewModel.getGraphForMetric(selectedMetric) }
+    // Reactive card visibility: with a Tread the delegate can swap after startup, so
+    // these must be observed rather than read once (see OverlaySensorViewModel).
+    val showPowerCard by sensorViewModel.showPowerCard.collectAsState()
+    val showCadenceCard by sensorViewModel.showCadenceCard.collectAsState()
+    val showResistanceCard by sensorViewModel.showResistanceCard.collectAsState()
+    val showInclineCard by sensorViewModel.showInclineCard.collectAsState()
+    val isTread by sensorViewModel.isTread.collectAsState()
     val rpm by sensorViewModel.rpmValue.collectAsState(initial = SensorValuePlaceholderText)
     val resistance by sensorViewModel.resistanceValue.collectAsState(initial = SensorValuePlaceholderText)
     val speed by sensorViewModel.speedValue.collectAsState(initial = SensorValuePlaceholderText)
     val speedLabel by sensorViewModel.speedLabel.collectAsState(initial = "")
+    val incline by sensorViewModel.inclineValue.collectAsState(initial = SensorValuePlaceholderText)
     val calories by sensorViewModel.caloriesValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
     val heartRate by HeartRateManager.heartRate.collectAsStateWithLifecycle(initialValue = null)
     val connectedHeartRateDevice by HeartRateManager.connectedDevice.collectAsStateWithLifecycle(initialValue = null)
@@ -103,7 +113,7 @@ fun Overlay(
     val location by locationState
     LaunchedEffect(showHeartRateCard, selectedMetric) {
         if (!showHeartRateCard && selectedMetric == MetricType.HEART_RATE) {
-            sensorViewModel.onMetricSelected(MetricType.POWER)
+            sensorViewModel.onMetricSelected(defaultMetric)
         }
     }
 
@@ -162,13 +172,19 @@ fun Overlay(
             timerPaused = isTimerPaused,
             showTimerWhenMinimized = showTimerWhenMinimized,
             location = location,
+            isTread = isTread,
             powerLabel = power,
             contentAlpha = timerAlpha,
             timerLabel = timerLabel,
             cadenceLabel = rpm,
             speedLabel = speed,
             resistanceLabel = resistance,
+            inclineLabel = incline,
             heartRateLabel = heartRate?.toString() ?: SensorValuePlaceholderText,
+            showPowerField = showPowerCard,
+            showCadenceField = showCadenceCard,
+            showResistanceField = showResistanceCard,
+            showInclineField = showInclineCard,
             onTap = { timerViewModel.onTimerTap() },
             onLongPress = { timerViewModel.onTimerLongPress() },
             onOpenSettings = { sensorViewModel.onOverlayDoubleTap() },
@@ -214,6 +230,7 @@ fun Overlay(
                     .padding(horizontal = 9.dp)
                     .padding(bottom = 5.dp),
                 rowAlignment = rowAlignment,
+                isTread = isTread,
                 power = power,
                 rpm = rpm,
                 pauseChart = isCurrentlyAnimating,
@@ -240,6 +257,11 @@ fun Overlay(
                 maxHeartRate = "%.0f".format(maxHeartRate),
                 avgHeartRate = "%.0f".format(avgHeartRate),
                 showHeartRateCard = showHeartRateCard,
+                incline = incline,
+                showInclineCard = showInclineCard,
+                showPowerCard = showPowerCard,
+                showCadenceCard = showCadenceCard,
+                showResistanceCard = showResistanceCard,
                 onMetricSelected = { sensorViewModel.onMetricSelected(it) },
                 onSpeedUnitClicked = { sensorViewModel.onClickedSpeedUnit() },
                 onChartClicked = { sensorViewModel.onOverlayPressed() }
@@ -248,6 +270,12 @@ fun Overlay(
     }
 
 
+    // The overlay Box is laid out with unbounded constraints so its content can extend
+    // past the window bounds. A Snackbar internally applies fillMaxWidth(), which under
+    // an unbounded (infinite) max width crashes in measure ("Can't represent a size ...
+    // in Constraints"). Cap the Snackbar to the screen width so it always has a bounded
+    // width regardless of the unbounded parent.
+    val maxSnackbarWidth = LocalConfiguration.current.screenWidthDp.dp
     Box(
         modifier = Modifier
             .wrapContentSize(unbounded = true)
@@ -261,6 +289,7 @@ fun Overlay(
                 },
                 backgroundColor = Color.White,
                 modifier = Modifier
+                    .widthIn(max = maxSnackbarWidth)
                     .padding(8.dp)
                     .zIndex(1f)
             ) {

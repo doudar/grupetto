@@ -18,3 +18,4 @@ val MetricSpeedColor = Color(0xFF2196F3)      // Blue
 val MetricResistanceColor = Color(0xFFD9182B) // Red
 val MetricHeartRateColor = Color(0xFFFF5252)  // Light red
 val MetricCalorieColor = Color(color = 0xFFC0C0C0)    // light grey
+val MetricInclineColor = Color(0xFFFF9800)     // Orange

@@ -1,10 +1,13 @@
 package com.spop.poverlay.ble
 
 import java.util.UUID
+import kotlin.math.atan
+import kotlin.math.roundToInt
 
 object FitnessMachineConstants {
     val ServiceUUID: UUID = UUID.fromString("00001826-0000-1000-8000-00805f9b34fb")
     val IndoorBikeDataUUID: UUID = UUID.fromString("00002ad2-0000-1000-8000-00805f9b34fb")
+    val TreadmillDataUUID: UUID = UUID.fromString("00002acd-0000-1000-8000-00805f9b34fb")
     val FeatureUUID: UUID = UUID.fromString("00002acc-0000-1000-8000-00805f9b34fb")
     val ControlPointUUID: UUID = UUID.fromString("00002ad9-0000-1000-8000-00805f9b34fb")
     val SupportedResistanceRangeUUID: UUID = UUID.fromString("00002ad6-0000-1000-8000-00805f9b34fb")
@@ -26,6 +29,60 @@ object FitnessMachineConstants {
         const val MetabolicEquivalentPresent = 1 shl 10
         const val ElapsedTimePresent = 1 shl 11
         const val RemainingTimePresent = 1 shl 12
+    }
+
+    // Treadmill Data (0x2ACD) Flags field (uint16, little-endian).
+    // Verified against the Bluetooth SIG FTMS v1.0 spec (section 4.3) and the
+    // qdomyos-zwift reference implementation
+    // (src/characteristics/characteristicnotifier2acd.cpp, flags 0x050E / 0x0C).
+    // NOTE: bit 0 ("More Data") is inverted for this characteristic: Instantaneous
+    // Speed is present when bit 0 is 0. Bit 3 gates BOTH Inclination and Ramp Angle.
+    object TreadmillDataFlags {
+        const val MoreData = 1 shl 0 // 0 => Instantaneous Speed present (inverted)
+        const val AverageSpeedPresent = 1 shl 1
+        const val TotalDistancePresent = 1 shl 2
+        const val InclinationAndRampAnglePresent = 1 shl 3
+        const val ElevationGainPresent = 1 shl 4
+        const val InstantaneousPacePresent = 1 shl 5
+        const val AveragePacePresent = 1 shl 6
+        const val ExpendedEnergyPresent = 1 shl 7
+        const val HeartRatePresent = 1 shl 8
+        const val MetabolicEquivalentPresent = 1 shl 9
+        const val ElapsedTimePresent = 1 shl 10
+        const val RemainingTimePresent = 1 shl 11
+        const val ForceOnBeltAndPowerOutputPresent = 1 shl 12
+    }
+
+    /**
+     * Builds a FTMS Treadmill Data (0x2ACD) value, little-endian, with the minimal
+     * useful record: Instantaneous Speed + Inclination + Ramp Angle. The Inclination
+     * flag (bit 3) gates both the inclination and ramp-angle fields per spec, so both
+     * are emitted. Pure (no Android GATT objects) for unit-testing.
+     *
+     * @param speedKmh instantaneous belt speed in km/h (encoded as uint16, 0.01 km/h).
+     * @param inclinePct inclination as a percent grade (encoded as sint16, 0.1 %).
+     * Ramp angle (sint16, 0.1 deg) is derived as atan(incline/100).
+     */
+    fun buildTreadmillDataPacket(speedKmh: Float, inclinePct: Float): ByteArray {
+        val flags = TreadmillDataFlags.InclinationAndRampAnglePresent
+        // Clamp to the FTMS field ranges before serializing. Out-of-range or unexpected
+        // negative inputs would otherwise wrap when masked into 16 bits and produce
+        // invalid notifications. Scaling/rounding is unchanged; only the results are bounded.
+        // Speed is uint16 (can't be negative); inclination and ramp are sint16.
+        val speedValue = (speedKmh * 100f).roundToInt().coerceIn(0, 65535)
+        val inclineValue = (inclinePct * 10f).roundToInt().coerceIn(-32768, 32767)
+        val rampDeg = Math.toDegrees(atan((inclinePct / 100f).toDouble()))
+        val rampValue = (rampDeg * 10.0).roundToInt().coerceIn(-32768, 32767)
+        return byteArrayOf(
+            (flags and 0xFF).toByte(),
+            (flags shr 8 and 0xFF).toByte(),
+            (speedValue and 0xFF).toByte(),
+            (speedValue shr 8 and 0xFF).toByte(),
+            (inclineValue and 0xFF).toByte(),
+            (inclineValue shr 8 and 0xFF).toByte(),
+            (rampValue and 0xFF).toByte(),
+            (rampValue shr 8 and 0xFF).toByte()
+        )
     }
 
     object FeatureFlags {

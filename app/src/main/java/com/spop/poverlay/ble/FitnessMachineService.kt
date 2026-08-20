@@ -5,12 +5,32 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
+import com.spop.poverlay.sensor.interfaces.DeviceType
 
 @Suppress("DEPRECATION")
-class FitnessMachineService(server: BleServer) : BaseBleService(server) {
+class FitnessMachineService(
+    server: BleServer,
+    private val deviceType: DeviceType = DeviceType.Bike
+) : BaseBleService(server) {
+
+    private val isTread = deviceType == DeviceType.Tread
 
     private val indoorBikeDataCharacteristic = BluetoothGattCharacteristic(
         FitnessMachineConstants.IndoorBikeDataUUID,
+        BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+        BluetoothGattCharacteristic.PERMISSION_READ
+    ).apply {
+        addDescriptor(
+            BluetoothGattDescriptor(
+                FitnessMachineConstants.ClientCharacteristicConfigurationUUID,
+                BluetoothGattDescriptor.PERMISSION_WRITE or BluetoothGattDescriptor.PERMISSION_READ
+            )
+        )
+    }
+
+    // Treadmill Data (0x2ACD) — used in place of Indoor Bike Data when this is a Tread.
+    private val treadmillDataCharacteristic = BluetoothGattCharacteristic(
+        FitnessMachineConstants.TreadmillDataUUID,
         BluetoothGattCharacteristic.PROPERTY_NOTIFY,
         BluetoothGattCharacteristic.PERMISSION_READ
     ).apply {
@@ -28,10 +48,15 @@ class FitnessMachineService(server: BleServer) : BaseBleService(server) {
         BluetoothGattCharacteristic.PERMISSION_READ
     ).apply {
         // 8-byte payload: 4 bytes FeatureFlags + 4 bytes TargetFlags (LE)
-        val featureFlags =
+        val featureFlags = if (isTread) {
+            // Only advertise what we actually broadcast: instantaneous speed (implicit)
+            // plus inclination (and its derived ramp angle).
+            FitnessMachineConstants.FeatureFlags.InclinationSupported
+        } else {
             FitnessMachineConstants.FeatureFlags.CadenceSupported or
             FitnessMachineConstants.FeatureFlags.PowerMeasurementSupported or
             FitnessMachineConstants.FeatureFlags.ResistanceLevelSupported
+        }
 
     // No control supported -> all target flags 0
     val targetFlags = 0
@@ -92,7 +117,12 @@ class FitnessMachineService(server: BleServer) : BaseBleService(server) {
         FitnessMachineConstants.ServiceUUID,
         BluetoothGattService.SERVICE_TYPE_PRIMARY
     ).apply {
-        addCharacteristic(indoorBikeDataCharacteristic)
+        // A Fitness Machine exposes exactly one machine-type data characteristic.
+        if (isTread) {
+            addCharacteristic(treadmillDataCharacteristic)
+        } else {
+            addCharacteristic(indoorBikeDataCharacteristic)
+        }
         addCharacteristic(featureCharacteristic)
         addCharacteristic(controlPointCharacteristic)
         addCharacteristic(supportedResistanceRangeCharacteristic)
@@ -177,7 +207,11 @@ class FitnessMachineService(server: BleServer) : BaseBleService(server) {
         super.onCharacteristicWriteRequest(device, requestId, characteristic, preparedWrite, responseNeeded, offset, value)
     }
 
-    override fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float) {
+    override fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float, incline: Float) {
+        if (isTread) {
+            onTreadDataUpdated(speed, incline)
+            return
+        }
     // Build 16-bit flags (LE when serialized). MoreData bit (0) is intentionally 0.
     val flags = FitnessMachineConstants.IndoorBikeDataFlags.InstantaneousCadencePresent or
         FitnessMachineConstants.IndoorBikeDataFlags.InstantaneousPowerPresent or
@@ -209,6 +243,30 @@ class FitnessMachineService(server: BleServer) : BaseBleService(server) {
 
         val newStatus = if (cadence > 0) FitnessMachineConstants.TrainingStatus.ManualMode.toByte() else FitnessMachineConstants.TrainingStatus.Idle.toByte()
         // Keep the two-byte layout consistent when updating
+        val currentStatus = trainingStatusCharacteristic.getValue()
+        if (currentStatus == null || currentStatus.size < 2 || currentStatus[1] != newStatus) {
+            trainingStatusCharacteristic.setValue(byteArrayOf(0x00, newStatus))
+            server.notifyDirConCharacteristicChanged(trainingStatusCharacteristic)
+            for (device in connectedDevices) {
+                server.notifyCharacteristicChanged(device, trainingStatusCharacteristic, false)
+            }
+        }
+    }
+
+    // Packs and notifies FTMS Treadmill Data (0x2ACD). Speed arrives in mph and is
+    // converted to km/h (FTMS is metric); incline is a percent grade. Mirrors the
+    // bike packer's notify path.
+    private fun onTreadDataUpdated(speedMph: Float, incline: Float) {
+        val speedKmh = speedMph * 1.60934f
+        treadmillDataCharacteristic.setValue(
+            FitnessMachineConstants.buildTreadmillDataPacket(speedKmh, incline)
+        )
+        server.notifyDirConCharacteristicChanged(treadmillDataCharacteristic)
+        for (device in connectedDevices) {
+            server.notifyCharacteristicChanged(device, treadmillDataCharacteristic, false)
+        }
+
+        val newStatus = if (speedMph > 0) FitnessMachineConstants.TrainingStatus.ManualMode.toByte() else FitnessMachineConstants.TrainingStatus.Idle.toByte()
         val currentStatus = trainingStatusCharacteristic.getValue()
         if (currentStatus == null || currentStatus.size < 2 || currentStatus[1] != newStatus) {
             trainingStatusCharacteristic.setValue(byteArrayOf(0x00, newStatus))

@@ -39,7 +39,7 @@ class SystemTimeProvider : TimeProvider {
 // Base class for all BLE services
 abstract class BaseBleService(val server: BleServer) {
     abstract val service: BluetoothGattService
-    abstract fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float)
+    abstract fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float, incline: Float)
     protected val connectedDevices = mutableSetOf<BluetoothDevice>()
 
     fun hasConnectedDevices(): Boolean = connectedDevices.isNotEmpty()
@@ -210,7 +210,7 @@ class BleServer(
 
     private fun baseServices(heartRateEnabled: Boolean): List<BaseBleService> {
         val services = mutableListOf<BaseBleService>(
-            FitnessMachineService(this),
+            FitnessMachineService(this, sensorInterface.deviceType),
             CyclingPowerService(this),
             CyclingSpeedAndCadenceService(this),
             DeviceInformationService(this)
@@ -1065,7 +1065,8 @@ class BleServer(
             val cadence: List<Float>,
             val power: List<Float>,
             val speed: List<Float>,
-            val resistance: List<Float>
+            val resistance: List<Float>,
+            val incline: List<Float>
     )
 
     private fun startSensorDataUpdates() {
@@ -1076,19 +1077,22 @@ class BleServer(
             val powerBuffer = mutableListOf<Float>()
             val speedBuffer = mutableListOf<Float>()
             val resistanceBuffer = mutableListOf<Float>()
+            val inclineBuffer = mutableListOf<Float>()
 
             launch {
                 combine(
                                 sensorInterface.cadence,
                                 sensorInterface.power,
                                 sensorInterface.speed,
-                                sensorInterface.resistance
-                        ) { cadence, power, speed, resistance ->
+                                sensorInterface.resistance,
+                                sensorInterface.incline
+                        ) { cadence, power, speed, resistance, incline ->
                             mutex.withLock {
                                 cadenceBuffer.add(cadence)
                                 powerBuffer.add(power)
                                 speedBuffer.add(speed)
                                 resistanceBuffer.add(resistance)
+                                inclineBuffer.add(incline)
                             }
                         }
                         .collect()
@@ -1108,13 +1112,15 @@ class BleServer(
                                                 cadenceBuffer.toList(),
                                                 powerBuffer.toList(),
                                                 speedBuffer.toList(),
-                                                resistanceBuffer.toList()
+                                                resistanceBuffer.toList(),
+                                                inclineBuffer.toList()
                                         )
                                                 .also {
                                                     cadenceBuffer.clear()
                                                     powerBuffer.clear()
                                                     speedBuffer.clear()
                                                     resistanceBuffer.clear()
+                                                    inclineBuffer.clear()
                                                 }
                             }
                     buffers?.let { data ->
@@ -1123,11 +1129,13 @@ class BleServer(
                         val rPower = robustAverage(data.power)
                         val rSpeedMph = robustAverage(data.speed) // mph
                         val rResistance = robustAverage(data.resistance)
+                        val rIncline = robustAverage(data.incline) // percent grade
 
                         val sCadence = smoothCadence(rCadence)
                         val sPower = smoothPower(rPower)
                         val sSpeedMph = smoothSpeed(rSpeedMph)
                         val sResistance = smoothResistance(rResistance)
+                        val sIncline = smoothIncline(rIncline)
 
                         // Convert mph -> km/h for wheel calculations
                         val sSpeedKmh = sSpeedMph * 1.60934f
@@ -1135,7 +1143,7 @@ class BleServer(
                         updateWheelAndCrankRev(sSpeedKmh, sCadence)
                         // Notify services with smoothed values (speed remains mph; services handle their unit needs)
                         registeredServices.forEach {
-                            it.onSensorDataUpdated(sCadence, sPower, sSpeedMph, sResistance)
+                            it.onSensorDataUpdated(sCadence, sPower, sSpeedMph, sResistance, sIncline)
                         }
                     }
                 }
@@ -1185,6 +1193,7 @@ class BleServer(
     private var smoothedPower: Float? = null
     private var smoothedSpeedMph: Float? = null
     private var smoothedResistance: Float? = null
+    private var smoothedIncline: Float? = null
 
     private fun smooth(prev: Float?, value: Float, alpha: Float): Float =
         if (prev == null) value else (alpha * value + (1f - alpha) * prev)
@@ -1209,6 +1218,11 @@ class BleServer(
     private fun smoothResistance(v: Float, alpha: Float = 0.7f): Float {
         smoothedResistance = smooth(smoothedResistance, v, alpha)
         return smoothedResistance!!
+    }
+
+    private fun smoothIncline(v: Float, alpha: Float = 0.7f): Float {
+        smoothedIncline = smooth(smoothedIncline, v, alpha)
+        return smoothedIncline!!
     }
 
     // CSC shared state (used by multiple services)

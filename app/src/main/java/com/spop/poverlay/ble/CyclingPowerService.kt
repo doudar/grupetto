@@ -49,7 +49,7 @@ class CyclingPowerService(server: BleServer) : BaseBleService(server) {
         addCharacteristic(sensorLocationCharacteristic)
     }
 
-    override fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float) {
+    override fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float, incline: Float) {
         // Flags: we include wheel and crank revolution data
         val flags = CyclingPowerConstants.MeasurementFlags.WheelRevolutionDataPresent or
                 CyclingPowerConstants.MeasurementFlags.CrankRevolutionDataPresent
