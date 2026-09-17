@@ -14,6 +14,11 @@ import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
 import io.mockk.verify
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.cancel
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
@@ -195,6 +200,41 @@ class BleServerTest {
 
         verify(exactly = 0) { gattServer.clearServices() }
         verify(exactly = 1) { gattServer.close() }
+    }
+
+    @Test
+    fun `transmitted resistance follows increases and decreases without smoothing`() = runBlocking {
+        val resistance = MutableStateFlow(99f)
+        every { sensorInterface.resistance } returns resistance
+        every { sensorInterface.speed } returns flowOf(0f)
+        val packets = Channel<ByteArray>(Channel.UNLIMITED)
+        val service = mockk<BaseBleService>(relaxed = true)
+        every { service.onSensorDataUpdated(any(), any(), any(), any()) } answers {
+            packets.trySend(FitnessMachineData.encode(arg(0), arg(1), arg(2), arg(3)))
+            Unit
+        }
+        BleServer::class.java.getDeclaredField("registeredServices").apply {
+            isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            (get(bleServer) as MutableList<BaseBleService>).add(service)
+        }
+
+        try {
+            BleServer::class.java.getDeclaredMethod("startSensorDataUpdates").apply {
+                isAccessible = true
+                invoke(bleServer)
+            }
+            for (level in listOf(99, 100, 99, 1, 0, 100)) {
+                resistance.value = level.toFloat()
+                val packet = withTimeout(5_000) { packets.receive() }
+                val transmitted = (packet[6].toInt() and 0xFF) or
+                    ((packet[7].toInt() and 0xFF) shl 8)
+                assertEquals("Latest received resistance $level", level, transmitted)
+            }
+        } finally {
+            bleServer.coroutineContext.cancel()
+            packets.close()
+        }
     }
 }
 

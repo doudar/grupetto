@@ -69,8 +69,7 @@ class FitnessMachineService(server: BleServer) : BaseBleService(server) {
         BluetoothGattCharacteristic.PROPERTY_READ,
         BluetoothGattCharacteristic.PERMISSION_READ
     ).apply {
-    // Little-endian: min(1), max(100), step(1) -> {0x01,0x00, 0x64,0x00, 0x01,0x00}
-    setValue(byteArrayOf(0x01, 0x00, 0x64.toByte(), 0x00, 0x01, 0x00))
+        setValue(FitnessMachineData.supportedResistanceRange())
     }
 
     private val trainingStatusCharacteristic = BluetoothGattCharacteristic(
@@ -178,29 +177,9 @@ class FitnessMachineService(server: BleServer) : BaseBleService(server) {
     }
 
     override fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float) {
-    // Build 16-bit flags (LE when serialized). MoreData bit (0) is intentionally 0.
-    val flags = FitnessMachineConstants.IndoorBikeDataFlags.InstantaneousCadencePresent or
-        FitnessMachineConstants.IndoorBikeDataFlags.InstantaneousPowerPresent or
-        FitnessMachineConstants.IndoorBikeDataFlags.ResistanceLevelPresent
-
-        val speedKmh = speed * 1.60934f // fixes the Issue #30 in the doudar fork of grupetto
-        val speedValue = (speedKmh * 100).toInt() // fixes the Issue #30 in the doudar fork of grupetto
-        val cadenceValue = (cadence * 2).toInt()
-        val powerValue = power.toInt()
-        val resistanceValue = resistance.toInt()
-
-    indoorBikeDataCharacteristic.setValue(byteArrayOf(
-            (flags and 0xFF).toByte(),
-            (flags shr 8 and 0xFF).toByte(),
-            (speedValue and 0xFF).toByte(),
-            (speedValue shr 8 and 0xFF).toByte(),
-            (cadenceValue and 0xFF).toByte(),
-            (cadenceValue shr 8 and 0xFF).toByte(),
-            (resistanceValue and 0xFF).toByte(),
-            (resistanceValue shr 8 and 0xFF).toByte(),
-            (powerValue and 0xFF).toByte(),
-            (powerValue shr 8 and 0xFF).toByte()
-    ))
+        indoorBikeDataCharacteristic.setValue(
+            FitnessMachineData.encode(cadence, power, speed, resistance)
+        )
         server.notifyDirConCharacteristicChanged(indoorBikeDataCharacteristic)
 
         for (device in connectedDevices) {

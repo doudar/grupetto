@@ -467,7 +467,6 @@ class BleServer(
         smoothedCadence = null
         smoothedPower = null
         smoothedSpeedMph = null
-        smoothedResistance = null
         cscCrankResidual = 0.0
         cscWheelResidual = 0.0
         cscCumulativeWheelRev = 0L
@@ -1122,20 +1121,22 @@ class BleServer(
                         val rCadence = robustAverage(data.cadence)
                         val rPower = robustAverage(data.power)
                         val rSpeedMph = robustAverage(data.speed) // mph
-                        val rResistance = robustAverage(data.resistance)
 
                         val sCadence = smoothCadence(rCadence)
                         val sPower = smoothPower(rPower)
                         val sSpeedMph = smoothSpeed(rSpeedMph)
-                        val sResistance = smoothResistance(rResistance)
+                        // Resistance is a discrete setting, already spike-filtered by the
+                        // sensor interface. Averaging/smoothing invents intermediate levels
+                        // (e.g. 99.7 for a received 100) and delays both increases and decreases.
+                        val resistance = data.resistance.lastOrNull { it.isFinite() } ?: 0f
 
                         // Convert mph -> km/h for wheel calculations
                         val sSpeedKmh = sSpeedMph * 1.60934f
                         // Update shared CSC counters using km/h for wheel and RPM for crank
                         updateWheelAndCrankRev(sSpeedKmh, sCadence)
-                        // Notify services with smoothed values (speed remains mph; services handle their unit needs)
+                        // Speed remains mph; resistance is the latest sensor setting.
                         registeredServices.forEach {
-                            it.onSensorDataUpdated(sCadence, sPower, sSpeedMph, sResistance)
+                            it.onSensorDataUpdated(sCadence, sPower, sSpeedMph, resistance)
                         }
                     }
                 }
@@ -1184,7 +1185,6 @@ class BleServer(
     private var smoothedCadence: Float? = null
     private var smoothedPower: Float? = null
     private var smoothedSpeedMph: Float? = null
-    private var smoothedResistance: Float? = null
 
     private fun smooth(prev: Float?, value: Float, alpha: Float): Float =
         if (prev == null) value else (alpha * value + (1f - alpha) * prev)
@@ -1204,11 +1204,6 @@ class BleServer(
     private fun smoothSpeed(vMph: Float, alpha: Float = 0.7f): Float {
         smoothedSpeedMph = smooth(smoothedSpeedMph, vMph, alpha)
         return smoothedSpeedMph!!
-    }
-
-    private fun smoothResistance(v: Float, alpha: Float = 0.7f): Float {
-        smoothedResistance = smooth(smoothedResistance, v, alpha)
-        return smoothedResistance!!
     }
 
     // CSC shared state (used by multiple services)
