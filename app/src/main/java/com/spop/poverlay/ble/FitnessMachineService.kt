@@ -69,8 +69,7 @@ class FitnessMachineService(server: BleServer) : BaseBleService(server) {
         BluetoothGattCharacteristic.PROPERTY_READ,
         BluetoothGattCharacteristic.PERMISSION_READ
     ).apply {
-    // Little-endian: min(1), max(100), step(1) -> {0x01,0x00, 0x64,0x00, 0x01,0x00}
-    setValue(byteArrayOf(0x01, 0x00, 0x64.toByte(), 0x00, 0x01, 0x00))
+        setValue(FitnessMachineData.supportedResistanceRange())
     }
 
     private val trainingStatusCharacteristic = BluetoothGattCharacteristic(
@@ -87,9 +86,6 @@ class FitnessMachineService(server: BleServer) : BaseBleService(server) {
             )
         )
     }
-
-    // Reused across onSensorDataUpdated() calls to avoid allocating a fresh array every tick.
-    private val indoorBikeDataBuffer = ByteArray(10)
 
     override val service = BluetoothGattService(
         FitnessMachineConstants.ServiceUUID,
@@ -125,6 +121,7 @@ class FitnessMachineService(server: BleServer) : BaseBleService(server) {
                     trainingStatusCharacteristic.setValue(
                         byteArrayOf(0x00, FitnessMachineConstants.TrainingStatus.Idle.toByte())
                     )
+                    server.notifyDirConCharacteristicChanged(trainingStatusCharacteristic)
                     for (d in connectedDevices) {
                         server.notifyCharacteristicChanged(d, trainingStatusCharacteristic, false)
                     }
@@ -135,6 +132,7 @@ class FitnessMachineService(server: BleServer) : BaseBleService(server) {
                     trainingStatusCharacteristic.setValue(
                         byteArrayOf(0x00, FitnessMachineConstants.TrainingStatus.ManualMode.toByte())
                     )
+                    server.notifyDirConCharacteristicChanged(trainingStatusCharacteristic)
                     for (d in connectedDevices) {
                         server.notifyCharacteristicChanged(d, trainingStatusCharacteristic, false)
                     }
@@ -145,6 +143,7 @@ class FitnessMachineService(server: BleServer) : BaseBleService(server) {
                     trainingStatusCharacteristic.setValue(
                         byteArrayOf(0x00, FitnessMachineConstants.TrainingStatus.Idle.toByte())
                     )
+                    server.notifyDirConCharacteristicChanged(trainingStatusCharacteristic)
                     for (d in connectedDevices) {
                         server.notifyCharacteristicChanged(d, trainingStatusCharacteristic, false)
                     }
@@ -163,6 +162,7 @@ class FitnessMachineService(server: BleServer) : BaseBleService(server) {
                 (result and 0xFF).toByte()
             )
             controlPointCharacteristic.setValue(response)
+            server.notifyDirConCharacteristicChanged(controlPointCharacteristic)
             // FTMS mandates indications for Control Point
             server.notifyCharacteristicChanged(device, controlPointCharacteristic, true)
 
@@ -177,27 +177,10 @@ class FitnessMachineService(server: BleServer) : BaseBleService(server) {
     }
 
     override fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float) {
-    // Build 16-bit flags (LE when serialized). MoreData bit (0) is intentionally 0.
-    val flags = FitnessMachineConstants.IndoorBikeDataFlags.InstantaneousCadencePresent or
-        FitnessMachineConstants.IndoorBikeDataFlags.InstantaneousPowerPresent or
-        FitnessMachineConstants.IndoorBikeDataFlags.ResistanceLevelPresent
-
-        val speedValue = (speed * 100).toInt()
-        val cadenceValue = (cadence * 2).toInt()
-        val powerValue = power.toInt()
-        val resistanceValue = resistance.toInt()
-
-    indoorBikeDataBuffer[0] = (flags and 0xFF).toByte()
-    indoorBikeDataBuffer[1] = (flags shr 8 and 0xFF).toByte()
-    indoorBikeDataBuffer[2] = (speedValue and 0xFF).toByte()
-    indoorBikeDataBuffer[3] = (speedValue shr 8 and 0xFF).toByte()
-    indoorBikeDataBuffer[4] = (cadenceValue and 0xFF).toByte()
-    indoorBikeDataBuffer[5] = (cadenceValue shr 8 and 0xFF).toByte()
-    indoorBikeDataBuffer[6] = (resistanceValue and 0xFF).toByte()
-    indoorBikeDataBuffer[7] = (resistanceValue shr 8 and 0xFF).toByte()
-    indoorBikeDataBuffer[8] = (powerValue and 0xFF).toByte()
-    indoorBikeDataBuffer[9] = (powerValue shr 8 and 0xFF).toByte()
-    indoorBikeDataCharacteristic.setValue(indoorBikeDataBuffer)
+        indoorBikeDataCharacteristic.setValue(
+            FitnessMachineData.encode(cadence, power, speed, resistance)
+        )
+        server.notifyDirConCharacteristicChanged(indoorBikeDataCharacteristic)
 
         for (device in connectedDevices) {
             server.notifyCharacteristicChanged(device, indoorBikeDataCharacteristic, false)
@@ -208,6 +191,7 @@ class FitnessMachineService(server: BleServer) : BaseBleService(server) {
         val currentStatus = trainingStatusCharacteristic.getValue()
         if (currentStatus == null || currentStatus.size < 2 || currentStatus[1] != newStatus) {
             trainingStatusCharacteristic.setValue(byteArrayOf(0x00, newStatus))
+            server.notifyDirConCharacteristicChanged(trainingStatusCharacteristic)
             for (device in connectedDevices) {
                 server.notifyCharacteristicChanged(device, trainingStatusCharacteristic, false)
             }

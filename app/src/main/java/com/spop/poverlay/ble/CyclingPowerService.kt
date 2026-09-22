@@ -86,6 +86,7 @@ class CyclingPowerService(server: BleServer) : BaseBleService(server) {
         measurementBuffer[13] = ((crankTime shr 8) and 0xFF).toByte()
 
         measurementCharacteristic.setValue(measurementBuffer)
+        server.notifyDirConCharacteristicChanged(measurementCharacteristic)
         server.logBleDebug(
             "BLE CPS notify power=${powerValue}W cadence=${cadence.toInt()}rpm wheelRev=$wheelRevs crankRev=$crankRevs payloadLen=${measurementBuffer.size} devices=${connectedDevices.size}"
         )

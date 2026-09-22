@@ -13,6 +13,7 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
     enum class Preferences(val key: String) {
         ShowTimerWhenMinimized("showTimerWhenMinimized"),
         BleTxEnabled("bleTxEnabled"),
+        DirConEnabled("dirConEnabled"),
         BleFtmsDeviceName("bleFtmsDeviceName"),
         AntPlusTxEnabled("antPlusTxEnabled"),
         AntPlusDeviceName("antPlusDeviceName"),
@@ -30,6 +31,7 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
 
     private val mutableShowTimerWhenMinimized = MutableStateFlow(true)
     private val mutableBleTxEnabled = MutableStateFlow(true)
+    private val mutableDirConEnabled = MutableStateFlow(true)
     private val mutableBleFtmsDeviceName = MutableStateFlow("Grupetto FTMS")
     private val mutableAntPlusTxEnabled = MutableStateFlow(false)
     private val mutableAntPlusDeviceName = MutableStateFlow("Grupetto ANT+")
@@ -38,6 +40,7 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
 
     val showTimerWhenMinimized = mutableShowTimerWhenMinimized
     val bleTxEnabled = mutableBleTxEnabled
+    val dirConEnabled = mutableDirConEnabled
     val bleFtmsDeviceName = mutableBleFtmsDeviceName
     val antPlusTxEnabled = mutableAntPlusTxEnabled
     val antPlusDeviceName = mutableAntPlusDeviceName
@@ -79,6 +82,13 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         mutableBleTxEnabled.value = enabled
         sharedPreferences.edit {
             putBoolean(Preferences.BleTxEnabled.key, enabled)
+        }
+    }
+
+    fun setDirConEnabled(enabled: Boolean) {
+        mutableDirConEnabled.value = enabled
+        sharedPreferences.edit {
+            putBoolean(Preferences.DirConEnabled.key, enabled)
         }
     }
 
@@ -131,6 +141,10 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         mutableBleTxEnabled.value =
             sharedPreferences
                 .getBoolean(Preferences.BleTxEnabled.key, true)
+
+        mutableDirConEnabled.value =
+            sharedPreferences
+                .getBoolean(Preferences.DirConEnabled.key, true)
 
         mutableBleFtmsDeviceName.value =
             sharedPreferences

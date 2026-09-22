@@ -94,6 +94,7 @@ class CyclingSpeedAndCadenceService(server: BleServer) : BaseBleService(server) 
             measurementBuffer[offset++] = ((crankTime shr 8) and 0xFF).toByte()
         }
         measurementCharacteristic.setValue(measurementBuffer.copyOf(offset))
+        server.notifyDirConCharacteristicChanged(measurementCharacteristic)
         server.logBleDebug(
             "BLE CSC notify flags=0x${flags.toString(16)} wheelRev=${server.cscCumulativeWheelRev} " +
                 "crankRev=${server.cscCumulativeCrankRev} payloadLen=$offset devices=${connectedDevices.size}"

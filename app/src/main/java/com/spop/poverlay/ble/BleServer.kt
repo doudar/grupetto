@@ -14,6 +14,9 @@ import android.os.ParcelUuid
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import com.spop.poverlay.BuildConfig
+import com.spop.poverlay.dircon.DirConGattBridge
+import com.spop.poverlay.dircon.DirConServer
+import com.spop.poverlay.dircon.toDirConService
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.sensor.interfaces.SensorInterface
 
@@ -107,15 +110,19 @@ class BleServer(
     private var gattServer: BluetoothGattServer? = null
     private var advertiser: BluetoothLeAdvertiser? = null
     private val registeredServices = mutableListOf<BaseBleService>()
+    private var dirConServer: DirConServer? = null
+    private var dirConTransportEnabled = true
+    private var isDirConOnlyStarted = false
     private val servicesToRegister = LinkedList<BaseBleService>()
     private var currentlyRegisteringService: BaseBleService? = null
     private var serviceAddTimeoutJob: Job? = null
+    private var gattServerGeneration = 0L
 
     // Advertising state tracking
-    private var isAdvertising = false
+    @Volatile private var isAdvertising = false
     private var lastAdvertisingStartTime = 0L
     private var lastAdvertisingFailureCode: Int? = null
-    private var isServerStarted = false
+    @Volatile private var isServerStarted = false
     private var heartRateServiceEnabled = false
 
     // CCCD UUID for checking notification subscriptions
@@ -195,29 +202,142 @@ class BleServer(
 
     //ADD OR EDIT SERVICES HERE
     private fun setupServices() {
-        servicesToRegister.addAll(baseServices(heartRateEnabled = heartRateServiceEnabled))
+        servicesToRegister.addAll(baseServices())
         registerNextService()
     }
 
-    private fun baseServices(heartRateEnabled: Boolean): List<BaseBleService> {
-        val services = mutableListOf<BaseBleService>(
+    private val dirConBridge = object : DirConGattBridge {
+        override fun services() = advertisedServices().map { it.service.toDirConService() }
+
+        override fun readCharacteristic(uuid: UUID): ByteArray? {
+            val characteristic = findGattCharacteristic(uuid) ?: return null
+            return characteristicValue(characteristic)
+        }
+
+        override fun writeCharacteristic(uuid: UUID, value: ByteArray): Boolean {
+            val characteristic = findGattCharacteristic(uuid) ?: return false
+            val writable = characteristic.properties and
+                (BluetoothGattCharacteristic.PROPERTY_WRITE or
+                    BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0
+            if (!writable) return false
+
+            @Suppress("DEPRECATION")
+            characteristic.value = value
+            return true
+        }
+    }
+
+    private fun baseServices(): List<BaseBleService> {
+        return listOf(
             FitnessMachineService(this),
             CyclingPowerService(this),
             CyclingSpeedAndCadenceService(this),
-            DeviceInformationService(this)
+            DeviceInformationService(this),
+            // Keep the GATT database stable for the lifetime of the server. Rebuilding the
+            // database when a heart-rate sensor connects can race Android's asynchronous
+            // service deletion, particularly on Android 11 vendor Bluetooth stacks.
+            HeartRateService(this)
         )
-        if (heartRateEnabled) {
-            services.add(HeartRateService(this))
-        }
-        return services
     }
 
+    private fun advertisedServices(): List<BaseBleService> =
+        registeredServices.filter {
+            heartRateServiceEnabled || it.service.uuid != HeartRateConstants.ServiceUUID
+        }
+
+    private fun callbackForGeneration(generation: Long) =
+        object : BluetoothGattServerCallback() {
+            private fun dispatch(callback: () -> Unit) {
+                synchronized(this@BleServer) {
+                    if (generation != gattServerGeneration || gattServer == null) {
+                        Timber.d("Ignoring callback from stale GATT server generation $generation")
+                        return
+                    }
+                    callback()
+                }
+            }
+
+            override fun onServiceAdded(status: Int, service: BluetoothGattService) =
+                dispatch { this@BleServer.onServiceAdded(status, service) }
+
+            override fun onConnectionStateChange(
+                device: BluetoothDevice?,
+                status: Int,
+                newState: Int
+            ) = dispatch { this@BleServer.onConnectionStateChange(device, status, newState) }
+
+            override fun onMtuChanged(device: BluetoothDevice?, mtu: Int) =
+                dispatch { this@BleServer.onMtuChanged(device, mtu) }
+
+            override fun onCharacteristicWriteRequest(
+                device: BluetoothDevice,
+                requestId: Int,
+                characteristic: BluetoothGattCharacteristic,
+                preparedWrite: Boolean,
+                responseNeeded: Boolean,
+                offset: Int,
+                value: ByteArray?
+            ) = dispatch {
+                this@BleServer.onCharacteristicWriteRequest(
+                    device,
+                    requestId,
+                    characteristic,
+                    preparedWrite,
+                    responseNeeded,
+                    offset,
+                    value
+                )
+            }
+
+            override fun onCharacteristicReadRequest(
+                device: BluetoothDevice,
+                requestId: Int,
+                offset: Int,
+                characteristic: BluetoothGattCharacteristic
+            ) = dispatch {
+                this@BleServer.onCharacteristicReadRequest(device, requestId, offset, characteristic)
+            }
+
+            override fun onDescriptorReadRequest(
+                device: BluetoothDevice,
+                requestId: Int,
+                offset: Int,
+                descriptor: BluetoothGattDescriptor
+            ) = dispatch {
+                this@BleServer.onDescriptorReadRequest(device, requestId, offset, descriptor)
+            }
+
+            override fun onDescriptorWriteRequest(
+                device: BluetoothDevice,
+                requestId: Int,
+                descriptor: BluetoothGattDescriptor,
+                preparedWrite: Boolean,
+                responseNeeded: Boolean,
+                offset: Int,
+                value: ByteArray?
+            ) = dispatch {
+                this@BleServer.onDescriptorWriteRequest(
+                    device,
+                    requestId,
+                    descriptor,
+                    preparedWrite,
+                    responseNeeded,
+                    offset,
+                    value
+                )
+            }
+        }
+
+    @Synchronized
     fun start() {
         if (isServerStarted) {
             Timber.d("BLE server already started, ignoring duplicate start()")
             return
         }
         logBleDebug("BLE_DEBUG: App version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+        if (isDirConOnlyStarted) {
+            stopDirConOnly()
+        }
         val bluetoothAdapter = bluetoothManager.adapter
         if (bluetoothAdapter == null) {
             Timber.e("Bluetooth adapter is null")
@@ -252,12 +372,14 @@ class BleServer(
         }
 
         try {
-            val server = bluetoothManager.openGattServer(context, this)
+            val generation = ++gattServerGeneration
+            val server = bluetoothManager.openGattServer(context, callbackForGeneration(generation))
             if (server == null) {
                 Timber.e("Failed to open GATT server (returned null)")
                 return
             }
             gattServer = server
+            isServerStarted = true
             
             // Register Bluetooth state change receiver
             val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
@@ -272,7 +394,6 @@ class BleServer(
             startWatchdog()
             startHeartRateServiceWatcher()
             
-            isServerStarted = true
         } catch (e: SecurityException) {
             Timber.e(e, "Failed to open GATT server due to missing Bluetooth permission")
             stop() // Clean up partial initialization
@@ -282,12 +403,14 @@ class BleServer(
         }
     }
 
+    @Synchronized
     private fun registerNextService() {
         if (servicesToRegister.isEmpty()) {
             currentlyRegisteringService = null
             serviceAddTimeoutJob?.cancel()
             serviceAddTimeoutJob = null
             startAdvertising()
+            startDirCon()
             startSensorDataUpdates()
         } else {
             currentlyRegisteringService = servicesToRegister.pop()
@@ -315,59 +438,125 @@ class BleServer(
         }
     }
 
+    @Synchronized
     fun stop() {
+        isServerStarted = false
+        isDirConOnlyStarted = false
+        gattServerGeneration++
+
+        // Detach first so no callback or concurrent operation can use a server once teardown starts.
+        val serverToClose = gattServer
+        gattServer = null
+        serviceAddTimeoutJob?.cancel()
+        serviceAddTimeoutJob = null
+        servicesToRegister.clear()
+        currentlyRegisteringService = null
+
+        // Closing the detached registration is the highest-priority teardown operation.
+        closeGattServer(serverToClose)
+
+        stopWatchdog()
+        stopSensorDataUpdates()
+        stopHeartRateServiceWatcher()
+        stopDirCon()
+        stopAdvertising()
+            
+        // Unregister Bluetooth state change receiver
         try {
-            isServerStarted = false
-            stopWatchdog()
-            stopSensorDataUpdates()
-            stopHeartRateServiceWatcher()
-            stopAdvertising()
-            
-            // Unregister Bluetooth state change receiver
-            try {
-                context.unregisterReceiver(bluetoothStateReceiver)
-                Timber.d("Unregistered Bluetooth state change receiver")
-            } catch (e: IllegalArgumentException) {
-                // Receiver was not registered, this is normal if stop() called without start()
-                Timber.d("Bluetooth state receiver was not registered (normal if not started)")
-            }
-            try {
-                context.unregisterReceiver(bondStateReceiver)
-            } catch (e: IllegalArgumentException) {
-                Timber.d("Bond state receiver was not registered")
-            }
-            
-            gattServer?.clearServices()
-            gattServer?.close()
-            gattServer = null
-            registeredServices.clear()
-            servicesToRegister.clear()
-            currentlyRegisteringService = null
-            heartRateServiceEnabled = false
-            
-            // Reset state tracking
-            isAdvertising = false
-            lastAdvertisingStartTime = 0L
-            lastAdvertisingFailureCode = null
-            
-            // Reset smoothing and CSC state so a restart begins fresh
-            smoothedCadence = null
-            smoothedPower = null
-            smoothedSpeedMph = null
-            smoothedResistance = null
-            cscCrankResidual = 0.0
-            cscWheelResidual = 0.0
-            cscCumulativeWheelRev = 0L
-            cscLastWheelEvtTime = 0
-            cscCumulativeCrankRev = 0
-            cscLastCrankEvtTime = 0
-            
-            synchronized(notificationSubscriptions) {
-                notificationSubscriptions.clear()
-            }
-        } catch (e: SecurityException) {
-            Timber.e(e, "Missing bluetooth permissions")
+            context.unregisterReceiver(bluetoothStateReceiver)
+            Timber.d("Unregistered Bluetooth state change receiver")
+        } catch (e: IllegalArgumentException) {
+            // Receiver was not registered, this is normal if stop() called without start()
+            Timber.d("Bluetooth state receiver was not registered (normal if not started)")
         }
+        try {
+            context.unregisterReceiver(bondStateReceiver)
+        } catch (e: IllegalArgumentException) {
+            Timber.d("Bond state receiver was not registered")
+        }
+
+        registeredServices.clear()
+        heartRateServiceEnabled = false
+            
+        // Reset state tracking
+        isAdvertising = false
+        lastAdvertisingStartTime = 0L
+        lastAdvertisingFailureCode = null
+            
+        // Reset smoothing and CSC state so a restart begins fresh
+        smoothedCadence = null
+        smoothedPower = null
+        smoothedSpeedMph = null
+        cscCrankResidual = 0.0
+        cscWheelResidual = 0.0
+        cscCumulativeWheelRev = 0L
+        cscLastWheelEvtTime = 0
+        cscCumulativeCrankRev = 0
+        cscLastCrankEvtTime = 0
+            
+        synchronized(notificationSubscriptions) {
+            notificationSubscriptions.clear()
+        }
+    }
+
+    private fun closeGattServer(server: BluetoothGattServer?) {
+        if (server == null) return
+
+        // BluetoothGattServer.close() unregisters the server, and Android's GattService
+        // deletes all of its services as part of that operation. Calling clearServices()
+        // immediately before close() starts the same asynchronous deletion twice. Some
+        // Android 11 vendor stacks then throw ConcurrentModificationException in
+        // GattService.deleteServices(), leaving orphaned native services behind.
+        try {
+            server.close()
+        } catch (e: SecurityException) {
+            Timber.e(e, "Missing bluetooth permissions while closing GATT server")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to close GATT server")
+        }
+    }
+
+    fun setDirConTransportEnabled(enabled: Boolean) {
+        dirConTransportEnabled = enabled
+        if (enabled) {
+            if (isServerStarted) {
+                startDirCon()
+            } else {
+                startDirConOnly()
+            }
+        } else if (isDirConOnlyStarted) {
+            stopDirConOnly()
+        } else {
+            stopDirCon()
+        }
+    }
+
+    fun startDirConOnly() {
+        if (!dirConTransportEnabled || isServerStarted || isDirConOnlyStarted) {
+            return
+        }
+
+        heartRateServiceEnabled = HeartRateManager.connectedDevice.value != null
+        registeredServices.clear()
+        registeredServices.addAll(baseServices())
+        startDirCon()
+        startSensorDataUpdates()
+        isDirConOnlyStarted = true
+        Timber.i("DIRCON-only transport started")
+    }
+
+    fun stopDirConOnly() {
+        if (!isDirConOnlyStarted) {
+            stopDirCon()
+            return
+        }
+
+        stopDirCon()
+        stopSensorDataUpdates()
+        registeredServices.clear()
+        isDirConOnlyStarted = false
+        heartRateServiceEnabled = false
+        Timber.i("DIRCON-only transport stopped")
     }
 
     private fun startHeartRateServiceWatcher() {
@@ -389,19 +578,42 @@ class BleServer(
         heartRateServiceWatcherJob = null
     }
 
+    @Synchronized
     private fun updateHeartRateServiceRegistration(enable: Boolean) {
+        if (!isServerStarted || gattServer == null) return
+
         heartRateServiceEnabled = enable
         Timber.i("Heart rate BLE service ${if (enable) "enabled" else "disabled"}")
 
-        stopSensorDataUpdates()
-        stopAdvertising()
-        gattServer?.clearServices()
-        registeredServices.clear()
-        servicesToRegister.clear()
-        currentlyRegisteringService = null
+        if (currentlyRegisteringService != null || servicesToRegister.isNotEmpty()) {
+            Timber.d("Deferring heart-rate advertisement update until GATT setup completes")
+            return
+        }
 
-        servicesToRegister.addAll(baseServices(heartRateEnabled = enable))
-        registerNextService()
+        // The heart-rate GATT service is registered up front. Only its discoverability is
+        // changed here, so connecting/disconnecting a sensor never mutates the live GATT
+        // database or races the platform's asynchronous service cleanup.
+        stopDirCon()
+        stopAdvertising()
+        startAdvertising()
+        startDirCon()
+    }
+
+    private fun startDirCon() {
+        if (!dirConTransportEnabled || dirConServer != null || registeredServices.isEmpty()) {
+            return
+        }
+
+        dirConServer = DirConServer(
+            context = context,
+            bridge = dirConBridge,
+            serialNumberProvider = { serialNumber() }
+        ).also { it.start() }
+    }
+
+    private fun stopDirCon() {
+        dirConServer?.stop()
+        dirConServer = null
     }
 
     fun notifyCharacteristicChanged(
@@ -437,6 +649,13 @@ class BleServer(
         } catch (e: SecurityException) {
             logBleError("Missing bluetooth permissions while notifying ${characteristic.uuid}", e)
         }
+    }
+
+    fun notifyDirConCharacteristicChanged(characteristic: BluetoothGattCharacteristic) {
+        dirConServer?.notifyCharacteristicChanged(
+            characteristic.uuid,
+            characteristicValue(characteristic)
+        )
     }
 
     fun sendResponse(
@@ -543,21 +762,23 @@ class BleServer(
             
             Timber.w("Watchdog: Advertising is not active, reason: $reason. Restarting...")
             
-            // If we have connected devices, just restart advertising (don't reset GATT server)
-            if (hasConnectedDevices()) {
-                Timber.i("Restarting advertising only (preserving connections)")
-                startAdvertising()
-            } else {
-                // No connections, safe to do full restart
-                restartGattAndAdvertising("Watchdog detected inactive advertising")
-            }
+            // Retrying advertising does not require rebuilding the GATT database. Rebuilding
+            // here can repeatedly exercise buggy vendor teardown paths and orphan services.
+            Timber.i("Retrying advertising without rebuilding the GATT server")
+            startAdvertising()
         } else if (isAdvertising) {
             val timeSinceStart = System.currentTimeMillis() - lastAdvertisingStartTime
             Timber.d("Watchdog: Advertising active for ${timeSinceStart / 1000}s")
         }
     }
     
+    @Synchronized
     private fun restartGattAndAdvertising(reason: String) {
+        if (!isServerStarted) {
+            Timber.d("Ignoring GATT restart after server was stopped: $reason")
+            return
+        }
+
         Timber.i("Restarting GATT and advertising: $reason")
         
         try {
@@ -565,9 +786,14 @@ class BleServer(
             stopAdvertising()
             
             // Close and reopen GATT server
-            gattServer?.clearServices()
-            gattServer?.close()
+            val serverToClose = gattServer
             gattServer = null
+            gattServerGeneration++
+            serviceAddTimeoutJob?.cancel()
+            serviceAddTimeoutJob = null
+            servicesToRegister.clear()
+            currentlyRegisteringService = null
+            closeGattServer(serverToClose)
             
             val bluetoothAdapter = bluetoothManager.adapter
             if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
@@ -581,18 +807,21 @@ class BleServer(
                 return
             }
             
-            gattServer = bluetoothManager.openGattServer(context, this)
-            if (gattServer == null) {
+            val generation = ++gattServerGeneration
+            val replacement = bluetoothManager.openGattServer(
+                context,
+                callbackForGeneration(generation)
+            )
+            if (replacement == null) {
                 Timber.e("Cannot restart: Failed to open GATT server")
                 return
             }
+            gattServer = replacement
             
             // Re-register all services
             val savedServices = registeredServices.toList()
             registeredServices.clear()
-            servicesToRegister.clear()
             servicesToRegister.addAll(savedServices)
-            currentlyRegisteringService = null
             
             registerNextService()
             
@@ -607,7 +836,7 @@ class BleServer(
         if (isAdvertising) {
             return
         }
-        val serviceUuids = registeredServices.map { ParcelUuid(it.service.uuid) }
+        val serviceUuids = advertisedServices().map { ParcelUuid(it.service.uuid) }
         if (serviceUuids.isEmpty()) {
             return
         }
@@ -690,6 +919,7 @@ class BleServer(
                 }
             }
 
+    @Synchronized
     override fun onServiceAdded(status: Int, service: BluetoothGattService) {
         serviceAddTimeoutJob?.cancel()
         serviceAddTimeoutJob = null
@@ -759,6 +989,13 @@ class BleServer(
 
     private fun findServiceForCharacteristic(uuid: UUID?): BaseBleService? {
         return registeredServices.firstOrNull { it.service.uuid == uuid }
+    }
+
+    private fun findGattCharacteristic(uuid: UUID): BluetoothGattCharacteristic? {
+        return registeredServices
+            .asSequence()
+            .flatMap { it.service.characteristics.asSequence() }
+            .firstOrNull { it.uuid == uuid }
     }
 
     override fun onCharacteristicWriteRequest(
@@ -910,20 +1147,22 @@ class BleServer(
                         val rCadence = robustAverage(data.cadence)
                         val rPower = robustAverage(data.power)
                         val rSpeedMph = robustAverage(data.speed) // mph
-                        val rResistance = robustAverage(data.resistance)
 
                         val sCadence = smoothCadence(rCadence)
                         val sPower = smoothPower(rPower)
                         val sSpeedMph = smoothSpeed(rSpeedMph)
-                        val sResistance = smoothResistance(rResistance)
+                        // Resistance is a discrete setting, already spike-filtered by the
+                        // sensor interface. Averaging/smoothing invents intermediate levels
+                        // (e.g. 99.7 for a received 100) and delays both increases and decreases.
+                        val resistance = data.resistance.lastOrNull { it.isFinite() } ?: 0f
 
                         // Convert mph -> km/h for wheel calculations
                         val sSpeedKmh = sSpeedMph * 1.60934f
                         // Update shared CSC counters using km/h for wheel and RPM for crank
                         updateWheelAndCrankRev(sSpeedKmh, sCadence)
-                        // Notify services with smoothed values (speed remains mph; services handle their unit needs)
+                        // Speed remains mph; resistance is the latest sensor setting.
                         registeredServices.forEach {
-                            it.onSensorDataUpdated(sCadence, sPower, sSpeedMph, sResistance)
+                            it.onSensorDataUpdated(sCadence, sPower, sSpeedMph, resistance)
                         }
                     }
                 }
@@ -972,7 +1211,6 @@ class BleServer(
     private var smoothedCadence: Float? = null
     private var smoothedPower: Float? = null
     private var smoothedSpeedMph: Float? = null
-    private var smoothedResistance: Float? = null
 
     private fun smooth(prev: Float?, value: Float, alpha: Float): Float =
         if (prev == null) value else (alpha * value + (1f - alpha) * prev)
@@ -992,11 +1230,6 @@ class BleServer(
     private fun smoothSpeed(vMph: Float, alpha: Float = 0.7f): Float {
         smoothedSpeedMph = smooth(smoothedSpeedMph, vMph, alpha)
         return smoothedSpeedMph!!
-    }
-
-    private fun smoothResistance(v: Float, alpha: Float = 0.7f): Float {
-        smoothedResistance = smooth(smoothedResistance, v, alpha)
-        return smoothedResistance!!
     }
 
     // CSC shared state (used by multiple services)

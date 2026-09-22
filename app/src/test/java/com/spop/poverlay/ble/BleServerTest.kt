@@ -1,12 +1,29 @@
 package com.spop.poverlay.ble
 
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothGattServer
 import android.bluetooth.BluetoothManager
+import android.bluetooth.le.BluetoothLeAdvertiser
 import android.content.Context
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import com.spop.poverlay.sensor.interfaces.SensorInterface
+import io.mockk.every
 import io.mockk.mockk
+import io.mockk.mockkStatic
+import io.mockk.unmockkStatic
+import io.mockk.verify
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.cancel
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
 
 class BleServerTest {
 
@@ -21,6 +38,9 @@ class BleServerTest {
         context = mockk(relaxed = true)
         bluetoothManager = mockk(relaxed = true)
         sensorInterface = mockk(relaxed = true)
+        every { sensorInterface.power } returns flowOf(0f)
+        every { sensorInterface.cadence } returns flowOf(0f)
+        every { sensorInterface.resistance } returns flowOf(0f)
         timeProvider = FakeTimeProvider()
         // Initialize with default time 0
         timeProvider.currentTime = 0
@@ -126,6 +146,95 @@ class BleServerTest {
         // 70 revs. 70 * 1024 = 71680 ticks.
         // Wrapped: 71680 % 65536 = 6144
         assertEquals(6144, bleServer.cscLastCrankEvtTime)
+    }
+
+    @Test
+    fun `concurrent starts cannot overlap GATT server registrations`() {
+        mockkStatic(ContextCompat::class)
+        every { ContextCompat.checkSelfPermission(context, any()) } returns
+            PackageManager.PERMISSION_GRANTED
+        val adapter = mockk<BluetoothAdapter>(relaxed = true)
+        val advertiser = mockk<BluetoothLeAdvertiser>(relaxed = true)
+        every { bluetoothManager.adapter } returns adapter
+        every { adapter.bluetoothLeAdvertiser } returns advertiser
+        val activeOpens = AtomicInteger(0)
+        val maximumActiveOpens = AtomicInteger(0)
+        every { bluetoothManager.openGattServer(context, any()) } answers {
+            val active = activeOpens.incrementAndGet()
+            maximumActiveOpens.updateAndGet { current -> maxOf(current, active) }
+            Thread.sleep(50)
+            activeOpens.decrementAndGet()
+            null
+        }
+
+        try {
+            val ready = CountDownLatch(2)
+            val start = CountDownLatch(1)
+            val workers = List(2) {
+                Thread {
+                    ready.countDown()
+                    start.await()
+                    bleServer.start()
+                }.also { it.start() }
+            }
+
+            ready.await()
+            start.countDown()
+            workers.forEach { it.join() }
+
+            assertEquals(1, maximumActiveOpens.get())
+        } finally {
+            unmockkStatic(ContextCompat::class)
+        }
+    }
+
+    @Test
+    fun `stop closes GATT server without clearing services first`() {
+        val gattServer = mockk<BluetoothGattServer>(relaxed = true)
+        BleServer::class.java.getDeclaredField("gattServer").apply {
+            isAccessible = true
+            set(bleServer, gattServer)
+        }
+
+        bleServer.stop()
+
+        verify(exactly = 0) { gattServer.clearServices() }
+        verify(exactly = 1) { gattServer.close() }
+    }
+
+    @Test
+    fun `transmitted resistance follows increases and decreases without smoothing`() = runBlocking {
+        val resistance = MutableStateFlow(99f)
+        every { sensorInterface.resistance } returns resistance
+        every { sensorInterface.speed } returns flowOf(0f)
+        val packets = Channel<ByteArray>(Channel.UNLIMITED)
+        val service = mockk<BaseBleService>(relaxed = true)
+        every { service.onSensorDataUpdated(any(), any(), any(), any()) } answers {
+            packets.trySend(FitnessMachineData.encode(arg(0), arg(1), arg(2), arg(3)))
+            Unit
+        }
+        BleServer::class.java.getDeclaredField("registeredServices").apply {
+            isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            (get(bleServer) as MutableList<BaseBleService>).add(service)
+        }
+
+        try {
+            BleServer::class.java.getDeclaredMethod("startSensorDataUpdates").apply {
+                isAccessible = true
+                invoke(bleServer)
+            }
+            for (level in listOf(99, 100, 99, 1, 0, 100)) {
+                resistance.value = level.toFloat()
+                val packet = withTimeout(5_000) { packets.receive() }
+                val transmitted = (packet[6].toInt() and 0xFF) or
+                    ((packet[7].toInt() and 0xFF) shl 8)
+                assertEquals("Latest received resistance $level", level, transmitted)
+            }
+        } finally {
+            bleServer.coroutineContext.cancel()
+            packets.close()
+        }
     }
 }
 

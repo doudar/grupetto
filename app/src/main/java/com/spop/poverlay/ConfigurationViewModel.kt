@@ -59,6 +59,9 @@ class ConfigurationViewModel(
     val bleTxEnabled
         get() = configurationRepository.bleTxEnabled
 
+    val dirConEnabled
+        get() = configurationRepository.dirConEnabled
+
     val bleFtmsDeviceName
         get() = configurationRepository.bleFtmsDeviceName
 
@@ -75,10 +78,7 @@ class ConfigurationViewModel(
     init {
         updatePermissionState()
         HeartRateManager.start(getApplication())
-        if (bleTxEnabled.value && hasBluetoothPermissions()) {
-            bleServer.start()
-            requestBatteryOptimizationExemptionIfNeeded()
-        }
+        syncOutboundTransports()
         if (antPlusTxEnabled.value && hasAntPlusPermissions()) {
             antPlusServer.start()
         } else if (antPlusTxEnabled.value) {
@@ -128,13 +128,14 @@ class ConfigurationViewModel(
         configurationRepository.setBleTxEnabled(isChecked)
         if (isChecked) {
             if (hasBluetoothPermissions()) {
-                bleServer.start()
+                syncOutboundTransports()
                 requestBatteryOptimizationExemptionIfNeeded()
             } else {
+                syncOutboundTransports()
                 requestBluetoothPermissions.value = getRequiredBluetoothPermissions()
             }
         } else {
-            bleServer.stop()
+            syncOutboundTransports()
             batteryOptimizationPromptShownThisSession = false
         }
     }
@@ -156,18 +157,39 @@ class ConfigurationViewModel(
         configurationRepository.setAntPlusDeviceName(newName)
     }
 
+    fun onDirConEnabledClicked(isChecked: Boolean) {
+        configurationRepository.setDirConEnabled(isChecked)
+        syncOutboundTransports()
+        requestBatteryOptimizationExemptionIfNeeded()
+    }
+
+    // Note: requestBluetoothPermissions is shared between the BLE and ANT+ permission
+    // flows, so this callback can't assume which one was just granted/denied. Unlike
+    // upstream's version, we don't force-disable BLE tx here, since that would be wrong
+    // when the denial was actually for the ANT+ permission prompt.
     fun onBluetoothPermissionsResult(granted: Boolean) {
-        if (bleTxEnabled.value && hasBluetoothPermissions()) {
-            bleServer.start()
+        if (granted) {
+            syncOutboundTransports()
             requestBatteryOptimizationExemptionIfNeeded()
-        }
-        
-        if (!granted) {
-            infoPopup.value = "Some permissions were denied. ANT+ logging to Downloads may not work on older Android versions."
+            infoPopup.postValue("Bluetooth permissions granted. BLE service started.")
+        } else {
+            syncOutboundTransports()
+            infoPopup.postValue("Some permissions were denied. BLE and/or ANT+ functionality may not work correctly.")
         }
 
         if (antPlusTxEnabled.value && hasAntPlusPermissions()) {
             antPlusServer.start()
+        }
+    }
+
+    private fun syncOutboundTransports() {
+        val shouldRunBle = bleTxEnabled.value && hasBluetoothPermissions()
+        if (shouldRunBle) {
+            bleServer.setDirConTransportEnabled(dirConEnabled.value)
+            bleServer.start()
+        } else {
+            bleServer.stop()
+            bleServer.setDirConTransportEnabled(dirConEnabled.value)
         }
     }
 
@@ -318,10 +340,13 @@ class ConfigurationViewModel(
                 }
             )
         }
+        syncOutboundTransports()
         if (bleTxEnabled.value && !hasBluetoothPermissions()) {
             val permissions = getRequiredBluetoothPermissions()
             requestBluetoothPermissions.value = permissions
-        } else if (bleTxEnabled.value && hasBluetoothPermissions()) {
+        } else if ((bleTxEnabled.value || dirConEnabled.value) &&
+            (!bleTxEnabled.value || hasBluetoothPermissions())
+        ) {
             requestBatteryOptimizationExemptionIfNeeded()
         }
         if (antPlusTxEnabled.value && !hasAntPlusPermissions()) {
@@ -351,7 +376,7 @@ class ConfigurationViewModel(
     }
 
     private fun requestBatteryOptimizationExemptionIfNeeded() {
-        if (!bleTxEnabled.value || batteryOptimizationPromptShownThisSession) {
+        if ((!bleTxEnabled.value && !dirConEnabled.value) || batteryOptimizationPromptShownThisSession) {
             return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !isIgnoringBatteryOptimizations()) {
