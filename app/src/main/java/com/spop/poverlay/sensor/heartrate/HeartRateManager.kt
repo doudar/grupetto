@@ -195,13 +195,17 @@ object HeartRateManager {
         }
     }
 
-    fun startDiscovery() {
+    // scanMode defaults to LOW_LATENCY for the user-initiated "scan for devices" flow, which
+    // wants fast results. The unattended background auto-reconnect loop passes LOW_POWER
+    // instead, since it can run continuously (whenever no strap is connected) and fast
+    // discovery there isn't worth the extra battery/CPU draw.
+    fun startDiscovery(scanMode: Int = ScanSettings.SCAN_MODE_LOW_LATENCY) {
         val adapter = BluetoothAdapter.getDefaultAdapter() ?: return
         val scanner = adapter.bluetoothLeScanner ?: return
         if (_isScanning.value) return
 
         val filter = ScanFilter.Builder().setServiceUuid(ParcelUuid(HR_SERVICE)).build()
-        val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
+        val settings = ScanSettings.Builder().setScanMode(scanMode).build()
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 val device = result.device ?: return
@@ -478,7 +482,7 @@ object HeartRateManager {
         autoReconnectJob = scope.launch {
             while (!stopped.get() && _connectedDevice.value == null && !manualDisconnectRequested) {
                 if (!_isScanning.value) {
-                    startDiscovery()
+                    startDiscovery(ScanSettings.SCAN_MODE_LOW_POWER)
                 }
                 delay(AutoReconnectScanMs)
                 if (_connectedDevice.value == null && !stopped.get() && !manualDisconnectRequested) {

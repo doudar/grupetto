@@ -2,7 +2,7 @@ package com.spop.poverlay.sensor.v2
 
 import android.os.IBinder
 import android.os.Parcel
-import com.spop.poverlay.sensor.BikeData
+import com.spop.poverlay.sensor.readBikeCoreData
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -76,8 +76,8 @@ class BikePlusCombinedSensor(private val binder: IBinder) {
                         // Skip the first integer
                         parcel2.readInt()
                         
-                        val bikeData = BikeData.CREATOR.createFromParcel(parcel2)
-                        
+                        val bikeData = readBikeCoreData(parcel2)
+
                         // Emit values
                         // Power is divided by 100 in original BikePlusPowerSensor
                         // Note: Property access 'rpm' vs 'RPM' depends on interop, sticking to existing convention

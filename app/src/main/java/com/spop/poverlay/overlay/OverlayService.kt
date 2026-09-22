@@ -27,7 +27,6 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -39,12 +38,6 @@ import com.spop.poverlay.R
 
 import com.spop.poverlay.sensor.CadenceWatchdog
 import com.spop.poverlay.sensor.DeadSensorDetector
-import com.spop.poverlay.sensor.interfaces.DummySensorInterface
-import com.spop.poverlay.sensor.interfaces.PelotonBikeSensorInterfaceV1New
-import com.spop.poverlay.sensor.interfaces.PelotonBikePlusSensorInterface
-import com.spop.poverlay.util.IsBikePlus
-import com.spop.poverlay.util.IsG700CrossTrainer
-import com.spop.poverlay.util.IsRunningOnPeloton
 import com.spop.poverlay.util.LifecycleEnabledService
 import com.spop.poverlay.util.disableAnimations
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -81,9 +74,6 @@ class OverlayService : LifecycleEnabledService() {
         //The percentage up or down a vertical drag must go before the overlay is relocated
         //Defined relative to the height of the screen
         const val VerticalMoveDragThreshold = .5f
-
-        // Replace with DeadSensorInterface to simulate a dead sensor
-        val EmulatorSensorInterface by lazy { DummySensorInterface() }
 
         private val mutableIsRunning = MutableStateFlow(false)
         val isRunning = mutableIsRunning.asStateFlow()
@@ -175,40 +165,22 @@ class OverlayService : LifecycleEnabledService() {
             resources.displayMetrics.heightPixels.toFloat()
         )
 
-        val sensorInterface = if (IsRunningOnPeloton) {
-            if (IsG700CrossTrainer || IsBikePlus) {
-                PelotonBikePlusSensorInterface(this).also {
-                    lifecycle.addObserver(LifecycleEventObserver { _, event ->
-                        if (event == Lifecycle.Event.ON_DESTROY) {
-                            it.stop()
-                        }
-                    })
-                }
-            } else {
-                PelotonBikeSensorInterfaceV1New(this).also {
-                    lifecycle.addObserver(LifecycleEventObserver { _, event ->
-                        if (event == Lifecycle.Event.ON_DESTROY) {
-                            it.stop()
-                        }
-                    })
-                }
-            }
-
-        } else {
-            EmulatorSensorInterface
-        }
+        // Shared, Application-scoped sensor interface (also used by bleServer/antPlusServer) -
+        // do not .stop() it here, its lifetime is the process lifetime.
+        val sensorInterface = (application as GrupettoApplication).sensorInterface
 
         val timerViewModel = OverlayTimerViewModel(
-            application,
             ConfigurationRepository(applicationContext, this),
-            sensorInterface.power
+            sensorInterface.power,
+            this.coroutineContext,
         )
 
         val sensorViewModel = OverlaySensorViewModel(
             application,
             sensorInterface,
             DeadSensorDetector(sensorInterface, this.coroutineContext),
-            timerViewModel
+            timerViewModel,
+            this.coroutineContext,
         )
         this.sensorViewModel = sensorViewModel
         // Wire up timer to auto-start/pause based on movement

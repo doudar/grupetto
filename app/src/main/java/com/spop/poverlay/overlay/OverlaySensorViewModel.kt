@@ -5,13 +5,12 @@ package com.spop.poverlay.overlay
 import android.app.Application
 import android.content.Intent
 import androidx.compose.runtime.mutableStateListOf
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
 import com.spop.poverlay.MainActivity
 import com.spop.poverlay.sensor.DeadSensorDetector
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.sensor.interfaces.SensorInterface
 import com.spop.poverlay.util.smoothSensorValue
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,6 +21,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.CoroutineContext
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
@@ -51,11 +51,12 @@ private const val CyclingEfficiency = 0.22 // 22% efficiency (typical for cyclin
 private const val CaloriesPerJoule = 4184.0 // Joules per kcal (thermochemical calorie definition)
 
 class OverlaySensorViewModel(
-    application: Application,
+    private val application: Application,
     private val sensorInterface: SensorInterface,
     private val deadSensorDetector: DeadSensorDetector,
-    private val timerViewModel: OverlayTimerViewModel
-) : AndroidViewModel(application) {
+    private val timerViewModel: OverlayTimerViewModel,
+    override val coroutineContext: CoroutineContext,
+) : CoroutineScope {
 
     companion object {
         // The sensor does not necessarily return new value this quickly
@@ -96,7 +97,7 @@ class OverlaySensorViewModel(
     }
 
     fun onOverlayDoubleTap() {
-        getApplication<Application>().apply {
+        application.apply {
             val intent = Intent(this, MainActivity::class.java)
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(intent)
@@ -104,7 +105,7 @@ class OverlaySensorViewModel(
     }
 
     fun onMetricSelected(metric: MetricType) {
-        viewModelScope.launch {
+        launch(Dispatchers.Main.immediate) {
             mutableSelectedMetric.emit(metric)
         }
     }
@@ -279,7 +280,7 @@ class OverlaySensorViewModel(
     }
 
     fun onClickedSpeedUnit() {
-        viewModelScope.launch {
+        launch(Dispatchers.Main.immediate) {
             useMph.emit(!useMph.value)
         }
     }
@@ -298,7 +299,7 @@ class OverlaySensorViewModel(
     private fun setupCaloriesAccumulation() {
         var lastUpdateTime = System.currentTimeMillis()
         
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             combine(
                 sensorInterface.power,
                 timerViewModel.elapsedSeconds
@@ -341,7 +342,7 @@ class OverlaySensorViewModel(
 
     private fun setupGraphData() {
         // Power graph
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             sensorInterface.power.smoothSensorValue()
                 .sample(UiUpdatePeriod)
                 .collect(object : FlowCollector<Float> {
@@ -357,7 +358,7 @@ class OverlaySensorViewModel(
         }
 
         // Cadence graph
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             sensorInterface.cadence.smoothSensorValue()
                 .sample(UiUpdatePeriod)
                 .collect(object : FlowCollector<Float> {
@@ -373,7 +374,7 @@ class OverlaySensorViewModel(
         }
 
         // Resistance graph
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             sensorInterface.resistance.smoothSensorValue()
                 .sample(UiUpdatePeriod)
                 .collect(object : FlowCollector<Float> {
@@ -389,7 +390,7 @@ class OverlaySensorViewModel(
         }
 
         // Speed graph
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             sensorInterface.speed.smoothSensorValue()
                 .sample(UiUpdatePeriod)
                 .collect(object : FlowCollector<Float> {
@@ -405,7 +406,7 @@ class OverlaySensorViewModel(
         }
 
         // Heart rate graph
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             HeartRateManager.heartRate
                 .map { (it ?: 0).toFloat() }
                 .smoothSensorValue()
@@ -424,7 +425,7 @@ class OverlaySensorViewModel(
     }
 
     private fun setupMaxTracking() {
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             combine(
                 sensorInterface.power,
                 sensorInterface.cadence,
@@ -433,7 +434,7 @@ class OverlaySensorViewModel(
                 HeartRateManager.heartRate.map { (it ?: 0).toFloat() }
             ) { power, cadence, resistance, speed, heartRate ->
                 floatArrayOf(power, cadence, resistance, speed, heartRate)
-            }.collect(object : FlowCollector<FloatArray> {
+            }.sample(UiUpdatePeriod).collect(object : FlowCollector<FloatArray> {
                 override suspend fun emit(value: FloatArray) {
                     withContext(Dispatchers.Main) {
                         updateSessionStats(value[0], value[1], value[2], value[3], value[4])
@@ -448,7 +449,7 @@ class OverlaySensorViewModel(
         setupGraphData()
         setupCaloriesAccumulation()
         setupMaxTracking()
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             deadSensorDetector.deadSensorDetected.collect(object : FlowCollector<Unit> {
                 override suspend fun emit(value: Unit) {
                     onDeadSensor()
@@ -456,7 +457,7 @@ class OverlaySensorViewModel(
             })
         }
 
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             errorMessage.collect(object : FlowCollector<String?> {
                 override suspend fun emit(value: String?) {
                     // Leave minimized state if we're showing an error message

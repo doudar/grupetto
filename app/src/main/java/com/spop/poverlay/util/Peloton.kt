@@ -6,7 +6,7 @@ import kotlin.math.sqrt
 
 private const val PelotonBrand = "Peloton"
 
-val IsRunningOnPeloton = Build.BRAND == PelotonBrand
+val IsRunningOnPeloton by lazy { Build.BRAND == PelotonBrand }
 
 /**
  * Check if the device is a G700 CrossTrainer bike.
@@ -17,14 +17,14 @@ internal fun isG700CrossTrainerModel(model: String): Boolean {
     return model.contains("G700", ignoreCase = true) || model.startsWith("PLTN-ATR", ignoreCase = true)
 }
 
-val IsG700CrossTrainer = isG700CrossTrainerModel(Build.MODEL)
+val IsG700CrossTrainer by lazy { isG700CrossTrainerModel(Build.MODEL) }
 
 /**
  * All Peloton bikes start with model "PLTN-T". Treadmills start with "PLTN-TR", so this might also
  * apply to them, but it will be interesting if anything works on them here.
  * Note: G700 is handled separately.
  */
-val IsBikePlus = Build.MODEL.contains("PLTN-T")
+val IsBikePlus by lazy { Build.MODEL.contains("PLTN-T") }
 
 
 fun calculateSpeedFromPelotonV1Power(power: Float) =

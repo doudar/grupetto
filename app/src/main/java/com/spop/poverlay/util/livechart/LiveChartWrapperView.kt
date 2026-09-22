@@ -392,6 +392,12 @@ open class LiveChartView(context: Context, attrs: AttributeSet?) : View(context,
     }
 
     /**
+     * Reused per-segment [Paint] for the heart-rate zone-banded draw path (onDraw), so a new
+     * Paint isn't allocated on every draw call - only its color is mutated per segment.
+     */
+    private val segmentPaint = Paint()
+
+    /**
      * Path generated from dataset points.
      */
     private var secondDatasetPath = Path()
@@ -421,6 +427,13 @@ open class LiveChartView(context: Context, attrs: AttributeSet?) : View(context,
         isDither = true
         setColor()
     }
+
+    // Cached inputs of the last LinearGradient built for datasetFillPaint, so drawDataset()
+    // only allocates a new gradient when one of them actually changes.
+    private var lastGradientTop: Float? = null
+    private var lastGradientColor: Int? = null
+    private var lastGradientStart: Float? = null
+    private var lastGradientBottom: Float? = null
 
     /**
      * Baseline Line [Paint] for this chart.
@@ -584,60 +597,57 @@ open class LiveChartView(context: Context, attrs: AttributeSet?) : View(context,
                             })
                 }
             } else {
-                datasetPath = Path().apply {
-                    dataset.points.forEachIndexed { index, point ->
-                        // move path to first data point,
-                        if (index == 0) {
-                            moveTo(
-                                chartBounds.start + point.x.xPointToPixels(),
-                                point.y.yPointToPixels()
-                            )
-                            return@forEachIndexed
-                        }
-
-                        lineTo(
-                            chartBounds.start + point.x.xPointToPixels(),
-                            point.y.yPointToPixels()
-                        )
-                    }
-                }
-
-                secondDatasetPath = Path().apply {
-                    secondDataset.points.forEachIndexed { index, point ->
-                        // move path to first data point,
-                        if (index == 0) {
-                            moveTo(
-                                chartBounds.start + point.x.xPointToPixels(),
-                                point.y.yPointToPixels()
-                            )
-                            return@forEachIndexed
-                        }
-
-                        lineTo(
-                            chartBounds.start + point.x.xPointToPixels(),
-                            point.y.yPointToPixels()
-                        )
-                    }
-                }
-            }
-
-            datasetFillPath = Path().apply {
+                datasetPath.reset()
                 dataset.points.forEachIndexed { index, point ->
                     // move path to first data point,
                     if (index == 0) {
-                        moveTo(chartBounds.start + point.x.xPointToPixels(),
-                            point.y.yPointToPixels())
+                        datasetPath.moveTo(
+                            chartBounds.start + point.x.xPointToPixels(),
+                            point.y.yPointToPixels()
+                        )
                         return@forEachIndexed
                     }
 
-                    lineTo(chartBounds.start + point.x.xPointToPixels(),
-                        point.y.yPointToPixels())
+                    datasetPath.lineTo(
+                        chartBounds.start + point.x.xPointToPixels(),
+                        point.y.yPointToPixels()
+                    )
                 }
-                lineTo(chartBounds.start + dataset.points.last().x.xPointToPixels(),
-                    chartBounds.bottom)
-                lineTo(chartBounds.start + dataset.points.first().x.xPointToPixels(),
-                    chartBounds.bottom)
+
+                secondDatasetPath.reset()
+                secondDataset.points.forEachIndexed { index, point ->
+                    // move path to first data point,
+                    if (index == 0) {
+                        secondDatasetPath.moveTo(
+                            chartBounds.start + point.x.xPointToPixels(),
+                            point.y.yPointToPixels()
+                        )
+                        return@forEachIndexed
+                    }
+
+                    secondDatasetPath.lineTo(
+                        chartBounds.start + point.x.xPointToPixels(),
+                        point.y.yPointToPixels()
+                    )
+                }
             }
+
+            datasetFillPath.reset()
+            dataset.points.forEachIndexed { index, point ->
+                // move path to first data point,
+                if (index == 0) {
+                    datasetFillPath.moveTo(chartBounds.start + point.x.xPointToPixels(),
+                        point.y.yPointToPixels())
+                    return@forEachIndexed
+                }
+
+                datasetFillPath.lineTo(chartBounds.start + point.x.xPointToPixels(),
+                    point.y.yPointToPixels())
+            }
+            datasetFillPath.lineTo(chartBounds.start + dataset.points.last().x.xPointToPixels(),
+                chartBounds.bottom)
+            datasetFillPath.lineTo(chartBounds.start + dataset.points.first().x.xPointToPixels(),
+                chartBounds.bottom)
 
             // Gradient paint
             var fillColor = chartStyle.mainFillColor
@@ -651,13 +661,25 @@ open class LiveChartView(context: Context, attrs: AttributeSet?) : View(context,
             }
 
             if (drawGradientFill) {
-                datasetFillPaint.shader = LinearGradient(chartBounds.start,
-                    dataset.upperBound().yPointToPixels(),
-                    chartBounds.start,
-                    chartBounds.bottom,
-                    fillColor,
-                    Color.parseColor(LiveChartAttributes.TRANSPARENT_COLOR),
-                    Shader.TileMode.CLAMP)
+                val gradientTop = dataset.upperBound().yPointToPixels()
+                val gradientChanged = datasetFillPaint.shader == null ||
+                        gradientTop != lastGradientTop ||
+                        fillColor != lastGradientColor ||
+                        chartBounds.start != lastGradientStart ||
+                        chartBounds.bottom != lastGradientBottom
+                if (gradientChanged) {
+                    datasetFillPaint.shader = LinearGradient(chartBounds.start,
+                        gradientTop,
+                        chartBounds.start,
+                        chartBounds.bottom,
+                        fillColor,
+                        Color.parseColor(LiveChartAttributes.TRANSPARENT_COLOR),
+                        Shader.TileMode.CLAMP)
+                    lastGradientTop = gradientTop
+                    lastGradientColor = fillColor
+                    lastGradientStart = chartBounds.start
+                    lastGradientBottom = chartBounds.bottom
+                }
             } else {
                 datasetFillPaint.color = fillColor
             }
@@ -728,8 +750,11 @@ open class LiveChartView(context: Context, attrs: AttributeSet?) : View(context,
 
         // Draw dataset — per-segment zone coloring if zone bands are set, otherwise single color
         if (zoneBands.isNotEmpty() && dataset.points.size > 1) {
-            val segmentPaint = Paint(datasetLinePaint)
-            dataset.points.zipWithNext().forEach { (p1, p2) ->
+            segmentPaint.set(datasetLinePaint)
+            val points = dataset.points
+            for (i in 0 until points.size - 1) {
+                val p1 = points[i]
+                val p2 = points[i + 1]
                 segmentPaint.color = zoneBands.lastOrNull { p1.y >= it.lowerBound }?.color
                     ?: datasetLinePaint.color
                 canvas.drawLine(

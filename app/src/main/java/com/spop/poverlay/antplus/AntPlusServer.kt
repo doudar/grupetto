@@ -29,6 +29,7 @@ class AntPlusServer(
     override val coroutineContext = SupervisorJob() + Dispatchers.IO
 
     private var sensorDataJob: Job? = null
+    private var hrmDataJob: Job? = null
     private val isRunning = AtomicBoolean(false)
 
     // ANT+ protocol handler
@@ -77,7 +78,7 @@ class AntPlusServer(
 
         try {
             // Initialize ANT+ handler in coroutine scope
-            antPlusHandler = AntPlusHandler(context, deviceName)
+            antPlusHandler = AntPlusHandler(context, deviceName, this)
             launch {
                 try {
                     antPlusHandler?.initialize()
@@ -114,7 +115,7 @@ class AntPlusServer(
         }
 
         try {
-            stopSensorDataUpdates()
+            stopDataUpdates()
             launch {
                 try {
                     antPlusHandler?.shutdown()
@@ -179,7 +180,8 @@ class AntPlusServer(
     }
 
     private fun startHrmDataUpdates() {
-        launch {
+        hrmDataJob?.cancel()
+        hrmDataJob = launch {
             HeartRateManager.heartRate.collect { bpm ->
                 bpm?.let { antPlusHandler?.broadcastHrmData(it) }
             }
@@ -187,11 +189,13 @@ class AntPlusServer(
     }
 
     /**
-     * Stop collecting sensor data
+     * Stop collecting sensor and heart rate data
      */
-    private fun stopSensorDataUpdates() {
+    private fun stopDataUpdates() {
         sensorDataJob?.cancel()
         sensorDataJob = null
+        hrmDataJob?.cancel()
+        hrmDataJob = null
     }
 
     /**

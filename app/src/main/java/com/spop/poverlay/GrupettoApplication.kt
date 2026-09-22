@@ -15,6 +15,9 @@ import com.spop.poverlay.util.IsRunningOnPeloton
 import timber.log.Timber
 
 class GrupettoApplication : Application() {
+    lateinit var sensorInterface: SensorInterface
+        private set
+
     lateinit var bleServer: BleServer
         private set
 
@@ -28,7 +31,7 @@ class GrupettoApplication : Application() {
         }
 
         val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        val sensorInterface = createSensorInterface()
+        sensorInterface = createSensorInterface()
         bleServer = BleServer(this, bluetoothManager, sensorInterface)
         antPlusServer = AntPlusServer(this, sensorInterface)
     }

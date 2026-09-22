@@ -1,6 +1,7 @@
 package com.spop.poverlay.sensor.interfaces
 
 import android.content.Context
+import android.content.ServiceConnection
 import android.os.IBinder
 import com.spop.poverlay.sensor.v1new.V1NewCombinedSensor
 import com.spop.poverlay.sensor.v1new.getV1NewBinder
@@ -30,13 +31,18 @@ class PelotonBikeSensorInterfaceV1New(val context: Context) : SensorInterface, C
         const val ResistanceMovingAverageWindowSize = 3
     }
     
+    private val job = SupervisorJob()
+    override val coroutineContext: CoroutineContext = job + Dispatchers.IO
+
     private val binder = MutableSharedFlow<IBinder>(replay = 1)
+    private var serviceConnection: ServiceConnection? = null
 
     init {
         launch(Dispatchers.IO) {
             try {
                 val service = getV1NewBinder(context)
-                binder.emit(service)
+                serviceConnection = service.connection
+                binder.emit(service.binder)
                 Timber.d("V1New service connected successfully")
             } catch (e: Exception) {
                 Timber.w(e, "Failed to connect to V1New service: ${e.message}")
@@ -46,11 +52,13 @@ class PelotonBikeSensorInterfaceV1New(val context: Context) : SensorInterface, C
         }
     }
 
-    override val coroutineContext: CoroutineContext
-        get() = SupervisorJob()
-
     fun stop() {
-        coroutineContext.cancelChildren()
+        job.cancel()
+        serviceConnection?.let { connection ->
+            runCatching { context.unbindService(connection) }
+                .onFailure { Timber.w(it, "Failed to unbind V1New service") }
+        }
+        serviceConnection = null
     }
 
     private val combinedSensorState = binder.transformLatest { service ->

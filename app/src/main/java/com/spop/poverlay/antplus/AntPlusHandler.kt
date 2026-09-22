@@ -25,8 +25,9 @@ import com.dsi.ant.message.fromant.MessageFromAntType
 import com.dsi.ant.message.ipc.AntMessageParcel
 import com.spop.poverlay.BuildConfig
 
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 import timber.log.Timber
 
 /**
@@ -38,7 +39,8 @@ import timber.log.Timber
  */
 class AntPlusHandler(
     private val context: Context,
-    private val deviceName: String
+    private val deviceName: String,
+    private val scope: CoroutineScope
 ) : ServiceConnection {
 
     companion object {
@@ -97,6 +99,13 @@ class AntPlusHandler(
     private var lastBroadcastCadenceRpm: Int = 0
     private var lastBroadcastSpeedKmh: Float = 0.0f
     private var isChannelProviderReceiverRegistered = false
+
+    // Reused page buffers - all page builders fully overwrite every byte before returning, and
+    // all callers (pushCurrentPayload/pushCscPayload/pushHrmPayload) are @Synchronized on this
+    // instance, so a single buffer per channel is safe to reuse across TX events (~4Hz each).
+    private val powerPayloadBuffer = ByteArray(AntPlusConstants.ANT_MESSAGE_SIZE)
+    private val cscPayloadBuffer = ByteArray(AntPlusConstants.ANT_MESSAGE_SIZE)
+    private val hrmPayloadBuffer = ByteArray(AntPlusConstants.ANT_MESSAGE_SIZE)
     private var isChannelSetupInProgress = false
 
     private val channelProviderStateReceiver = object : BroadcastReceiver() {
@@ -108,10 +117,13 @@ class AntPlusHandler(
             val numChannels = intent.getIntExtra(AntChannelProvider.NUM_CHANNELS_AVAILABLE, -1)
             val legacyInUse = intent.getBooleanExtra(AntChannelProvider.LEGACY_INTERFACE_IN_USE, false)
 
-            if (numChannels >= 0) {
-                handleProviderState(numChannels, legacyInUse, "broadcast")
-            } else {
-                syncProviderStateFromProvider("broadcast-fallback")
+            // Channel setup can retry with delays; run off the (likely main) receiver thread.
+            scope.launch {
+                if (numChannels >= 0) {
+                    handleProviderState(numChannels, legacyInUse, "broadcast")
+                } else {
+                    syncProviderStateFromProvider("broadcast-fallback")
+                }
             }
         }
     }
@@ -265,7 +277,9 @@ class AntPlusHandler(
         antService = AntService(service)
         antChannelProvider = antService?.channelProvider
         registerChannelProviderReceiverIfNeeded()
-        syncProviderStateFromProvider("onServiceConnected")
+        // Channel setup can retry with delays; onServiceConnected runs on a Binder callback
+        // thread and must not be blocked for that long.
+        scope.launch { syncProviderStateFromProvider("onServiceConnected") }
     }
 
     override fun onServiceDisconnected(name: ComponentName?) {
@@ -277,14 +291,21 @@ class AntPlusHandler(
         isServiceBound = false
     }
 
-    private fun setupAntChannel() {
-        if (isChannelSetupInProgress || isChannelOpen) {
-            return
+    // Suspend so the retry delay below doesn't block the calling thread (previously a
+    // runBlocking{delay(600)}, which could freeze the main thread for up to ~2.4s across
+    // retries). The actual channel mutations still run under synchronized(this) - the same
+    // monitor used by pushCurrentPayload()/pushCscPayload()/pushHrmPayload() - so a payload
+    // push can never observe a half-torn-down channel; only the delay itself runs unlocked.
+    private suspend fun setupAntChannel() {
+        val channelProvider = synchronized(this) {
+            if (isChannelSetupInProgress || isChannelOpen) {
+                return
+            }
+            isChannelSetupInProgress = true
+            cleanupChannel()
+            antChannelProvider
         }
-        isChannelSetupInProgress = true
-        cleanupChannel()
 
-        val channelProvider = antChannelProvider
         if (channelProvider == null) {
             logWarn("ANT_DEBUG: ANT channel provider unavailable")
             return
@@ -295,23 +316,23 @@ class AntPlusHandler(
             repeat(4) { attempt ->
                 val setupAttempt = attempt + 1
                 logDebug("ANT_DEBUG: Channel setup attempt $setupAttempt/4")
-                val result = trySetupAntChannelOnce(channelProvider)
+                val result = synchronized(this) { trySetupAntChannelOnce(channelProvider) }
                 if (result.success) {
                     return
                 }
 
                 lastError = result.error
                 if (result.retryable) {
-                    runBlocking {
-                        delay(600)
-                    }
+                    delay(600)
                 }
             }
 
-            logError("ANT_DEBUG: Failed to setup ANT channel on all attempts", lastError)
-            cleanupChannel()
+            synchronized(this) {
+                logError("ANT_DEBUG: Failed to setup ANT channel on all attempts", lastError)
+                cleanupChannel()
+            }
         } finally {
-            isChannelSetupInProgress = false
+            synchronized(this) { isChannelSetupInProgress = false }
         }
     }
 
@@ -681,10 +702,10 @@ class AntPlusHandler(
         // Match VirtualPowerMeter startup behavior: first TX is a page-16 init frame.
         if (!hasSentInitializationPage) {
             hasSentInitializationPage = true
-            val initPayload = ByteArray(AntPlusConstants.ANT_MESSAGE_SIZE)
-            initPayload[0] = AntPlusConstants.POWER_METER_PAGE_STANDARD.toByte()
-            logDebug("ANT_DEBUG: Sent initialization payload=${initPayload.toHexString()}")
-            return initPayload
+            powerPayloadBuffer.fill(0)
+            powerPayloadBuffer[0] = AntPlusConstants.POWER_METER_PAGE_STANDARD.toByte()
+            logDebug("ANT_DEBUG: Sent initialization payload=${powerPayloadBuffer.toHexString()}")
+            return powerPayloadBuffer
         }
 
         val instantaneousPower = effectivePower.coerceIn(0, 0xFFFF)
@@ -767,7 +788,7 @@ class AntPlusHandler(
 
 
     private fun buildStandardPowerPage(eventCountByte: Int, cadence: Int, instantaneousPower: Int): ByteArray {
-        val payload = ByteArray(AntPlusConstants.ANT_MESSAGE_SIZE)
+        val payload = powerPayloadBuffer
         payload[0] = AntPlusConstants.POWER_METER_PAGE_STANDARD.toByte()
         payload[1] = eventCountByte.toByte()
         // Pedal power is not supported; 0xFF means "not used" per Bike Power profile.
@@ -781,7 +802,7 @@ class AntPlusHandler(
     }
 
     private fun buildManufacturerInfoPage(): ByteArray {
-        val payload = ByteArray(AntPlusConstants.ANT_MESSAGE_SIZE)
+        val payload = powerPayloadBuffer
         payload[0] = AntPlusConstants.PAGE_MANUFACTURER_INFO.toByte()
         payload[1] = 0xFF.toByte()
         payload[2] = 0xFF.toByte()
@@ -797,7 +818,7 @@ class AntPlusHandler(
     }
 
     private fun buildProductInfoPage(): ByteArray {
-        val payload = ByteArray(AntPlusConstants.ANT_MESSAGE_SIZE)
+        val payload = powerPayloadBuffer
         payload[0] = AntPlusConstants.PAGE_PRODUCT_INFO.toByte()
         payload[1] = 0xFF.toByte()
         payload[2] = AntPlusConstants.SOFTWARE_REVISION_SUPPLEMENTAL.toByte()
@@ -815,7 +836,7 @@ class AntPlusHandler(
      * Uses cumulative rev counters + event timestamps so receivers compute speed/cadence correctly.
      */
     private fun buildCscSpeedCadencePage(speedKmh: Float): ByteArray {
-        val payload = ByteArray(AntPlusConstants.ANT_MESSAGE_SIZE)
+        val payload = cscPayloadBuffer
         payload[0] = AntPlusConstants.SPEED_CADENCE_PAGE_DATA.toByte()
 
         val nowMs = SystemClock.elapsedRealtime()
@@ -951,7 +972,7 @@ class AntPlusHandler(
         logDebug("ANT_DEBUG: Unregistered channel provider state receiver")
     }
 
-    private fun syncProviderStateFromProvider(source: String) {
+    private suspend fun syncProviderStateFromProvider(source: String) {
         val provider = antChannelProvider
         if (provider == null) {
             logWarn("ANT_DEBUG: Cannot sync provider state ($source), provider unavailable")
@@ -967,25 +988,33 @@ class AntPlusHandler(
         }
     }
 
-    @Synchronized
-    private fun handleProviderState(numChannels: Int, legacyInterfaceInUse: Boolean, source: String) {
+    // setupAntChannel() below is suspend (it can delay() between retries), so this can no
+    // longer be a single @Synchronized function - see setupAntChannel()'s comment for how
+    // mutual exclusion with the payload-push methods is preserved instead.
+    private suspend fun handleProviderState(numChannels: Int, legacyInterfaceInUse: Boolean, source: String) {
         val canAcquireChannel = numChannels > 0 || legacyInterfaceInUse
         logDebug(
             "ANT_DEBUG: Provider state ($source): numChannels=$numChannels legacyInterfaceInUse=$legacyInterfaceInUse canAcquire=$canAcquireChannel"
         )
 
         if (!canAcquireChannel) {
-            cleanupChannel()
+            synchronized(this) { cleanupChannel() }
             return
         }
 
-        if (!isChannelOpen && !isChannelSetupInProgress) {
+        val shouldSetupPowerChannel = synchronized(this) { !isChannelOpen && !isChannelSetupInProgress }
+        if (shouldSetupPowerChannel) {
             setupAntChannel()
-        } else if (isChannelOpen && currentTransmissionType >= 0) {
-            // Power channel open; opportunistically retry any missing secondary channels
-            val provider = antChannelProvider ?: return
-            if (!isCscChannelOpen) setupCscChannel(provider, currentTransmissionType)
-            if (!isHrmChannelOpen) setupHrmChannel(provider, currentTransmissionType)
+            return
+        }
+
+        synchronized(this) {
+            if (isChannelOpen && currentTransmissionType >= 0) {
+                // Power channel open; opportunistically retry any missing secondary channels
+                val provider = antChannelProvider ?: return
+                if (!isCscChannelOpen) setupCscChannel(provider, currentTransmissionType)
+                if (!isHrmChannelOpen) setupHrmChannel(provider, currentTransmissionType)
+            }
         }
     }
 
@@ -1103,7 +1132,7 @@ class AntPlusHandler(
             }
         }
 
-        val payload = ByteArray(AntPlusConstants.ANT_MESSAGE_SIZE)
+        val payload = hrmPayloadBuffer
         payload[0] = AntPlusConstants.HRM_PAGE_DATA.toByte()
         payload[1] = 0xFF.toByte()
         payload[2] = 0xFF.toByte()
