@@ -118,6 +118,25 @@ internal class HeartRateBluetoothAccess(
         }
     }
 
+    /** Best-effort radio coexistence hint, applied after notification setup completes.
+     * Android chooses the interval; this does not set the sensor's reporting cadence.
+     * A rejected request must not tear down an otherwise working sensor connection.
+     */
+    fun requestLowPowerConnection(gatt: BluetoothGatt): Boolean {
+        if (!canConnect()) return false
+        return try {
+            val accepted = gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER)
+            Timber.i("Sensor BLE low-power connection request accepted=%s", accepted)
+            accepted
+        } catch (e: SecurityException) {
+            Timber.w(e, "Sensor connection priority permission was revoked")
+            false
+        } catch (e: IllegalStateException) {
+            Timber.w(e, "Bluetooth is unavailable for sensor connection priority update")
+            false
+        }
+    }
+
     fun disconnect(gatt: BluetoothGatt) {
         try {
             gatt.disconnect()

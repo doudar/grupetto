@@ -410,6 +410,8 @@ object HeartRateManager {
         releaseCurrentGatt()
         val device = access.remoteDevice(address) ?: return
         bluetoothGatt = access.connect(device, object : BluetoothGattCallback() {
+            private var lowPowerRequested = false
+
             private fun connectionFailed(gatt: BluetoothGatt) {
                 if (bluetoothGatt !== gatt) {
                     access.close(gatt)
@@ -452,6 +454,22 @@ object HeartRateManager {
                 val characteristic = service.getCharacteristic(HR_MEASUREMENT) ?: return
                 val desc = characteristic.getDescriptor(CCC_UUID) ?: return
                 if (!access.enableNotifications(gatt, characteristic, desc)) connectionFailed(gatt)
+            }
+
+            override fun onDescriptorWrite(
+                gatt: BluetoothGatt,
+                descriptor: android.bluetooth.BluetoothGattDescriptor,
+                status: Int
+            ) {
+                if (bluetoothGatt !== gatt || descriptor.uuid != CCC_UUID) return
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    connectionFailed(gatt)
+                    return
+                }
+                if (!lowPowerRequested) {
+                    lowPowerRequested = true
+                    access.requestLowPowerConnection(gatt)
+                }
             }
 
             override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {

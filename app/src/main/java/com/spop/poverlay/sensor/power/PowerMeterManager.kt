@@ -35,6 +35,7 @@ class PowerMeterManager internal constructor(
     private var connectionAt = 0L
     private var lastMeasurementAt: Long? = null
     private var loggedPacket = false
+    private var lowPowerRequested = false
     private var scan: ScanCallback? = null
     private var watcher: Job? = null
     private var nextReconnectAt = 0L
@@ -178,6 +179,7 @@ class PowerMeterManager internal constructor(
         gatt = null; connecting = null
         lastMeasurementAt = null
         loggedPacket = false
+        lowPowerRequested = false
         mutableConnected.value = null; mutableReading.value = null
         if (old != null) { access.disconnect(old); access.close(old) }
     }
@@ -213,6 +215,10 @@ class PowerMeterManager internal constructor(
                 if (gatt !== link || descriptor.uuid != Cccd) return
                 log("Notification subscription: status=$status")
                 if (status != BluetoothGatt.GATT_SUCCESS) { fail("Power notification subscription failed"); return }
+                if (!lowPowerRequested) {
+                    lowPowerRequested = true
+                    log("Low-power connection request accepted=${access.requestLowPowerConnection(link)}")
+                }
                 mutableConnected.value = connecting
                 mutableStatus.value = "Connected · waiting for watts"
             }

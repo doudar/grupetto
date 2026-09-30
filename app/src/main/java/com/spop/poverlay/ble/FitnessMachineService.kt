@@ -137,7 +137,7 @@ class FitnessMachineService(
         BluetoothGattCharacteristic.PERMISSION_READ
     ).apply { value = byteArrayOf(25, 0, 0xe8.toByte(), 3, 1, 0) }
 
-    fun handleControl(client: String, value: ByteArray): ByteArray {
+    fun handleControl(client: String, value: ByteArray): ByteArray = synchronized(server) {
         val opcode = value.firstOrNull()?.toInt()?.and(255) ?: 0
         val reply = if (canControl) control!!.procedure(client, value)
         else com.spop.poverlay.control.BikeControl.Reply(
@@ -155,7 +155,7 @@ class FitnessMachineService(
             server.notifyDirConCharacteristicChanged(trainingStatusCharacteristic)
             connectedDevices.forEach { server.notifyCharacteristicChanged(it, trainingStatusCharacteristic, false) }
         }
-        return byteArrayOf(0x80.toByte(), opcode.toByte(), reply.result.toByte())
+        byteArrayOf(0x80.toByte(), opcode.toByte(), reply.result.toByte())
     }
 
     override fun onDisconnected(device: BluetoothDevice) {

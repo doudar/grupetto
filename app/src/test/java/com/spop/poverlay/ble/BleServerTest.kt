@@ -158,6 +158,7 @@ class BleServerTest {
         val adapter = mockk<BluetoothAdapter>(relaxed = true)
         val advertiser = mockk<BluetoothLeAdvertiser>(relaxed = true)
         every { bluetoothManager.adapter } returns adapter
+        every { adapter.state } returns BluetoothAdapter.STATE_ON
         every { adapter.bluetoothLeAdvertiser } returns advertiser
         val activeOpens = AtomicInteger(0)
         val maximumActiveOpens = AtomicInteger(0)
@@ -239,6 +240,7 @@ class BleServerTest {
         every { ContextCompat.checkSelfPermission(context, any()) } returns PackageManager.PERMISSION_GRANTED
         val adapter = mockk<BluetoothAdapter>(relaxed = true)
         every { bluetoothManager.adapter } returns adapter
+        every { adapter.state } returns BluetoothAdapter.STATE_ON
         every { adapter.bluetoothLeAdvertiser } returns mockk(relaxed = true)
         // Stop at GATT registration so these tests don't need real Android services.
         every { bluetoothManager.openGattServer(context, any()) } returns null

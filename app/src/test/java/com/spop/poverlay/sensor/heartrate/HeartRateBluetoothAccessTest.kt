@@ -84,6 +84,7 @@ class HeartRateBluetoothAccessTest {
         assertNull(access.connect(device, callback))
         assertFalse(access.discoverServices(gatt))
         assertFalse(access.enableNotifications(gatt, characteristic, descriptor))
+        assertFalse(access.requestLowPowerConnection(gatt))
         verify { adapter wasNot Called; device wasNot Called; gatt wasNot Called }
     }
 
@@ -137,6 +138,23 @@ class HeartRateBluetoothAccessTest {
         every { adapter.bluetoothLeScanner } returns scanner
         every { scanner.startScan(any<List<ScanFilter>>(), settings, scanCallback) } throws IllegalStateException()
         assertFalse(access.startScan(emptyList(), settings, scanCallback))
+    }
+
+    @Test fun `low power request uses Android profile and preserves accepted or rejected result`() {
+        every { gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER) } returns true
+        assertTrue(access.requestLowPowerConnection(gatt))
+        every { gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER) } returns false
+        assertFalse(access.requestLowPowerConnection(gatt))
+        verify(exactly = 2) { gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER) }
+        verify(exactly = 0) { gatt.disconnect(); gatt.close() }
+    }
+
+    @Test fun `low power request tolerates permission and adapter shutdown races`() {
+        every { gatt.requestConnectionPriority(any()) } throws SecurityException()
+        assertFalse(access.requestLowPowerConnection(gatt))
+        every { gatt.requestConnectionPriority(any()) } throws IllegalStateException()
+        assertFalse(access.requestLowPowerConnection(gatt))
+        verify(exactly = 0) { gatt.disconnect(); gatt.close() }
     }
 
     @Test fun `newly revoked permission is checked again on later operations`() {

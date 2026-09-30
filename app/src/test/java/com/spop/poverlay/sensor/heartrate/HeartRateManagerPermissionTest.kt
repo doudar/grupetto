@@ -114,6 +114,49 @@ class HeartRateManagerPermissionTest {
         verify { adapter wasNot Called; device wasNot Called }
     }
 
+    private fun subscriptionDescriptor(): BluetoothGattDescriptor = mockk<BluetoothGattDescriptor>().also {
+        every { it.uuid } returns UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+    }
+
+    @Test fun `sensor priority changes only after subscription and only once per connection`() {
+        connectAndReceive()
+        verify(exactly = 0) { gatt.requestConnectionPriority(any()) }
+        val descriptor = subscriptionDescriptor()
+        every { gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER) } returns true
+        repeat(2) { callback.captured.onDescriptorWrite(gatt, descriptor, BluetoothGatt.GATT_SUCCESS) }
+        verify(exactly = 1) { gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER) }
+        HeartRateManager.disconnectCurrent()
+        connectAndReceive()
+        callback.captured.onDescriptorWrite(gatt, descriptor, BluetoothGatt.GATT_SUCCESS)
+        verify(exactly = 2) { gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER) }
+    }
+
+    @Test fun `rejected sensor priority keeps heart rate streaming`() {
+        connectAndReceive()
+        every { gatt.requestConnectionPriority(any()) } returns false
+        callback.captured.onDescriptorWrite(gatt, subscriptionDescriptor(), BluetoothGatt.GATT_SUCCESS)
+        every { measurement.value } returns byteArrayOf(0, 123)
+        callback.captured.onCharacteristicChanged(gatt, measurement)
+        assertEquals(123, HeartRateManager.heartRate.value)
+        assertEquals(address, HeartRateManager.connectedDevice.value?.address)
+        verify(exactly = 0) { gatt.disconnect(); gatt.close() }
+    }
+
+    @Test fun `failed subscription closes HR connection without changing priority`() {
+        connectAndReceive()
+        callback.captured.onDescriptorWrite(gatt, subscriptionDescriptor(), BluetoothGatt.GATT_FAILURE)
+        assertNull(HeartRateManager.connectedDevice.value)
+        verify(exactly = 0) { gatt.requestConnectionPriority(any()) }
+        verify(exactly = 1) { gatt.close() }
+    }
+
+    @Test fun `late subscription callback cannot change priority after disconnect`() {
+        connectAndReceive()
+        HeartRateManager.disconnectCurrent()
+        callback.captured.onDescriptorWrite(gatt, subscriptionDescriptor(), BluetoothGatt.GATT_SUCCESS)
+        verify(exactly = 0) { gatt.requestConnectionPriority(any()) }
+    }
+
     @Test fun `scan cleanup clears scanning state even when stopScan is denied`() {
         val scanner = mockk<android.bluetooth.le.BluetoothLeScanner>()
         val scanCallback = mockk<ScanCallback>()

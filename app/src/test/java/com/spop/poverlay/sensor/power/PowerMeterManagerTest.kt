@@ -129,6 +129,33 @@ class PowerMeterManagerTest {
         assertNull(manager.reading.value)
         assertNull(manager.connectedDevice.value)
     }
+    @Test fun lowPowerRequestedOnlyAfterSubscriptionAndOncePerConnection() {
+        manager.connect(info)
+        callback.captured.onConnectionStateChange(gatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_CONNECTED)
+        callback.captured.onServicesDiscovered(gatt, BluetoothGatt.GATT_SUCCESS)
+        verify(exactly = 0) { access.requestLowPowerConnection(any()) }
+        repeat(2) { callback.captured.onDescriptorWrite(gatt, descriptor, BluetoothGatt.GATT_SUCCESS) }
+        verify(exactly = 1) { access.requestLowPowerConnection(gatt) }
+        manager.disconnect()
+        connected()
+        verify(exactly = 2) { access.requestLowPowerConnection(gatt) }
+    }
+
+    @Test fun rejectedLowPowerRequestKeepsPowerStreaming() {
+        every { access.requestLowPowerConnection(gatt) } returns false
+        connected(); receive()
+        assertEquals(210, manager.reading.value?.watts)
+        assertEquals(info, manager.connectedDevice.value)
+        verify(exactly = 0) { access.disconnect(gatt); access.close(gatt) }
+    }
+
+    @Test fun failedAndLateSubscriptionCallbacksDoNotRequestLowPower() {
+        manager.connect(info)
+        callback.captured.onDescriptorWrite(gatt, descriptor, BluetoothGatt.GATT_FAILURE)
+        callback.captured.onDescriptorWrite(gatt, descriptor, BluetoothGatt.GATT_SUCCESS)
+        verify(exactly = 0) { access.requestLowPowerConnection(any()) }
+    }
+
     @Test fun stopReleasesResourcesAndLatePacketsCannotReactivateMeter() {
         connected(); receive(); manager.stop(); receive()
         assertNull(manager.reading.value)
