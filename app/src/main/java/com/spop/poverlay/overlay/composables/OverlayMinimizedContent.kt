@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Color.Companion.White
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.painterResource
@@ -38,11 +39,18 @@ fun OverlayMinimizedContent(
     isMinimized: Boolean,
     showTimerWhenMinimized: Boolean,
     location: OverlayLocation,
+    isTread: Boolean,
     powerLabel: String,
     cadenceLabel: String,
     speedLabel: String,
     resistanceLabel: String,
+    inclineLabel: String,
     heartRateLabel: String,
+    showPowerField: Boolean,
+    showCadenceField: Boolean,
+    showResistanceField: Boolean,
+    showInclineField: Boolean,
+    heartRateColor: Color,
     contentAlpha: Float,
     timerLabel: String,
     timerPaused: Boolean,
@@ -50,7 +58,9 @@ fun OverlayMinimizedContent(
     onLongPress: () -> Unit,
     onOpenSettings: () -> Unit,
     onMinimizeToggle: () -> Unit,
-    onLayout: (IntSize) -> Unit
+    onLayout: (IntSize) -> Unit,
+    emulationLabel: String? = null,
+    powerComparison: String? = null
 ) {
     val backgroundShape = if (isMinimized) {
         RoundedCornerShape(8.dp)
@@ -97,6 +107,8 @@ fun OverlayMinimizedContent(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (emulationLabel != null) Text("DEMO", color = Color(0xFFFFCC44), fontSize = 11.sp,
+            modifier = Modifier.padding(end = 6.dp))
         val infiniteTransition = rememberInfiniteTransition()
         if (!isMinimized || showTimerWhenMinimized || timerPaused) {
 
@@ -154,35 +166,64 @@ fun OverlayMinimizedContent(
         )
 
         if (isMinimized) {
-            Spacer(modifier = Modifier.width(4.dp))
-            OverlayTimerField(
-                modifier = Modifier.width(58.dp),
-                timerLabel = powerLabel,
-                iconDrawable = R.drawable.ic_power
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            OverlayTimerField(
-                modifier = Modifier.width(58.dp),
-                timerLabel = cadenceLabel,
-                iconDrawable = R.drawable.ic_cadence
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            OverlayTimerField(
-                modifier = Modifier.width(58.dp),
-                timerLabel = resistanceLabel,
-                iconDrawable = R.drawable.ic_resistance
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            OverlayTimerField(
-                modifier = Modifier.width(58.dp),
-                timerLabel = speedLabel,
-                iconDrawable = R.drawable.ic_speed
-            )
+            if (showPowerField) {
+                Spacer(modifier = Modifier.width(4.dp))
+                OverlayTimerField(
+                    modifier = Modifier.width(if (powerComparison == null) 58.dp else 90.dp),
+                    timerLabel = powerLabel,
+                    secondaryLabel = powerComparison,
+                    iconDrawable = R.drawable.ic_power
+                )
+            }
+            if (showCadenceField) {
+                Spacer(modifier = Modifier.width(4.dp))
+                OverlayTimerField(
+                    modifier = Modifier.width(58.dp),
+                    timerLabel = cadenceLabel,
+                    iconDrawable = R.drawable.ic_cadence
+                )
+            }
+            if (showResistanceField) {
+                Spacer(modifier = Modifier.width(4.dp))
+                OverlayTimerField(
+                    modifier = Modifier.width(58.dp),
+                    timerLabel = resistanceLabel,
+                    iconDrawable = R.drawable.ic_resistance
+                )
+            }
+            // Reuses ic_speed for incline until a dedicated incline drawable is
+            // added, matching the main content's incline card.
+            val speedField = @Composable {
+                Spacer(modifier = Modifier.width(4.dp))
+                OverlayTimerField(
+                    modifier = Modifier.width(58.dp),
+                    timerLabel = speedLabel,
+                    iconDrawable = R.drawable.ic_speed
+                )
+            }
+            val inclineField = @Composable {
+                Spacer(modifier = Modifier.width(4.dp))
+                OverlayTimerField(
+                    modifier = Modifier.width(58.dp),
+                    timerLabel = inclineLabel,
+                    iconDrawable = R.drawable.ic_speed
+                )
+            }
+            if (isTread) {
+                // Mirror the expanded HUD's left-to-right sense: incline before speed.
+                if (showInclineField) {
+                    inclineField()
+                }
+                speedField()
+            } else {
+                speedField()
+            }
             Spacer(modifier = Modifier.width(4.dp))
             OverlayTimerField(
                 modifier = Modifier.width(58.dp),
                 timerLabel = heartRateLabel,
-                iconDrawable = R.drawable.ic_hrm
+                iconDrawable = R.drawable.ic_hrm,
+                textColor = heartRateColor
             )
         }
     }
@@ -193,9 +234,13 @@ private fun OverlayTimerField(
     modifier: Modifier,
     timerLabel: String,
     iconDrawable: Int,
+    textColor: Color = White,
+    secondaryLabel: String? = null,
 ) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
     Row(
-        modifier = modifier
+        modifier = Modifier
+            .fillMaxWidth()
             .wrapContentHeight(),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -210,11 +255,13 @@ private fun OverlayTimerField(
         )
         Text(
             timerLabel,
-            color = Color.White,
+            color = textColor,
             fontSize = 19.sp,
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
         )
+    }
+    if (secondaryLabel != null) Text(secondaryLabel, color = Color.LightGray, fontSize = 11.sp, maxLines = 1)
     }
 }

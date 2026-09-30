@@ -1,7 +1,6 @@
 package com.spop.poverlay
 
 import android.app.Application
-import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -19,6 +18,7 @@ import com.spop.poverlay.releases.ReleaseChecker
 import com.spop.poverlay.sensor.heartrate.HeartRateDevice
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -28,12 +28,25 @@ class ConfigurationViewModel(
     private val configurationRepository: ConfigurationRepository,
     private val releaseChecker: ReleaseChecker,
 ) : AndroidViewModel(application) {
+    val emulatedModel get() = (getApplication<Application>() as GrupettoApplication).emulatedModel
+    val isPreview get() = emulatedModel != null
+    fun emulateModel(model: com.spop.poverlay.sensor.interfaces.EmulatedModel?) {
+        val app = getApplication<Application>() as GrupettoApplication
+        app.stopService(Intent(app, OverlayService::class.java))
+        HeartRateManager.stop()
+        app.setEmulatedModel(model)
+        requestRestart.value = Unit
+    }
     val finishActivity = MutableLiveData<Unit>()
     val requestOverlayPermission = MutableLiveData<Unit>()
     val requestRestart = MutableLiveData<Unit>()
     val requestQuit = MutableLiveData<Unit>()
     val requestBluetoothPermissions = MutableLiveData<Array<String>>()
     val requestIgnoreBatteryOptimizations = MutableLiveData<Unit>()
+    val requestBackgroundLocationPermission = MutableLiveData<Unit>()
+
+    private val _backgroundLocationGranted = MutableStateFlow(hasBackgroundLocationPermission())
+    val backgroundLocationGranted: StateFlow<Boolean> = _backgroundLocationGranted
     val showPermissionInfo = mutableStateOf(false)
     val infoPopup = MutableLiveData<String>()
 
@@ -46,8 +59,16 @@ class ConfigurationViewModel(
 
     var latestRelease = mutableStateOf<Release?>(null)
 
+    val autoStartOnBoot
+        get() = configurationRepository.autoStartOnBoot
+
     val showTimerWhenMinimized
         get() = configurationRepository.showTimerWhenMinimized
+
+    val showShifters get() = configurationRepository.showShifters
+    val shifterInset get() = configurationRepository.shifterInset
+    fun setShowShifters(shown: Boolean) = configurationRepository.setShowShifters(shown)
+    fun setShifterInset(inset: Float) = configurationRepository.setShifterInset(inset)
 
     val bleTxEnabled
         get() = configurationRepository.bleTxEnabled
@@ -58,13 +79,66 @@ class ConfigurationViewModel(
     val bleFtmsDeviceName
         get() = configurationRepository.bleFtmsDeviceName
 
+    val antPlusTxEnabled
+        get() = configurationRepository.antPlusTxEnabled
+
+
     private val bleServer = (application as GrupettoApplication).bleServer
+    private val antPlusServer = (application as GrupettoApplication).antPlusServer
+    private val bikeControl = (application as GrupettoApplication).sensorInterface.bikeControl
+    private val powerMeters = (application as GrupettoApplication).powerMeterManager
+    val powerMeterDevice = powerMeters.connectedDevice
+    val powerMeterReading = powerMeters.reading
+    val powerMeterStatus = powerMeters.status
+    val powerMeterDiscovered = powerMeters.discoveredDevices
+    val powerMeterSaved = powerMeters.savedDevices
+    val powerMeterScanning = powerMeters.scanning
+    val livePower = (application as GrupettoApplication).sensorInterface.power
+    val liveCadence = (application as GrupettoApplication).sensorInterface.cadence
+    val liveResistance = (application as GrupettoApplication).sensorInterface.resistance
+    val liveSpeed = (application as GrupettoApplication).sensorInterface.speed
+    val liveIncline = (application as GrupettoApplication).sensorInterface.incline
+    val isTread = (application as GrupettoApplication).sensorInterface.deviceType == com.spop.poverlay.sensor.interfaces.DeviceType.Tread
+    private var managingPowerMeters = false
+    fun managePowerMeters(active: Boolean) {
+        if (isPreview) return
+        managingPowerMeters = active
+        if (active && !hasBluetoothPermissions()) {
+            requestBluetoothPermissions.value = getRequiredBluetoothPermissions()
+            return
+        }
+        powerMeters.manage(active)
+    }
+    fun connectPowerMeter(device: HeartRateDevice) { if (!isPreview) powerMeters.connect(device) }
+    fun disconnectPowerMeter() { powerMeters.disconnect() }
+    fun forgetPowerMeter(address: String) { powerMeters.forget(address) }
+    val bikeControlState = bikeControl?.state ?: MutableStateFlow(com.spop.poverlay.control.ControlState())
+
+    fun setBikeTuning(shiftSize: Int, gain: Float, wattsPerShift: Int, inclineSensitivity: Float) {
+        bikeControl?.tune(shiftSize, gain, wattsPerShift, inclineSensitivity)
+        if (isPreview) return
+        bikeControl?.state?.value?.let { state ->
+            getApplication<Application>().getSharedPreferences(ConfigurationRepository.SharedPrefsName, Context.MODE_PRIVATE)
+                .edit().putInt("bikeShiftSize", state.shiftSize).putFloat("bikeProportionalGain", state.gain)
+                .putInt("bikeWattsPerShift", state.wattsPerShift).putFloat("bikeInclineSensitivity", state.inclineSensitivity).apply()
+        }
+    }
+    fun startErg(watts: Int) {
+        if (bikeControl?.localErg(watts) != true) infoPopup.value = "Waiting for fresh Bike+ / CrossTrainer data."
+    }
+    fun startSimulation(incline: Float) {
+        if (bikeControl?.localSimulation(incline) != true) infoPopup.value = "Waiting for fresh Bike+ / CrossTrainer data."
+    }
+    fun setBikeResistance(resistance: Int) { bikeControl?.localResistance(resistance) }
+    fun stopBikeControl() { bikeControl?.localManual() }
     private var batteryOptimizationPromptShownThisSession = false
 
     init {
         updatePermissionState()
-        HeartRateManager.start(getApplication())
+        if (!isPreview) HeartRateManager.start(getApplication())
+        if (!isPreview) powerMeters.start()
         syncOutboundTransports()
+        syncAntPlusTransport()
     }
 
     private fun updatePermissionState() {
@@ -72,6 +146,32 @@ class ConfigurationViewModel(
             showPermissionInfo.value = !Settings.canDrawOverlays(getApplication())
         } else {
             showPermissionInfo.value = false
+        }
+        _backgroundLocationGranted.value = hasBackgroundLocationPermission()
+    }
+
+    private fun hasBackgroundLocationPermission(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true
+        return ContextCompat.checkSelfPermission(
+            getApplication(),
+            android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    fun onBackgroundLocationPermissionResult(granted: Boolean) {
+        _backgroundLocationGranted.value = hasBackgroundLocationPermission()
+        val msg = if (granted) {
+            "Background location granted. HRM will auto-connect at boot."
+        } else {
+            "Background location not granted. Open the app once after boot for HRM to connect."
+        }
+        infoPopup.postValue(msg)
+    }
+
+    fun onAutoStartOnBootClicked(isChecked: Boolean) {
+        configurationRepository.setAutoStartOnBoot(isChecked)
+        if (!isPreview && isChecked && !hasBackgroundLocationPermission()) {
+            requestBackgroundLocationPermission.value = Unit
         }
     }
 
@@ -81,6 +181,7 @@ class ConfigurationViewModel(
 
     fun onBleTxEnabledClicked(isChecked: Boolean) {
         configurationRepository.setBleTxEnabled(isChecked)
+        if (isPreview) return
         if (isChecked) {
             if (hasBluetoothPermissions()) {
                 syncOutboundTransports()
@@ -95,6 +196,23 @@ class ConfigurationViewModel(
         }
     }
 
+    val antPlusSupported: Boolean get() = (isPreview && emulatedModel != com.spop.poverlay.sensor.interfaces.EmulatedModel.Tread) || antPlusServer.isSupported
+
+    fun onAntPlusTxEnabledClicked(isChecked: Boolean) {
+        if (!isPreview && isChecked && (!antPlusSupported || !antPlusServer.isAntPlusAvailable())) {
+            infoPopup.postValue("ANT+ requires a supported bike and ANT Radio Service.")
+            return
+        }
+        configurationRepository.setAntPlusTxEnabled(isChecked)
+        syncAntPlusTransport()
+        requestBatteryOptimizationExemptionIfNeeded()
+    }
+
+    private fun syncAntPlusTransport() {
+        if (isPreview) return
+        if (antPlusTxEnabled.value && antPlusSupported) antPlusServer.start()
+        else antPlusServer.stop()
+    }
     fun onDirConEnabledClicked(isChecked: Boolean) {
         configurationRepository.setDirConEnabled(isChecked)
         syncOutboundTransports()
@@ -103,6 +221,10 @@ class ConfigurationViewModel(
 
     fun onBluetoothPermissionsResult(granted: Boolean) {
         if (granted) {
+            if (!isPreview) {
+                powerMeters.start()
+                if (managingPowerMeters) powerMeters.manage(true)
+            }
             syncOutboundTransports()
             requestBatteryOptimizationExemptionIfNeeded()
             infoPopup.postValue("Bluetooth permissions granted. BLE service started.")
@@ -111,9 +233,12 @@ class ConfigurationViewModel(
             syncOutboundTransports()
             infoPopup.postValue("Bluetooth permissions are required for BLE functionality.")
         }
+
+        syncAntPlusTransport()
     }
 
     private fun syncOutboundTransports() {
+        if (isPreview) return
         val shouldRunBle = bleTxEnabled.value && hasBluetoothPermissions()
         if (shouldRunBle) {
             bleServer.setDirConTransportEnabled(dirConEnabled.value)
@@ -126,47 +251,37 @@ class ConfigurationViewModel(
 
     private fun getRequiredBluetoothPermissions(): Array<String> {
         val permissions = mutableListOf<String>()
-
-        // Always required permissions
         permissions.add(android.Manifest.permission.BLUETOOTH)
         permissions.add(android.Manifest.permission.BLUETOOTH_ADMIN)
         permissions.add(android.Manifest.permission.ACCESS_FINE_LOCATION)
-
-        // Android 12+ permissions
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             permissions.add(android.Manifest.permission.BLUETOOTH_ADVERTISE)
             permissions.add(android.Manifest.permission.BLUETOOTH_CONNECT)
             permissions.add(android.Manifest.permission.BLUETOOTH_SCAN)
         }
-
         return permissions.toTypedArray()
     }
 
     private fun hasBluetoothPermissions(): Boolean {
         val context = getApplication<Application>()
-
         val bluetoothPermission = ContextCompat.checkSelfPermission(
             context, android.Manifest.permission.BLUETOOTH
         ) == PackageManager.PERMISSION_GRANTED
-
         val bluetoothAdminPermission = ContextCompat.checkSelfPermission(
             context, android.Manifest.permission.BLUETOOTH_ADMIN
         ) == PackageManager.PERMISSION_GRANTED
-
         val locationPermission = ContextCompat.checkSelfPermission(
             context, android.Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
-
-        // Check for Android 12+ permissions
         var bluetoothAdvertisePermission = true
         var bluetoothConnectPermission = true
         var bluetoothScanPermission = true
+
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             bluetoothAdvertisePermission = ContextCompat.checkSelfPermission(
                 context, android.Manifest.permission.BLUETOOTH_ADVERTISE
             ) == PackageManager.PERMISSION_GRANTED
-
             bluetoothConnectPermission = ContextCompat.checkSelfPermission(
                 context, android.Manifest.permission.BLUETOOTH_CONNECT
             ) == PackageManager.PERMISSION_GRANTED
@@ -175,7 +290,6 @@ class ConfigurationViewModel(
                 context, android.Manifest.permission.BLUETOOTH_SCAN
             ) == PackageManager.PERMISSION_GRANTED
         }
-
         return bluetoothPermission && bluetoothAdminPermission && locationPermission &&
                 bluetoothAdvertisePermission && bluetoothConnectPermission && bluetoothScanPermission
     }
@@ -198,6 +312,8 @@ class ConfigurationViewModel(
     }
 
     fun onQuitClicked() {
+        bikeControl?.stop()
+        powerMeters.stop()
         requestQuit.value = Unit
     }
 
@@ -208,6 +324,7 @@ class ConfigurationViewModel(
     }
 
     fun startHeartRateDiscovery() {
+        if (isPreview) return
         HeartRateManager.startDiscovery()
     }
 
@@ -245,6 +362,7 @@ class ConfigurationViewModel(
     }
 
     fun onAppResumed() {
+        OverlayService.configurationVisible.value = true
         if (isOverlayRunning.value) {
             ContextCompat.startForegroundService(
                 getApplication(),
@@ -253,6 +371,7 @@ class ConfigurationViewModel(
                 }
             )
         }
+        if (isPreview) return
         syncOutboundTransports()
         if (bleTxEnabled.value && !hasBluetoothPermissions()) {
             val permissions = getRequiredBluetoothPermissions()
@@ -262,9 +381,11 @@ class ConfigurationViewModel(
         ) {
             requestBatteryOptimizationExemptionIfNeeded()
         }
+        syncAntPlusTransport()
     }
 
     fun onAppStopped() {
+        OverlayService.configurationVisible.value = false
         if (isOverlayRunning.value) {
             ContextCompat.startForegroundService(
                 getApplication(),
@@ -279,17 +400,16 @@ class ConfigurationViewModel(
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
             return true
         }
-
         val context = getApplication<Application>()
         val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
         return powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true
     }
 
     private fun requestBatteryOptimizationExemptionIfNeeded() {
-        if ((!bleTxEnabled.value && !dirConEnabled.value) || batteryOptimizationPromptShownThisSession) {
+        if (isPreview) return
+        if ((!bleTxEnabled.value && !dirConEnabled.value && !antPlusTxEnabled.value) || batteryOptimizationPromptShownThisSession) {
             return
         }
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !isIgnoringBatteryOptimizations()) {
             batteryOptimizationPromptShownThisSession = true
             requestIgnoreBatteryOptimizations.postValue(Unit)
@@ -300,7 +420,6 @@ class ConfigurationViewModel(
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
             return
         }
-
         val prompt = if (isIgnoringBatteryOptimizations()) {
             "Battery optimization disabled for Grupetto. BLE reliability should improve while idle."
         } else {

@@ -12,7 +12,16 @@
 You can use it to watch media from sources like Netflix and Youtube while viewing your current 
 *power output, cadence, resistance, and speed.*
 
-**Supported bikes:** Peloton Bike (Gen 1), Bike+ (Gen 2), and G700 CrossTrainer
+**Supported hardware:** Peloton Bike (Gen 1), Bike+ (Gen 2), G700 CrossTrainer, and Peloton Tread (broadcasts FTMS Treadmill Data `0x2ACD` &mdash; speed and incline)
+
+Tread mode is enabled only when Peloton's `peloton_platform` setting identifies a
+Tread (`prism` or a `prism-` variant). The tablet model alone is not sufficient.
+On a detected Tread, both overlay sizes show speed and incline, with speed selected
+for the graph by default. Bike power, cadence, resistance, and cycling calorie
+estimates remain on the bike display. Missing or unknown platform values retain
+the existing bike behavior. Tread+ is not included in this support.
+
+The Tread connection reads telemetry only; it does not control belt speed or incline.
 
 ***Note: This project is wholly unaffiliated with Peloton. Please do not approach them for support
 with this app. It relies on undocumented interfaces that are subject to change with any update.***
@@ -63,6 +72,50 @@ sideload an APK.
 After following those steps, the APK for grupetto can be found on the Releases tab above.
 
 # Usage
+
+- On a connected Bike+ or G700 CrossTrainer, **Modes & tuning** provides ERG
+  (25–1000 W), Sim, and Manual with a light selected-mode button. ERG has gain
+  and watts-per-shift controls; Sim has incline, incline sensitivity, and
+  resistance per shift; Manual has resistance and resistance per shift.
+  Tall **− / +** shifters stay fixed at the bottom left and right in overlay
+  mode, changing target watts in ERG and resistance in Sim/Manual. The
+  **Shifters** tab has a visibility checkbox and a shared position slider that
+  moves each button inward by up to 1/8 of the screen width. Settings hide
+  them except for a temporary preview while moving that slider. Bluetooth
+  and DirCon FTMS commands automatically update the mode and target, with an
+  **External control** flag identifying the active transport. Original Bike
+  and Tread remain read-only.
+  The ERG/motor work builds on [dwj300's PR #50](https://github.com/doudar/grupetto/pull/50).
+- Settings show live metrics and connection status in a compact dashboard, with
+  dialogs for connections, **External Sensors**, and bike control. Sensor lists
+  use pages instead of scrolling. External Sensors includes heart-rate monitors,
+  HR zones, and Bluetooth Cycling Power meters; HR and power can connect together.
+- A selected external power meter supplies watts for the overlay, broadcasts,
+  and ERG. A small **Peloton … W** comparison appears below external watts in
+  both overlay sizes. Missing data falls back to built-in power after three
+  seconds. Changing or losing the power source stops ERG until explicitly
+  restarted. Cadence, resistance, and speed remain supplied by the bike.
+- Developer menu: tap the version label at the bottom left **five times**, with
+  no more than two seconds between taps. Select Bike, Bike+, CrossTrainer, or
+  Tread to restart into emulation. **Use detected hardware** restores normal
+  operation. Emulation persists until changed, displays a banner and **DEMO**
+  on the overlay, uses simulated sensors/motor commands, and disables broadcasts.
+  Its configuration preferences are separate from normal settings.
+
+See [Bike control implementation and validation](docs/bike-control.md) for protocol
+details, Sim behavior, limits, and hardware validation still needed.
+
+- Bikes can optionally broadcast power, speed/cadence, and heart rate over ANT+
+  in addition to BLE and DirCon. Enable **ANT+** in settings on a tablet with
+  ANT Radio Service installed and a compatible radio. Pair device **1** for power,
+  **2** for speed/cadence, and **3** for heart rate. The cycling ANT+ option is
+  hidden on detected Treads; their BLE speed/incline support is unchanged.
+- **Auto-start on boot** is opt-in and requires permission to draw over other
+  apps. For automatic heart-rate reconnection after boot, allow background
+  location when Android requests it and keep the saved monitor nearby.
+- Heart-rate values and graph segments use the configured five zone colors.
+  Default boundaries are 108, 126, 144, and 162 bpm; adjust them in heart-rate
+  settings for your own zones.
 
 - When first run, grupetto will ask for permission to draw over other apps. This permission is
   required for the app to function.

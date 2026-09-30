@@ -20,15 +20,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.unit.sp
 import com.spop.poverlay.overlay.composables.OverlayMainContent
 import com.spop.poverlay.overlay.composables.OverlayMinimizedContent
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
+import androidx.compose.ui.graphics.toArgb
+import com.spop.poverlay.ui.theme.HrZone1Color
+import com.spop.poverlay.ui.theme.HrZone2Color
+import com.spop.poverlay.ui.theme.HrZone3Color
+import com.spop.poverlay.ui.theme.HrZone4Color
+import com.spop.poverlay.ui.theme.HrZone5Color
+import com.spop.poverlay.ui.theme.MetricHeartRateColor
+import com.spop.poverlay.util.livechart.ZoneBand
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.drop
@@ -40,10 +50,18 @@ val OverlayCornerRadius = 25.dp
 val StatCardWidth = 105.dp
 val PowerChartFullWidth = 200.dp
 val PowerChartShrunkWidth = 120.dp
-val BackgroundColorDefault = Color(20, 20, 20)
+val BackgroundColorDefault = Color(20, 20, 20, 230)
 
 // Shown when a sensor hasn't reported a value yet
 const val SensorValuePlaceholderText = "-"
+
+internal fun heartRateZoneColor(bpm: Int, zones: List<Int>): Color = when {
+    bpm < zones[0] -> HrZone1Color
+    bpm < zones[1] -> HrZone2Color
+    bpm < zones[2] -> HrZone3Color
+    bpm < zones[3] -> HrZone4Color
+    else -> HrZone5Color
+}
 
 @Composable
 fun Overlay(
@@ -59,16 +77,42 @@ fun Overlay(
     onDragFinished: () -> Unit
 ) {
     val power by sensorViewModel.powerValue.collectAsState(initial = SensorValuePlaceholderText)
+    val pelotonPowerComparison by sensorViewModel.pelotonPowerComparison.collectAsState(initial = null)
 
-    val selectedMetric by sensorViewModel.selectedMetric.collectAsState(initial = MetricType.POWER)
+    val defaultMetric by sensorViewModel.defaultMetric.collectAsState()
+    val selectedMetric by sensorViewModel.selectedMetric.collectAsState(initial = defaultMetric)
     val currentGraph = remember(selectedMetric) { sensorViewModel.getGraphForMetric(selectedMetric) }
+    // Card visibility is initialized from the detected device before the first frame.
+    val showPowerCard by sensorViewModel.showPowerCard.collectAsState()
+    val showCadenceCard by sensorViewModel.showCadenceCard.collectAsState()
+    val showResistanceCard by sensorViewModel.showResistanceCard.collectAsState()
+    val showInclineCard by sensorViewModel.showInclineCard.collectAsState()
+    val isTread by sensorViewModel.isTread.collectAsState()
     val rpm by sensorViewModel.rpmValue.collectAsState(initial = SensorValuePlaceholderText)
     val resistance by sensorViewModel.resistanceValue.collectAsState(initial = SensorValuePlaceholderText)
     val speed by sensorViewModel.speedValue.collectAsState(initial = SensorValuePlaceholderText)
     val speedLabel by sensorViewModel.speedLabel.collectAsState(initial = "")
+    val incline by sensorViewModel.inclineValue.collectAsState(initial = SensorValuePlaceholderText)
     val calories by sensorViewModel.caloriesValue.collectAsStateWithLifecycle(initialValue = SensorValuePlaceholderText)
     val heartRate by HeartRateManager.heartRate.collectAsStateWithLifecycle(initialValue = null)
+    val heartRateZones by HeartRateManager.heartRateZones.collectAsStateWithLifecycle(initialValue = null)
     val connectedHeartRateDevice by HeartRateManager.connectedDevice.collectAsStateWithLifecycle(initialValue = null)
+    val heartRateColor = remember(heartRate, heartRateZones) {
+        val bpm = heartRate
+        val zones = heartRateZones
+        if (bpm != null && bpm > 0 && zones != null) heartRateZoneColor(bpm, zones)
+        else MetricHeartRateColor
+    }
+    val heartRateZoneBands = remember(heartRateZones) {
+        val zones = heartRateZones ?: return@remember null
+        listOf(
+            ZoneBand(0f,          zones[0].toFloat(), HrZone1Color.copy(alpha = 0.3f).toArgb()),
+            ZoneBand(zones[0].toFloat(), zones[1].toFloat(), HrZone2Color.copy(alpha = 0.3f).toArgb()),
+            ZoneBand(zones[1].toFloat(), zones[2].toFloat(), HrZone3Color.copy(alpha = 0.3f).toArgb()),
+            ZoneBand(zones[2].toFloat(), zones[3].toFloat(), HrZone4Color.copy(alpha = 0.3f).toArgb()),
+            ZoneBand(zones[3].toFloat(), 220f,         HrZone5Color.copy(alpha = 0.3f).toArgb()),
+        )
+    }
     val timerLabel by timerViewModel.timerLabel.collectAsState(initial = "")
     val isTimerPaused by timerViewModel.timerPaused.collectAsState(initial = false)
     val errorMessage by sensorViewModel.errorMessage.collectAsState(initial = null)
@@ -104,15 +148,16 @@ fun Overlay(
     val location by locationState
     LaunchedEffect(showHeartRateCard, selectedMetric) {
         if (!showHeartRateCard && selectedMetric == MetricType.HEART_RATE) {
-            sensorViewModel.onMetricSelected(MetricType.POWER)
+            sensorViewModel.onMetricSelected(defaultMetric)
         }
     }
 
     val size = remember { mutableStateOf(IntSize.Zero) }
 
 
+    val contentHeight = height + if (pelotonPowerComparison != null) 14.dp else 0.dp
     val mainContentHeight = with(LocalDensity.current) {
-        height.roundToPx()
+        contentHeight.roundToPx()
     }
 
     val timerAlpha by animateFloatAsState(
@@ -162,23 +207,32 @@ fun Overlay(
             timerPaused = isTimerPaused,
             showTimerWhenMinimized = showTimerWhenMinimized,
             location = location,
+            isTread = isTread,
             powerLabel = power,
+            powerComparison = pelotonPowerComparison,
             contentAlpha = timerAlpha,
             timerLabel = timerLabel,
             cadenceLabel = rpm,
             speedLabel = speed,
             resistanceLabel = resistance,
+            inclineLabel = incline,
             heartRateLabel = heartRate?.toString() ?: SensorValuePlaceholderText,
+            showPowerField = showPowerCard,
+            showCadenceField = showCadenceCard,
+            showResistanceField = showResistanceCard,
+            showInclineField = showInclineCard,
+            heartRateColor = heartRateColor,
             onTap = { timerViewModel.onTimerTap() },
             onLongPress = { timerViewModel.onTimerLongPress() },
             onOpenSettings = { sensorViewModel.onOverlayDoubleTap() },
             onMinimizeToggle = { sensorViewModel.onOverlayPressed() },
-            onLayout = onTimerLayout
+            onLayout = onTimerLayout,
+            emulationLabel = sensorViewModel.emulatedModel
         )
     }
     val mainContent = @Composable {
         Box(modifier = Modifier
-            .requiredHeight(height)
+            .requiredHeight(contentHeight)
             .wrapContentWidth(unbounded = true)
             .onSizeChanged {
                 if (it.width != size.value.width || it.height != size.value.height) {
@@ -211,13 +265,16 @@ fun Overlay(
                 OverlayLocation.Bottom -> Alignment.Bottom
             }
 
+            Row(verticalAlignment = Alignment.CenterVertically) {
             OverlayMainContent(
                 modifier = Modifier
                     .wrapContentWidth(unbounded = true)
                     .padding(horizontal = 9.dp)
                     .padding(bottom = 5.dp),
                 rowAlignment = rowAlignment,
+                isTread = isTread,
                 power = power,
+                powerComparison = pelotonPowerComparison,
                 rpm = rpm,
                 pauseChart = isCurrentlyAnimating,
                 currentGraph = currentGraph,
@@ -226,6 +283,8 @@ fun Overlay(
                 speed = speed,
                 speedLabel = speedLabel,
                 heartRate = heartRate?.toString() ?: SensorValuePlaceholderText,
+                heartRateColor = heartRateColor,
+                heartRateZoneBands = heartRateZoneBands,
                 calories = calories,
                 maxPower = "%.0f".format(maxPower),
                 maxCadence = "%.0f".format(maxCadence),
@@ -243,14 +302,26 @@ fun Overlay(
                 maxHeartRate = "%.0f".format(maxHeartRate),
                 avgHeartRate = "%.0f".format(avgHeartRate),
                 showHeartRateCard = showHeartRateCard,
+                incline = incline,
+                showInclineCard = showInclineCard,
+                showPowerCard = showPowerCard,
+                showCadenceCard = showCadenceCard,
+                showResistanceCard = showResistanceCard,
                 onMetricSelected = { sensorViewModel.onMetricSelected(it) },
                 onSpeedUnitClicked = { sensorViewModel.onClickedSpeedUnit() },
                 onChartClicked = { sensorViewModel.onOverlayPressed() }
             )
+            }
         }
     }
 
 
+    // The overlay Box is laid out with unbounded constraints so its content can extend
+    // past the window bounds. A Snackbar internally applies fillMaxWidth(), which under
+    // an unbounded (infinite) max width crashes in measure ("Can't represent a size ...
+    // in Constraints"). Cap the Snackbar to the screen width so it always has a bounded
+    // width regardless of the unbounded parent.
+    val maxSnackbarWidth = LocalConfiguration.current.screenWidthDp.dp
     Box(
         modifier = Modifier
             .wrapContentSize(unbounded = true)
@@ -264,6 +335,7 @@ fun Overlay(
                 },
                 backgroundColor = Color.White,
                 modifier = Modifier
+                    .widthIn(max = maxSnackbarWidth)
                     .padding(8.dp)
                     .zIndex(1f)
             ) {

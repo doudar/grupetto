@@ -9,15 +9,19 @@ import androidx.lifecycle.LifecycleOwner
 import com.spop.poverlay.overlay.OverlayLocation
 import kotlinx.coroutines.flow.MutableStateFlow
 
-class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) : AutoCloseable {
+class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner, preferencesName: String = SharedPrefsName) : AutoCloseable {
 
     enum class Preferences(val key: String) {
         ShowTimerWhenMinimized("showTimerWhenMinimized"),
+        ShowShifters("showShifters"),
+        ShifterInset("shifterInset"),
         BleTxEnabled("bleTxEnabled"),
         DirConEnabled("dirConEnabled"),
         BleFtmsDeviceName("bleFtmsDeviceName"),
         OverlayHorizontalOffset("overlayHorizontalOffset"),
         OverlayLocation("overlayLocation"),
+        AntPlusTxEnabled("antPlusTxEnabled"),
+        AutoStartOnBoot("autoStartOnBoot"),
         SerialNumber("serialNumber")
     }
 
@@ -30,15 +34,21 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
     }
 
     private val mutableShowTimerWhenMinimized = MutableStateFlow(true)
+    val showShifters = MutableStateFlow(true)
+    val shifterInset = MutableStateFlow(0f)
     private val mutableBleTxEnabled = MutableStateFlow(true)
     private val mutableDirConEnabled = MutableStateFlow(true)
     private val mutableBleFtmsDeviceName = MutableStateFlow("Grupetto FTMS")
+    private val mutableAntPlusTxEnabled = MutableStateFlow(false)
+    private val mutableAutoStartOnBoot = MutableStateFlow(false)
     private val mutableSerialNumber = MutableStateFlow("")
 
     val showTimerWhenMinimized = mutableShowTimerWhenMinimized
     val bleTxEnabled = mutableBleTxEnabled
     val dirConEnabled = mutableDirConEnabled
     val bleFtmsDeviceName = mutableBleFtmsDeviceName
+    val antPlusTxEnabled = mutableAntPlusTxEnabled
+    val autoStartOnBoot = mutableAutoStartOnBoot
     val serialNumber = mutableSerialNumber
 
     private val sharedPreferences: SharedPreferences
@@ -52,7 +62,7 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
     private val listener : SharedPreferences.OnSharedPreferenceChangeListener
 
     init {
-        sharedPreferences = context.getSharedPreferences(SharedPrefsName, Context.MODE_PRIVATE)
+        sharedPreferences = context.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
         updateFromSharedPrefs()
 
         listener = createSharedPreferencesListener()
@@ -70,6 +80,17 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         sharedPreferences.edit {
             putBoolean(Preferences.ShowTimerWhenMinimized.key, isShown)
         }
+    }
+
+    fun setShowShifters(shown: Boolean) {
+        showShifters.value = shown
+        sharedPreferences.edit { putBoolean(Preferences.ShowShifters.key, shown) }
+    }
+
+    fun setShifterInset(inset: Float) {
+        val normalized = com.spop.poverlay.overlay.normalizedShifterInset(inset)
+        shifterInset.value = normalized
+        sharedPreferences.edit { putFloat(Preferences.ShifterInset.key, normalized) }
     }
 
     fun setBleTxEnabled(enabled: Boolean) {
@@ -90,6 +111,20 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         mutableBleFtmsDeviceName.value = name
         sharedPreferences.edit {
             putString(Preferences.BleFtmsDeviceName.key, name)
+        }
+    }
+
+    fun setAntPlusTxEnabled(enabled: Boolean) {
+        mutableAntPlusTxEnabled.value = enabled
+        sharedPreferences.edit {
+            putBoolean(Preferences.AntPlusTxEnabled.key, enabled)
+        }
+    }
+
+    fun setAutoStartOnBoot(enabled: Boolean) {
+        mutableAutoStartOnBoot.value = enabled
+        sharedPreferences.edit {
+            putBoolean(Preferences.AutoStartOnBoot.key, enabled)
         }
     }
 
@@ -123,6 +158,9 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
     }
 
     private fun updateFromSharedPrefs() {
+        showShifters.value = sharedPreferences.getBoolean(Preferences.ShowShifters.key, true)
+        shifterInset.value = com.spop.poverlay.overlay.normalizedShifterInset(
+            sharedPreferences.getFloat(Preferences.ShifterInset.key, 0f))
         mutableShowTimerWhenMinimized.value =
             sharedPreferences
                 .getBoolean(Preferences.ShowTimerWhenMinimized.key, true)
@@ -138,6 +176,13 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         mutableBleFtmsDeviceName.value =
             sharedPreferences
                 .getString(Preferences.BleFtmsDeviceName.key, "Grupetto FTMS") ?: "Grupetto FTMS"
+
+        mutableAntPlusTxEnabled.value =
+            sharedPreferences
+                .getBoolean(Preferences.AntPlusTxEnabled.key, false)
+
+        mutableAutoStartOnBoot.value =
+            sharedPreferences.getBoolean(Preferences.AutoStartOnBoot.key, false)
 
         // Ensure a serial number exists and keep it in memory
         val existingSerial = sharedPreferences.getString(Preferences.SerialNumber.key, null)

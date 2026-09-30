@@ -42,15 +42,29 @@ class CyclingSpeedAndCadenceService(server: BleServer) : BaseBleService(server) 
         )
     }
 
+    private val sensorLocationCharacteristic = BluetoothGattCharacteristic(
+        CyclingSpeedAndCadenceConstants.SensorLocationUUID,
+        BluetoothGattCharacteristic.PROPERTY_READ,
+        BluetoothGattCharacteristic.PERMISSION_READ
+    ).apply {
+        value = byteArrayOf(CyclingSpeedAndCadenceConstants.SensorLocation.RearWheel.toByte())
+    }
+
+    // Reused scratch buffer (max size: 1 flags + 6 wheel + 4 crank), to avoid allocating a
+    // fresh ArrayList<Byte>/array every tick. setValue() still needs an exact-length array,
+    // so a small copyOf() per call remains, but the boxed-Byte allocations are gone.
+    private val measurementBuffer = ByteArray(11)
+
     override val service = BluetoothGattService(
         CyclingSpeedAndCadenceConstants.ServiceUUID,
         BluetoothGattService.SERVICE_TYPE_PRIMARY
     ).apply {
         addCharacteristic(measurementCharacteristic)
         addCharacteristic(featureCharacteristic)
+        addCharacteristic(sensorLocationCharacteristic)
     }
 
-    override fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float) {
+    override fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float, incline: Float) {
         // Build measurement from server's shared counters
         val hasWheel = server.cscLastWheelEvtTime != 0 || server.cscCumulativeWheelRev != 0L
         val hasCrank = server.cscLastCrankEvtTime != 0 || server.cscCumulativeCrankRev != 0
@@ -59,28 +73,32 @@ class CyclingSpeedAndCadenceService(server: BleServer) : BaseBleService(server) 
         if (hasWheel) flags = flags or CyclingSpeedAndCadenceConstants.MeasurementFlags.WheelRevolutionDataPresent
         if (hasCrank) flags = flags or CyclingSpeedAndCadenceConstants.MeasurementFlags.CrankRevolutionDataPresent
 
-        val bytes = ArrayList<Byte>(1 + (if (hasWheel) 6 else 0) + (if (hasCrank) 4 else 0))
-        bytes.add(flags.toByte())
+        var offset = 0
+        measurementBuffer[offset++] = flags.toByte()
         if (hasWheel) {
             val wheelRevs = server.cscCumulativeWheelRev
             val wheelTime = server.cscLastWheelEvtTime
-            bytes.add((wheelRevs and 0xFF).toByte())
-            bytes.add(((wheelRevs shr 8) and 0xFF).toByte())
-            bytes.add(((wheelRevs shr 16) and 0xFF).toByte())
-            bytes.add(((wheelRevs shr 24) and 0xFF).toByte())
-            bytes.add((wheelTime and 0xFF).toByte())
-            bytes.add(((wheelTime shr 8) and 0xFF).toByte())
+            measurementBuffer[offset++] = (wheelRevs and 0xFF).toByte()
+            measurementBuffer[offset++] = ((wheelRevs shr 8) and 0xFF).toByte()
+            measurementBuffer[offset++] = ((wheelRevs shr 16) and 0xFF).toByte()
+            measurementBuffer[offset++] = ((wheelRevs shr 24) and 0xFF).toByte()
+            measurementBuffer[offset++] = (wheelTime and 0xFF).toByte()
+            measurementBuffer[offset++] = ((wheelTime shr 8) and 0xFF).toByte()
         }
         if (hasCrank) {
             val crankRevs = server.cscCumulativeCrankRev
             val crankTime = server.cscLastCrankEvtTime
-            bytes.add((crankRevs and 0xFF).toByte())
-            bytes.add(((crankRevs shr 8) and 0xFF).toByte())
-            bytes.add((crankTime and 0xFF).toByte())
-            bytes.add(((crankTime shr 8) and 0xFF).toByte())
+            measurementBuffer[offset++] = (crankRevs and 0xFF).toByte()
+            measurementBuffer[offset++] = ((crankRevs shr 8) and 0xFF).toByte()
+            measurementBuffer[offset++] = (crankTime and 0xFF).toByte()
+            measurementBuffer[offset++] = ((crankTime shr 8) and 0xFF).toByte()
         }
-        measurementCharacteristic.setValue(bytes.toByteArray())
+        measurementCharacteristic.setValue(measurementBuffer.copyOf(offset))
         server.notifyDirConCharacteristicChanged(measurementCharacteristic)
+        server.logBleDebug(
+            "BLE CSC notify flags=0x${flags.toString(16)} wheelRev=${server.cscCumulativeWheelRev} " +
+                "crankRev=${server.cscCumulativeCrankRev} payloadLen=$offset devices=${connectedDevices.size}"
+        )
 
         for (device in connectedDevices) {
             server.notifyCharacteristicChanged(device, measurementCharacteristic, false)

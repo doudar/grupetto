@@ -1,13 +1,10 @@
 package com.spop.poverlay
 
 import android.os.Build
-import android.text.format.DateUtils
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -21,14 +18,9 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Favorite
-import com.spop.poverlay.releases.Release
 import com.spop.poverlay.sensor.heartrate.HeartRateDevice
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
-import com.spop.poverlay.ui.theme.ErrorColor
 import kotlin.math.max
-import kotlin.math.min
 
 private data class UiScale(
                 val value: Float
@@ -39,380 +31,354 @@ private data class UiScale(
 
 @Composable
 fun ConfigurationPage(viewModel: ConfigurationViewModel) {
-    val showPermissionInfo by remember { viewModel.showPermissionInfo }
-    val latestRelease by remember { viewModel.latestRelease }
+    val permission by viewModel.showPermissionInfo
+    val release by viewModel.latestRelease
+    val boot by viewModel.autoStartOnBoot.collectAsStateWithLifecycle()
+    val timer by viewModel.showTimerWhenMinimized.collectAsStateWithLifecycle()
+    val ble by viewModel.bleTxEnabled.collectAsStateWithLifecycle()
+    val dircon by viewModel.dirConEnabled.collectAsStateWithLifecycle()
+    val ant by viewModel.antPlusTxEnabled.collectAsStateWithLifecycle()
+    val running by viewModel.isOverlayRunning.collectAsStateWithLifecycle()
+    val background by viewModel.backgroundLocationGranted.collectAsStateWithLifecycle()
+    val hr by viewModel.hrConnectedDevice.collectAsStateWithLifecycle()
+    val discovered by viewModel.hrDiscoveredDevices.collectAsStateWithLifecycle()
+    val saved by viewModel.hrSavedDevices.collectAsStateWithLifecycle()
+    val scanning by viewModel.hrIsScanning.collectAsStateWithLifecycle()
+    val match by viewModel.hrMatchByName.collectAsStateWithLifecycle()
+    val bike by viewModel.bikeControlState.collectAsStateWithLifecycle()
+    val showShifters by viewModel.showShifters.collectAsStateWithLifecycle()
+    val shifterInset by viewModel.shifterInset.collectAsStateWithLifecycle()
+    val watts by viewModel.livePower.collectAsStateWithLifecycle(initialValue = Float.NaN)
+    val cadence by viewModel.liveCadence.collectAsStateWithLifecycle(initialValue = Float.NaN)
+    val resistance by viewModel.liveResistance.collectAsStateWithLifecycle(initialValue = Float.NaN)
+    val speed by viewModel.liveSpeed.collectAsStateWithLifecycle(initialValue = Float.NaN)
+    val incline by viewModel.liveIncline.collectAsStateWithLifecycle(initialValue = Float.NaN)
+    val bpm by HeartRateManager.heartRate.collectAsStateWithLifecycle()
+    val meter by viewModel.powerMeterDevice.collectAsStateWithLifecycle()
+    val externalWatts by viewModel.powerMeterReading.collectAsStateWithLifecycle()
+    var dialog by remember { mutableStateOf<String?>(null) }
+    var previewShifters by remember { mutableStateOf(false) }
+    var developerTaps by remember { mutableStateOf(0) }
+    var lastDeveloperTap by remember { mutableStateOf(0L) }
+    Box(Modifier.fillMaxSize().padding(16.dp)) {
+        if (permission) {
+            Column(Modifier.align(Alignment.Center)) {
+                PermissionPage(viewModel::onGrantPermissionClicked, UiScale(.7f))
+            }
+        } else {
+            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Grupetto", fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                            Text("  /  RIDE CONSOLE", color = Color(0xFF34D399), fontSize = 11.sp, letterSpacing = 1.sp)
+                            bike.externalControl?.let {
+                                Spacer(Modifier.width(12.dp))
+                                ExternalControlFlag(it)
+                            }
+                        }
+                        Text(viewModel.emulatedModel?.let { "${it.label} emulation · Simulated data · Radios off" }
+                            ?: "Your ride, connected", color = Color(0xFF9EAEC0), fontSize = 14.sp)
+                    }
+                    Button(viewModel::onStartServiceClicked, Modifier.heightIn(min = 48.dp)) {
+                        Text(if (running) "Restart overlay" else "Start overlay")
+                    }
+                    TextButton(viewModel::onQuitClicked, Modifier.padding(start = 12.dp)) { Text("Quit") }
+                }
+                Row(Modifier.fillMaxWidth().height(58.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (viewModel.isTread) {
+                        LiveMetric("SPEED", displayMetric(speed, 1), "mph", Color(0xFF60A5FA), Modifier.weight(1f))
+                        LiveMetric("INCLINE", displayMetric(incline, 1), "%", Color(0xFF34D399), Modifier.weight(1f))
+                    } else {
+                        LiveMetric("POWER", displayMetric(watts), "W", Color(0xFFFBBF24), Modifier.weight(1f))
+                        LiveMetric("CADENCE", displayMetric(cadence), "rpm", Color(0xFF34D399), Modifier.weight(1f))
+                        LiveMetric("RESISTANCE", displayMetric(resistance), "%", Color(0xFF60A5FA), Modifier.weight(1f))
+                    }
+                    LiveMetric("HEART RATE", bpm?.toString() ?: "—", "bpm", Color(0xFFFB7185), Modifier.weight(1f))
+                }
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingsTile(if (running) "Overlay · Running" else "Overlay · Ready", Modifier.weight(1f).fillMaxHeight(), Color(0xFF34D399)) {
+                        SettingSwitch("Start on boot", boot, viewModel::onAutoStartOnBootClicked)
+                        SettingSwitch("Timer when minimized", timer, viewModel::onShowTimerWhenMinimizedClicked)
+                    }
+                    SettingsTile("Broadcast connections", Modifier.weight(1f).fillMaxHeight(), Color(0xFF60A5FA)) {
+                        ConnectionSummary("Bluetooth", if (viewModel.isPreview) "Preview" else if (ble) "On · Grupetto" else "Off", ble)
+                        ConnectionSummary("Network", if (viewModel.isPreview) "Preview" else if (dircon) "On · DirCon" else "Off", dircon)
+                        if (viewModel.antPlusSupported) ConnectionSummary("ANT+", if (viewModel.isPreview) "Preview" else if (ant) "On · IDs 1 / 2 / 3" else "Off", ant)
+                        Spacer(Modifier.weight(1f))
+                        TileActionButton("Manage connections", { dialog = "connections" })
+                    }
+                }
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingsTile("External Sensors", Modifier.weight(1f).fillMaxHeight(), Color(0xFFFB7185)) {
+                        SensorSummary("Heart rate", hr?.let { it.name ?: it.address } ?: "Not connected",
+                            bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185))
+                        SensorSummary("Power meter", meter?.let { it.name ?: it.address } ?: "Using built-in power",
+                            externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", Color(0xFFFBBF24))
+                        Spacer(Modifier.weight(1f))
+                        TileActionButton("Pair & manage sensors", { dialog = "sensors" })
+                    }
+                    if (bike.connected) {
+                        SettingsTile("Trainer control", Modifier.weight(1f).fillMaxHeight(), Color(0xFFFBBF24)) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text(when (bike.mode) {
+                                    com.spop.poverlay.control.ControlMode.Erg -> "ERG · ${bike.targetWatts} W"
+                                    com.spop.poverlay.control.ControlMode.Simulation -> "Sim · ${"%.1f".format(java.util.Locale.US, bike.targetIncline)}%"
+                                    else -> "Manual · ${bike.targetResistance}"
+                                }, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6EE7B7))
+                                Spacer(Modifier.weight(1f))
+                                Text(if (externalWatts != null) "EXTERNAL POWER" else "BUILT-IN POWER", fontSize = 10.sp, color = Color(0xFF9EAEC0))
+                            }
+                            Text(when (bike.mode) {
+                                com.spop.poverlay.control.ControlMode.Erg -> "Shift ${bike.wattsPerShift} W   ·   Gain ${"%.3f".format(java.util.Locale.US, bike.gain)}"
+                                com.spop.poverlay.control.ControlMode.Simulation -> "Shift ${bike.shiftSize} pts   ·   ${"%.1f".format(java.util.Locale.US, bike.inclineSensitivity)} pts / 1% incline"
+                                else -> "Shift ${bike.shiftSize} pts"
+                            },
+                                fontSize = 13.sp, lineHeight = 17.sp, color = Color(0xFF9EAEC0))
+                            Text(bike.message, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Spacer(Modifier.weight(1f))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TileActionButton("Modes & tuning", { dialog = "bike" }, Modifier.weight(1f))
+                                OutlinedButton(viewModel::stopBikeControl, modifier = Modifier.height(48.dp),
+                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF52728F)),
+                                    colors = ButtonDefaults.outlinedButtonColors(backgroundColor = Color.Transparent, contentColor = Color(0xFFE6F3FF))) {
+                                    Text("Manual", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+                    } else {
+                        SettingsTile("Device & app", Modifier.weight(1f).fillMaxHeight(), Color(0xFFA78BFA)) {
+                            Text(if (viewModel.isTread) "Tread · Speed & incline" else "Bike · Live telemetry", fontSize = 18.sp, lineHeight = 22.sp)
+                            Text("Model ${Build.MODEL}   ·   Android ${Build.VERSION.RELEASE}", fontSize = 13.sp, lineHeight = 17.sp, color = Color(0xFF9EAEC0))
+                            Text(if (externalWatts != null) "Power source: external meter" else "Power source: built-in sensors", fontSize = 13.sp, lineHeight = 17.sp)
+                            Spacer(Modifier.weight(1f))
+                            TileActionButton("Version & updates", { dialog = "about" })
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Grupetto ${BuildConfig.VERSION_NAME}", fontSize = 12.sp, color = Color(0xFF9EAEC0),
+                        modifier = Modifier.weight(1f).clickable {
+                            val now = android.os.SystemClock.elapsedRealtime()
+                            developerTaps = if (now - lastDeveloperTap > 2000) 1 else developerTaps + 1
+                            lastDeveloperTap = now
+                            if (developerTaps >= 5) { developerTaps = 0; dialog = "developer" }
+                        }.padding(vertical = 8.dp))
+                    TextButton({ dialog = "about" }, Modifier.height(32.dp), contentPadding = PaddingValues(0.dp)) {
+                        Text(if (release?.isCurrentlyInstalled == false) "New Version Available" else "About & updates", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+    when (dialog) {
+        "sensors" -> SettingsDialog("External Sensors", { dialog = null }) {
+            SensorSummary("Heart rate", hr?.let { it.name ?: it.address } ?: "Pair a heart-rate monitor",
+                bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185))
+            OutlinedButton({ dialog = "heart" }, Modifier.fillMaxWidth()) { Text("Heart-rate monitors & zones") }
+            Divider(Modifier.padding(vertical = 12.dp))
+            SensorSummary("Power meter", meter?.let { it.name ?: it.address } ?: "Use an external Cycling Power sensor",
+                externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", Color(0xFFFBBF24))
+            OutlinedButton({ dialog = "power" }, Modifier.fillMaxWidth()) { Text("Pair & manage power meters") }
+            Text("External watts are used for display, broadcasting, and ERG. Changing or losing the source stops ERG until restarted.",
+                fontSize = 13.sp, color = Color(0xFF9EAEC0))
+        }
+        "power" -> PowerMeterDialog(viewModel) { dialog = null }
+        "developer" -> SettingsDialog("Developer · Model emulation", { dialog = null }) {
+            Text("Emulation uses simulated sensors and motor control. Broadcasts are disabled. Selecting a model restarts Grupetto.",
+                fontSize = 14.sp, color = Color(0xFF9EAEC0))
+            TextButton({ viewModel.emulateModel(null) }, Modifier.fillMaxWidth()) {
+                Text(if (viewModel.emulatedModel == null) "✓ Detected hardware" else "Use detected hardware")
+            }
+            com.spop.poverlay.sensor.interfaces.EmulatedModel.values().forEach { model ->
+                TextButton({ viewModel.emulateModel(model) }, Modifier.fillMaxWidth()) {
+                    Text((if (viewModel.emulatedModel == model) "✓ " else "") + model.label)
+                }
+            }
+        }
+        "connections" -> SettingsDialog("Connections", { dialog = null }) {
+            SettingSwitch("Bluetooth FTMS", ble, viewModel::onBleTxEnabledClicked)
+            SettingSwitch("Network / DirCon", dircon, viewModel::onDirConEnabledClicked)
+            Text("Bluetooth name: Grupetto", fontSize = 14.sp, color = Color(0xFF9EAEC0))
+            if (boot && !background) Text("Allow location all the time in Android settings for sensor reconnection after boot.",
+                fontSize = 12.sp, color = Color(0xFFFBBF24))
+            if (viewModel.antPlusSupported) {
+                Divider(Modifier.padding(vertical = 12.dp))
+                SettingSwitch("ANT+ broadcast", ant, viewModel::onAntPlusTxEnabledClicked)
+                Text("ANT+ sensor IDs: power 1 · speed/cadence 2 · HR 3", fontSize = 14.sp)
+            }
+        }
+        "bike" -> if (bike.connected) SettingsDialog("Bike+ / CrossTrainer", { dialog = null }) {
+            var tab by remember { mutableStateOf(0) }
+            TabRow(tab, backgroundColor = Color.Transparent) {
+                Tab(tab == 0, { tab = 0 }, text = { Text("Trainer") })
+                Tab(tab == 1, { tab = 1 }, text = { Text("Shifters") })
+            }
+            Spacer(Modifier.height(8.dp))
+            if (tab == 0) TrainerControls(bike, viewModel::startErg, viewModel::startSimulation,
+                viewModel::stopBikeControl, viewModel::setBikeResistance, viewModel::setBikeTuning)
+            else ShifterSettings(showShifters, shifterInset, viewModel::setShowShifters, viewModel::setShifterInset,
+                onPreview = { previewShifters = it })
+        }
+        "heart" -> HeartRateManagerDialog(hr, discovered, saved, scanning, match,
+            viewModel::startHeartRateDiscovery, viewModel::stopHeartRateDiscovery,
+            viewModel::connectHeartRateDevice, viewModel::disconnectHeartRateDevice,
+            viewModel::forgetHeartRateDevice, viewModel::setHrMatchByName) { dialog = null }
+        "about" -> SettingsDialog("About Grupetto", { dialog = null }) {
+            Text("Version ${BuildConfig.VERSION_NAME} · Android ${Build.VERSION.RELEASE}")
+            Text("Device: ${Build.MODEL}", fontSize = 14.sp)
+            Spacer(Modifier.height(16.dp))
+            val current = release
+            Text(current?.let { if (it.isCurrentlyInstalled) "You're up to date" else "Available: ${it.friendlyName}" }
+                ?: "Couldn't check for updates")
+            if (current != null) TextButton({ viewModel.onClickedRelease(current) }) { Text("View release") }
+            Text("Bike+ ERG work based on dwj300's contribution (PR #50).", fontSize = 14.sp)
+        }
+    }
+    ShifterPositionPreview(dialog == "bike" && bike.connected && previewShifters, shifterInset)
+}
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val widthScale = maxWidth.value / 1200f
-        val heightScale = maxHeight.value / 800f
-        val rawScale = min(widthScale, heightScale)
-        val uiScale = UiScale(max(0.58f, min(rawScale, 1.15f)))
+@Composable
+private fun SettingsTile(title: String, modifier: Modifier, accent: Color = Color(0xFF34D399), content: @Composable ColumnScope.() -> Unit) {
+    Card(modifier, shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+        backgroundColor = Color(0xFF19232F), border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = .25f)), elevation = 0.dp) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text(title, fontSize = 17.sp, lineHeight = 22.sp, color = accent, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            content()
+        }
+    }
+}
 
-        Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-        ) {
-            if (showPermissionInfo) {
-                PermissionPage(
-                        onClickedGrantPermission = viewModel::onGrantPermissionClicked,
-                        uiScale = uiScale
-                )
-            } else {
-                val timerShownWhenMinimized by
-                        viewModel.showTimerWhenMinimized.collectAsStateWithLifecycle(
-                                initialValue = true
-                        )
-                val bleTxEnabled by
-                        viewModel.bleTxEnabled.collectAsStateWithLifecycle(initialValue = false)
-                val dirConEnabled by
-                        viewModel.dirConEnabled.collectAsStateWithLifecycle(initialValue = true)
-                val bleFtmsDeviceName by
-                        viewModel.bleFtmsDeviceName.collectAsStateWithLifecycle(
-                                initialValue = "Grupetto FTMS"
-                        )
-                val hrConnectedDevice by
-                        viewModel.hrConnectedDevice.collectAsStateWithLifecycle(initialValue = null)
-                val hrDiscoveredDevices by
-                        viewModel.hrDiscoveredDevices.collectAsStateWithLifecycle(initialValue = emptyList())
-                val hrSavedDevices by
-                        viewModel.hrSavedDevices.collectAsStateWithLifecycle(initialValue = emptyList())
-                val hrIsScanning by
-                        viewModel.hrIsScanning.collectAsStateWithLifecycle(initialValue = false)
-                val hrMatchByName by
-                        viewModel.hrMatchByName.collectAsStateWithLifecycle(initialValue = false)
-                val isOverlayRunning by
-                        viewModel.isOverlayRunning.collectAsStateWithLifecycle(initialValue = false)
-                StartServicePage(
-                        timerShownWhenMinimized,
-                        viewModel::onShowTimerWhenMinimizedClicked,
-                        bleTxEnabled,
-                        viewModel::onBleTxEnabledClicked,
-                        dirConEnabled,
-                        viewModel::onDirConEnabledClicked,
-                        bleFtmsDeviceName,
-                        hrConnectedDevice,
-                        hrDiscoveredDevices,
-                        hrSavedDevices,
-                        hrIsScanning,
-                        hrMatchByName,
-                        viewModel::startHeartRateDiscovery,
-                        viewModel::stopHeartRateDiscovery,
-                        viewModel::connectHeartRateDevice,
-                        viewModel::disconnectHeartRateDevice,
-                        viewModel::forgetHeartRateDevice,
-                        viewModel::setHrMatchByName,
-                        isOverlayRunning,
-                        uiScale,
-                        viewModel::onStartServiceClicked,
-                        viewModel::onQuitClicked,
-                        viewModel::onClickedRelease,
-                        latestRelease
-                )
+@Composable
+private fun TileActionButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier.fillMaxWidth()) {
+    Button(onClick, modifier.height(48.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF52728F)),
+        colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF2A4056), contentColor = Color(0xFFE6F3FF)),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
+        Text(label, fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun SettingSwitch(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), fontSize = 16.sp)
+        Switch(checked, onChange)
+    }
+}
+
+private fun displayMetric(value: Float, decimals: Int = 0): String =
+    if (value.isFinite()) String.format(java.util.Locale.US, "%.$decimals" + "f", value) else "—"
+
+@Composable
+private fun LiveMetric(label: String, value: String, unit: String, accent: Color, modifier: Modifier) {
+    Surface(modifier.fillMaxHeight(), color = Color(0xFF111C27),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) {
+            Text(label, fontSize = 10.sp, lineHeight = 14.sp, letterSpacing = 1.sp, color = Color(0xFF9EAEC0))
+            Row {
+                Text(value, fontSize = 25.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold,
+                    color = accent, modifier = Modifier.alignByBaseline())
+                Text(" $unit", fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFF9EAEC0),
+                    modifier = Modifier.alignByBaseline())
             }
         }
     }
 }
 
 @Composable
-private fun StartServicePage(
-        timerShownWhenMinimized: Boolean,
-        onTimerShownWhenMinimizedToggled: (Boolean) -> Unit,
-        bleTxEnabled: Boolean,
-        onBleTxEnabledToggled: (Boolean) -> Unit,
-        dirConEnabled: Boolean,
-        onDirConEnabledToggled: (Boolean) -> Unit,
-        bleFtmsDeviceName: String,
-        hrConnectedDevice: HeartRateDevice?,
-        hrDiscoveredDevices: List<HeartRateDevice>,
-        hrSavedDevices: List<HeartRateDevice>,
-        hrIsScanning: Boolean,
-        hrMatchByName: Boolean,
-        onStartHeartRateDiscovery: () -> Unit,
-        onStopHeartRateDiscovery: () -> Unit,
-        onConnectHeartRateDevice: (HeartRateDevice) -> Unit,
-        onDisconnectHeartRateDevice: () -> Unit,
-        onForgetHeartRateDevice: (String) -> Unit,
-        onSetHrMatchByName: (Boolean) -> Unit,
-        isOverlayRunning: Boolean,
-        uiScale: UiScale,
-        onClickedStartOverlay: () -> Unit,
-        onClickedQuitApp: () -> Unit,
-        onClickedRelease: (Release) -> Unit,
-        latestRelease: Release?
-) {
-    var showHeartRateDialog by remember { mutableStateOf(false) }
+private fun ConnectionSummary(name: String, detail: String, enabled: Boolean) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(name, fontSize = 13.sp, lineHeight = 18.sp, color = Color(0xFFBAC6D3))
+        Text(detail, fontSize = 13.sp, lineHeight = 18.sp, color = if (enabled) Color(0xFF6EE7B7) else Color(0xFF718096))
+    }
+}
 
-    val contentWidth = 900.dp
-    val cardPadding = uiScale.dp(14f)
-    val cardColor = Color(0xFF1E1E1E)
-    val headingColor = Color(0xFFF2F2F2)
-    val bodyColor = Color(0xFFD0D0D0)
-    val accentColor = Color(0xFF4DA3FF)
-    val hrStatus = hrConnectedDevice?.let { "Connected to ${it.name ?: it.address}" } ?: "Disconnected"
+@Composable
+private fun SensorSummary(label: String, name: String, value: String, accent: Color) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(label, fontSize = 13.sp, lineHeight = 16.sp, color = Color(0xFFBAC6D3))
+            Text(name, fontSize = 11.sp, lineHeight = 14.sp, color = Color(0xFF8796A8), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text(value, color = accent, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
 
-    CompositionLocalProvider(
-            LocalTextStyle provides LocalTextStyle.current.copy(fontSize = uiScale.sp(16f))
-    ) {
-        Column(
-                modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = uiScale.dp(16f))
-                        .widthIn(max = contentWidth),
-                horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-        Text(
-                text = "Grupetto",
-                fontSize = uiScale.sp(40f),
-                fontWeight = FontWeight.Bold
-        )
-        Text(
-                text = "Overlay for Peloton metrics",
-                fontSize = uiScale.sp(18f),
-                color = bodyColor
-        )
-        Spacer(modifier = Modifier.height(uiScale.dp(16f)))
-
-        Card(
-                modifier = Modifier.fillMaxWidth(),
-                backgroundColor = cardColor,
-                elevation = uiScale.dp(4f)
-        ) {
-            Column(modifier = Modifier.padding(cardPadding)) {
-                Text("Overlay", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
-                Spacer(modifier = Modifier.height(uiScale.dp(8f)))
-                Button(
-                        onClick = onClickedStartOverlay,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(backgroundColor = accentColor)
-                ) {
-                    Text(
-                            text = if (isOverlayRunning) "Restart Overlay" else "Start Overlay",
-                            fontSize = uiScale.sp(18f),
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                    )
+@Composable
+private fun PowerMeterDialog(viewModel: ConfigurationViewModel, onDismiss: () -> Unit) {
+    val connected by viewModel.powerMeterDevice.collectAsStateWithLifecycle()
+    val reading by viewModel.powerMeterReading.collectAsStateWithLifecycle()
+    val status by viewModel.powerMeterStatus.collectAsStateWithLifecycle()
+    val discovered by viewModel.powerMeterDiscovered.collectAsStateWithLifecycle()
+    val saved by viewModel.powerMeterSaved.collectAsStateWithLifecycle()
+    val scanning by viewModel.powerMeterScanning.collectAsStateWithLifecycle()
+    var tab by remember { mutableStateOf(0) }
+    var page by remember { mutableStateOf(0) }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        viewModel.managePowerMeters(true)
+        onDispose { viewModel.managePowerMeters(false) }
+    }
+    SettingsDialog("External Sensors · Power", onDismiss) {
+        SensorSummary("Power meter",
+            connected?.let { it.name ?: it.address } ?: status,
+            "${reading?.watts?.coerceAtLeast(0) ?: "—"} W", Color(0xFFFBBF24))
+        if (connected != null) Row {
+            TextButton(viewModel::disconnectPowerMeter) { Text("Disconnect") }
+            TextButton({ connected?.let { viewModel.forgetPowerMeter(it.address) } }) { Text("Forget") }
+        }
+        Text(if (viewModel.isPreview) "Model emulation: pairing is disabled" else status,
+            fontSize = 12.sp, color = Color(0xFF9EAEC0))
+        TabRow(tab, backgroundColor = Color.Transparent) {
+            listOf("Discover", "Saved").forEachIndexed { index, name ->
+                Tab(tab == index, { tab = index; page = 0 }, text = { Text(name) })
+            }
+        }
+        val devices = (if (tab == 0) discovered else saved).filter { it.address != connected?.address }
+        val pages = maxOf(1, (devices.size + 1) / 2)
+        val current = page.coerceAtMost(pages - 1)
+        Column(Modifier.height(128.dp).padding(top = 8.dp)) {
+            if (devices.isEmpty()) Text(if (scanning) "Scanning… Wake your power meter by pedaling." else "No power meters found")
+            devices.drop(current * 2).take(2).forEach { device ->
+                Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(device.name ?: "Power meter", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(device.address, fontSize = 12.sp, color = Color(0xFF9EAEC0))
+                    }
+                    TextButton({ viewModel.connectPowerMeter(device) }) { Text("Connect") }
+                    if (tab == 1) TextButton({ viewModel.forgetPowerMeter(device.address) }) { Text("Forget") }
                 }
             }
         }
-        Spacer(modifier = Modifier.height(uiScale.dp(12f)))
-
-        Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(uiScale.dp(12f))
-        ) {
-            Card(
-                    modifier = Modifier.weight(1f),
-                    backgroundColor = cardColor,
-                    elevation = uiScale.dp(4f)
-            ) {
-                Column(modifier = Modifier.padding(cardPadding)) {
-                    Text("Timer Preference", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
-                    Spacer(modifier = Modifier.height(uiScale.dp(8f)))
-                    Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Show timer when minimized", fontSize = uiScale.sp(16f), color = bodyColor)
-                        Switch(
-                                checked = timerShownWhenMinimized,
-                                onCheckedChange = onTimerShownWhenMinimizedToggled,
-                                colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color(0xFF22C55E),
-                                        checkedTrackColor = Color(0xFF22C55E)
-                                )
-                        )
-                    }
-                }
-            }
-
-            Card(
-                    modifier = Modifier.weight(1f),
-                    backgroundColor = cardColor,
-                    elevation = uiScale.dp(4f)
-            ) {
-                Column(modifier = Modifier.padding(cardPadding)) {
-                    Text("Broadcast", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
-                    Spacer(modifier = Modifier.height(uiScale.dp(8f)))
-                    Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("BLE", fontSize = uiScale.sp(16f), color = bodyColor)
-                        Switch(
-                                checked = bleTxEnabled,
-                                onCheckedChange = onBleTxEnabledToggled,
-                                colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color(0xFF22C55E),
-                                        checkedTrackColor = Color(0xFF22C55E)
-                                )
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(uiScale.dp(8f)))
-                    Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("DIRCON WiFi", fontSize = uiScale.sp(16f), color = bodyColor)
-                        Switch(
-                                checked = dirConEnabled,
-                                onCheckedChange = onDirConEnabledToggled,
-                                colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color(0xFF22C55E),
-                                        checkedTrackColor = Color(0xFF22C55E)
-                                )
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(uiScale.dp(8f)))
-                    if (bleTxEnabled || dirConEnabled) {
-                        Text(
-                                text = "Broadcasting as",
-                                fontSize = uiScale.sp(14f),
-                                color = bodyColor
-                        )
-                        Text(
-                                text = bleFtmsDeviceName,
-                                fontSize = uiScale.sp(20f),
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                        )
-                    } else {
-                        Text(
-                                text = "Enable BLE or DIRCON to broadcast bike data to apps like Zwift or TrainerRoad.",
-                                fontSize = uiScale.sp(13f),
-                                color = bodyColor
-                        )
-                    }
-                }
-            }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            TextButton({ page = current - 1 }, enabled = current > 0) { Text("Previous") }
+            Text("${current + 1} / $pages", Modifier.padding(top = 12.dp), fontSize = 13.sp)
+            TextButton({ page = current + 1 }, enabled = current + 1 < pages) { Text("Next") }
         }
-        Spacer(modifier = Modifier.height(uiScale.dp(12f)))
+        Text("A connected meter supplies watts to the overlay, all broadcasts, and ERG. Cadence and resistance still come from the bike.",
+            fontSize = 12.sp, color = Color(0xFF9EAEC0))
+    }
+}
 
-        Card(
-                modifier = Modifier.fillMaxWidth(),
-                backgroundColor = cardColor,
-                elevation = uiScale.dp(4f)
-        ) {
-            Column(modifier = Modifier.padding(cardPadding)) {
-                Text("Heart Rate Monitors", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
-                Spacer(modifier = Modifier.height(uiScale.dp(8f)))
-                OutlinedButton(
-                        onClick = { showHeartRateDialog = true },
-                        modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                                imageVector = Icons.Default.Favorite,
-                                contentDescription = "Heart Rate",
-                                tint = Color.Red
-                        )
-                        Spacer(modifier = Modifier.width(uiScale.dp(10f)))
-                        Text("Manage Heart Rate Monitors")
-                    }
+@Composable
+internal fun SettingsDialog(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    androidx.compose.ui.window.Dialog(onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.widthIn(max = 660.dp).fillMaxWidth(.9f),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp), color = Color(0xFF1B2430), contentColor = Color(0xFFE8EEF5)) {
+            Column(Modifier.padding(24.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, Modifier.weight(1f), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    TextButton(onDismiss) { Text("Done") }
                 }
-                Spacer(modifier = Modifier.height(uiScale.dp(6f)))
-                if (hrConnectedDevice != null) {
-                    Text(
-                            text = "Connected to",
-                            fontSize = uiScale.sp(14f),
-                            color = bodyColor
-                    )
-                    Text(
-                            text = hrConnectedDevice.name ?: hrConnectedDevice.address,
-                            fontSize = uiScale.sp(20f),
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                    )
-                } else {
-                    Text(
-                            text = hrStatus,
-                            fontSize = uiScale.sp(13f),
-                            color = bodyColor,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                    )
-                }
+                Spacer(Modifier.height(8.dp))
+                content()
             }
-        }
-
-        Spacer(modifier = Modifier.height(uiScale.dp(12f)))
-
-        Card(
-                modifier = Modifier.fillMaxWidth(),
-                backgroundColor = cardColor,
-                elevation = uiScale.dp(4f)
-        ) {
-            Column(modifier = Modifier.padding(cardPadding)) {
-                Text("Updates", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
-                Spacer(modifier = Modifier.height(uiScale.dp(8f)))
-                if (latestRelease == null) {
-                    Text("Couldn't check for updates", color = bodyColor)
-                } else {
-                    val formattedDate = DateUtils.getRelativeTimeSpanString(latestRelease.createdAt.time)
-                    val text = if (latestRelease.isCurrentlyInstalled) {
-                        "Up to date: ${latestRelease.tagName} • $formattedDate • ${latestRelease.friendlyName}"
-                    } else {
-                        "New version: ${latestRelease.friendlyName} • $formattedDate"
-                    }
-                    Text(text, color = bodyColor, fontSize = uiScale.sp(16f))
-                    TextButton(onClick = { onClickedRelease(latestRelease) }) {
-                        Text("View release", color = accentColor)
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(uiScale.dp(12f)))
-
-        Card(
-                modifier = Modifier.fillMaxWidth(),
-                backgroundColor = cardColor,
-                elevation = uiScale.dp(4f)
-        ) {
-            Column(modifier = Modifier.padding(cardPadding)) {
-                Text("App Actions", fontSize = uiScale.sp(18f), fontWeight = FontWeight.Bold, color = headingColor)
-                Spacer(modifier = Modifier.height(uiScale.dp(8f)))
-                Button(
-                        onClick = onClickedQuitApp,
-                        colors = ButtonDefaults.buttonColors(backgroundColor = ErrorColor),
-                        modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Quit App", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(uiScale.dp(10f)))
-        Text(
-                "Device: ${Build.DEVICE} • SDK: ${Build.VERSION.RELEASE}",
-                fontSize = uiScale.sp(12f),
-                color = LocalContentColor.current.copy(alpha = .55f)
-        )
         }
     }
-
-    if (showHeartRateDialog) {
-        HeartRateManagerDialog(
-                connectedDevice = hrConnectedDevice,
-                discoveredDevices = hrDiscoveredDevices,
-                savedDevices = hrSavedDevices,
-                isScanning = hrIsScanning,
-                matchByName = hrMatchByName,
-                onStartDiscovery = onStartHeartRateDiscovery,
-                onStopDiscovery = onStopHeartRateDiscovery,
-                onConnectDevice = onConnectHeartRateDevice,
-                onDisconnectConnectedDevice = onDisconnectHeartRateDevice,
-                onForgetDevice = onForgetHeartRateDevice,
-                onSetMatchByName = onSetHrMatchByName,
-                onDismiss = { showHeartRateDialog = false }
-        )
-    }
-
 }
 
 @Composable
@@ -434,348 +400,97 @@ private fun PermissionPage(onClickedGrantPermission: () -> Unit, uiScale: UiScal
 
 @Composable
 private fun HeartRateManagerDialog(
-                connectedDevice: HeartRateDevice?,
-                discoveredDevices: List<HeartRateDevice>,
-                savedDevices: List<HeartRateDevice>,
-                isScanning: Boolean,
-                matchByName: Boolean,
-                onStartDiscovery: () -> Unit,
-                onStopDiscovery: () -> Unit,
-                onConnectDevice: (HeartRateDevice) -> Unit,
-                onDisconnectConnectedDevice: () -> Unit,
-                onForgetDevice: (String) -> Unit,
-                onSetMatchByName: (Boolean) -> Unit,
-                onDismiss: () -> Unit
+    connectedDevice: HeartRateDevice?,
+    discoveredDevices: List<HeartRateDevice>,
+    savedDevices: List<HeartRateDevice>,
+    isScanning: Boolean,
+    matchByName: Boolean,
+    onStartDiscovery: () -> Unit,
+    onStopDiscovery: () -> Unit,
+    onConnectDevice: (HeartRateDevice) -> Unit,
+    onDisconnectConnectedDevice: () -> Unit,
+    onForgetDevice: (String) -> Unit,
+    onSetMatchByName: (Boolean) -> Unit,
+    onDismiss: () -> Unit
 ) {
-        val zone12 = remember { mutableStateOf("") }
-        val zone23 = remember { mutableStateOf("") }
-        val zone34 = remember { mutableStateOf("") }
-        val zone45 = remember { mutableStateOf("") }
-        val cardColor = Color(0xFF1E1E1E)
-        val headingColor = Color(0xFFF2F2F2)
-        val bodyColor = Color(0xFFD0D0D0)
-        val accentColor = Color(0xFF4DA3FF)
-        val currentHeartRate by HeartRateManager.heartRate.collectAsStateWithLifecycle(initialValue = null)
-        val savedZone12 by HeartRateManager.zone12.collectAsStateWithLifecycle(initialValue = null)
-        val savedZone23 by HeartRateManager.zone23.collectAsStateWithLifecycle(initialValue = null)
-        val savedZone34 by HeartRateManager.zone34.collectAsStateWithLifecycle(initialValue = null)
-        val savedZone45 by HeartRateManager.zone45.collectAsStateWithLifecycle(initialValue = null)
-
-        androidx.compose.runtime.LaunchedEffect(savedZone12, savedZone23, savedZone34, savedZone45) {
-                if (zone12.value.isBlank() && savedZone12 != null) zone12.value = savedZone12.toString()
-                if (zone23.value.isBlank() && savedZone23 != null) zone23.value = savedZone23.toString()
-                if (zone34.value.isBlank() && savedZone34 != null) zone34.value = savedZone34.toString()
-                if (zone45.value.isBlank() && savedZone45 != null) zone45.value = savedZone45.toString()
+    var tab by remember { mutableStateOf(0) }
+    var page by remember { mutableStateOf(0) }
+    val bpm by HeartRateManager.heartRate.collectAsStateWithLifecycle()
+    val zone12 by HeartRateManager.zone12.collectAsStateWithLifecycle()
+    val zone23 by HeartRateManager.zone23.collectAsStateWithLifecycle()
+    val zone34 by HeartRateManager.zone34.collectAsStateWithLifecycle()
+    val zone45 by HeartRateManager.zone45.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        onStartDiscovery()
+        HeartRateManager.setManaging(true)
+    }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { onStopDiscovery(); HeartRateManager.setManaging(false) }
+    }
+    SettingsDialog("Heart rate", onDismiss) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(connectedDevice?.name ?: connectedDevice?.address ?: "No monitor connected",
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${bpm ?: "—"} bpm", color = Color(0xFFFB7185))
+            }
+            if (connectedDevice != null) {
+                TextButton(onDisconnectConnectedDevice) { Text("Disconnect") }
+                TextButton({ onForgetDevice(connectedDevice.address) }) { Text("Forget") }
+            }
         }
-
-        fun parseZone(value: String): Int? = value.toIntOrNull()
-        fun updateZones() {
-                HeartRateManager.setHeartRateZones(
-                        parseZone(zone12.value),
-                        parseZone(zone23.value),
-                        parseZone(zone34.value),
-                        parseZone(zone45.value)
-                )
+        Spacer(Modifier.height(8.dp))
+        TabRow(tab, backgroundColor = Color.Transparent) {
+            listOf("Discover", "Saved", "Zones").forEachIndexed { index, label ->
+                Tab(tab == index, { tab = index; page = 0 }, text = { Text(label) })
+            }
         }
-
-        androidx.compose.runtime.LaunchedEffect(Unit) {
-                onStartDiscovery()
-                HeartRateManager.setManaging(true)
-        }
-        androidx.compose.runtime.DisposableEffect(Unit) {
-                onDispose {
-                        onStopDiscovery()
-                        HeartRateManager.setManaging(false)
+        Spacer(Modifier.height(12.dp))
+        if (tab == 2) {
+            Text("Zone boundaries (bpm)", fontWeight = FontWeight.SemiBold)
+            Text("Leave a boundary blank to use the default.", fontSize = 13.sp)
+            val stored = listOf(zone12, zone23, zone34, zone45)
+            val values = remember(zone12, zone23, zone34, zone45) {
+                androidx.compose.runtime.mutableStateListOf(*stored.map { it?.toString() ?: "" }.toTypedArray())
+            }
+            Row(Modifier.fillMaxWidth().padding(vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                values.forEachIndexed { index, value ->
+                    OutlinedTextField(value, { input ->
+                        values[index] = input.filter(Char::isDigit).take(3)
+                        HeartRateManager.setHeartRateZones(values[0].toIntOrNull(), values[1].toIntOrNull(),
+                            values[2].toIntOrNull(), values[3].toIntOrNull())
+                    }, label = { Text("${index + 1} → ${index + 2}") }, singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
                 }
-        }
-
-        CompositionLocalProvider(
-                LocalTextStyle provides LocalTextStyle.current.copy(fontSize = 16.sp)
-        ) {
-        AlertDialog(
-                        onDismissRequest = onDismiss,
-                        backgroundColor = cardColor,
-                        title = { Text("Manage Heart Rate Monitors", color = headingColor) },
-                        text = {
-                                Column(modifier = Modifier.fillMaxWidth()) {
-                                        Card(
-                                                        backgroundColor = Color(0xFF252525),
-                                                        modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                                Column(modifier = Modifier.padding(10.dp)) {
-                                        SectionHeader("Connected")
-                                        if (connectedDevice == null) {
-                                                Text("None", color = bodyColor)
-                                        } else {
-                                                Row(
-                                                                modifier = Modifier.fillMaxWidth(),
-                                                                verticalAlignment = Alignment.CenterVertically,
-                                                                horizontalArrangement = Arrangement.SpaceBetween
-                                                ) {
-                                                         Column(modifier = Modifier.weight(1f)) {
-                                                                 Text(
-                                                                                 text = connectedDevice.name ?: "Unknown",
-                                                                                 fontSize = 16.sp,
-                                                                                 color = headingColor
-                                                                  )
-                                                                  Text(
-                                                                                 text = connectedDevice.address,
-                                                                                 fontSize = 16.sp,
-                                                                                 color = bodyColor
-                                                                  )
-                                                                 Row(
-                                                                                 verticalAlignment = Alignment.CenterVertically
-                                                                 ) {
-                                                                         Icon(
-                                                                                         imageVector = Icons.Default.Favorite,
-                                                                                         contentDescription = "Heart rate",
-                                                                                         tint = Color.Red,
-                                                                                         modifier = Modifier.size(16.dp)
-                                                                         )
-                                                                         Spacer(modifier = Modifier.width(6.dp))
-                                                                         Text(
-                                                                                         text = "${currentHeartRate ?: "--"} bpm",
-                                                                                         fontSize = 16.sp,
-                                                                                         fontWeight = FontWeight.Bold,
-                                                                                         color = headingColor
-                                                                          )
-                                                                 }
-                                                         }
-                                                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                                 TextButton(onClick = onDisconnectConnectedDevice) {
-                                                                         Text("Disconnect", color = accentColor)
-                                                                 }
-                                                                TextButton(onClick = { onForgetDevice(connectedDevice.address) }) {
-                                                                        Text("Forget", color = accentColor)
-                                                                }
-                                                        }
-                                                }
-                                        }
-                                                }
-                                        }
-
-                                        Divider(modifier = Modifier.padding(vertical = 8.dp), color = bodyColor.copy(alpha = 0.25f))
-
-                                        Card(
-                                                        backgroundColor = Color(0xFF252525),
-                                                        modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                                Column(modifier = Modifier.padding(10.dp)) {
-                                        SectionHeader("Discovered")
-                                        if (discoveredDevices.isEmpty()) {
-                                                Text(
-                                                                text = if (isScanning) "Scanning..." else "None",
-                                                                color = bodyColor
-                                                )
-                                        } else {
-                                                discoveredDevices.forEach { device ->
-                                                        HeartRateDeviceRow(
-                                                                        device = device,
-                                                                        actionLabel = "Connect",
-                                                                        onAction = { onConnectDevice(device) },
-                                                                        titleColor = headingColor,
-                                                                        subtitleColor = bodyColor,
-                                                                        actionColor = accentColor
-                                                        )
-                                                }
-                                        }
-                                                }
-                                        }
-
-                                        Divider(modifier = Modifier.padding(vertical = 8.dp), color = bodyColor.copy(alpha = 0.25f))
-
-                                        Card(
-                                                        backgroundColor = Color(0xFF252525),
-                                                        modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                                Column(modifier = Modifier.padding(10.dp)) {
-                                        SectionHeader("Saved")
-                                        val filteredSaved = savedDevices.filter { it.address != connectedDevice?.address }
-                                        if (filteredSaved.isEmpty()) {
-                                                Text("None", color = bodyColor)
-                                        } else {
-                                                filteredSaved.forEach { device ->
-                                                        Row(
-                                                                        modifier = Modifier.fillMaxWidth(),
-                                                                        verticalAlignment = Alignment.CenterVertically,
-                                                                        horizontalArrangement = Arrangement.SpaceBetween
-                                                        ) {
-                                                                Column(modifier = Modifier.weight(1f)) {
-                                                                        Text(
-                                                                                        text = device.name ?: "Unknown",
-                                                                                        fontSize = 16.sp,
-                                                                                        color = headingColor
-                                                                        )
-                                                                        Text(
-                                                                                        text = device.address,
-                                                                                        fontSize = 16.sp,
-                                                                                        color = bodyColor
-                                                                        )
-                                                                }
-                                                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                                        TextButton(onClick = { onConnectDevice(device) }) {
-                                                                                Text("Connect", color = accentColor)
-                                                                        }
-                                                                        TextButton(onClick = { onForgetDevice(device.address) }) {
-                                                                                Text("Forget", color = accentColor)
-                                                                        }
-                                                                }
-                                                        }
-                                                }
-                                        }
-                                                }
-                                        }
-
-                                        Divider(modifier = Modifier.padding(vertical = 8.dp), color = bodyColor.copy(alpha = 0.25f))
-
-                                        Card(
-                                                        backgroundColor = Color(0xFF252525),
-                                                        modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                                Column(modifier = Modifier.padding(10.dp)) {
-                                                        SectionHeader("Connection Options")
-                                                        Row(
-                                                                modifier = Modifier.fillMaxWidth(),
-                                                                verticalAlignment = Alignment.CenterVertically,
-                                                                horizontalArrangement = Arrangement.SpaceBetween
-                                                        ) {
-                                                                Column(modifier = Modifier.weight(1f)) {
-                                                                        Text("Match by name only", fontSize = 16.sp, color = headingColor)
-                                                                        Text(
-                                                                                "Reconnect using device name instead of MAC address. Useful when the MAC changes.",
-                                                                                fontSize = 13.sp,
-                                                                                color = bodyColor
-                                                                        )
-                                                                }
-                                                                Spacer(modifier = Modifier.width(8.dp))
-                                                                Switch(
-                                                                        checked = matchByName,
-                                                                        onCheckedChange = onSetMatchByName,
-                                                                        colors = SwitchDefaults.colors(
-                                                                                checkedThumbColor = Color(0xFF22C55E),
-                                                                                checkedTrackColor = Color(0xFF22C55E)
-                                                                        )
-                                                                )
-                                                        }
-                                                }
-                                        }
-
-                                        Divider(modifier = Modifier.padding(vertical = 8.dp), color = bodyColor.copy(alpha = 0.25f))
-
-                                        Card(
-                                                        backgroundColor = Color(0xFF252525),
-                                                        modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                                Column(modifier = Modifier.padding(10.dp)) {
-                                        SectionHeader("Heart Rate Zone Transitions")
-                                        Row(
-                                                modifier = Modifier.wrapContentWidth(),
-                                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                        ) {
-                                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                        Text("Zone 1-2", fontSize = 16.sp, color = bodyColor)
-                                                        TextField(
-                                                                value = zone12.value,
-                                                                onValueChange = {
-                                                                        zone12.value = it.filter { ch -> ch.isDigit() }
-                                                                        updateZones()
-                                                                },
-                                                                modifier = Modifier.width(72.dp),
-                                                                placeholder = { Text("bpm") },
-                                                                singleLine = true
-                                                        )
-                                                }
-                                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                        Text("Zone 2-3", fontSize = 16.sp, color = bodyColor)
-                                                        TextField(
-                                                                value = zone23.value,
-                                                                onValueChange = {
-                                                                        zone23.value = it.filter { ch -> ch.isDigit() }
-                                                                        updateZones()
-                                                                },
-                                                                modifier = Modifier.width(72.dp),
-                                                                placeholder = { Text("bpm") },
-                                                                singleLine = true
-                                                        )
-                                                }
-                                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                        Text("Zone 3-4", fontSize = 16.sp, color = bodyColor)
-                                                        TextField(
-                                                                value = zone34.value,
-                                                                onValueChange = {
-                                                                        zone34.value = it.filter { ch -> ch.isDigit() }
-                                                                        updateZones()
-                                                                },
-                                                                modifier = Modifier.width(72.dp),
-                                                                placeholder = { Text("bpm") },
-                                                                singleLine = true
-                                                        )
-                                                }
-                                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                        Text("Zone 4-5", fontSize = 16.sp, color = bodyColor)
-                                                        TextField(
-                                                                value = zone45.value,
-                                                                onValueChange = {
-                                                                        zone45.value = it.filter { ch -> ch.isDigit() }
-                                                                        updateZones()
-                                                                },
-                                                                modifier = Modifier.width(72.dp),
-                                                                placeholder = { Text("bpm") },
-                                                                singleLine = true
-                                                        )
-                                                }
-                                        }
-                                                }
-                                        }
-                                }
-                        },
-                        confirmButton = {
-                                Button(
-                                                onClick = onDismiss,
-                                                colors = ButtonDefaults.buttonColors(backgroundColor = accentColor)
-                                ) {
-                                        Text("Close", color = Color.White, fontWeight = FontWeight.Bold)
-                                }
+            }
+        } else {
+            val devices = (if (tab == 0) discoveredDevices else savedDevices)
+                .filter { it.address != connectedDevice?.address }
+            val pages = maxOf(1, (devices.size + 2) / 3)
+            val current = page.coerceAtMost(pages - 1)
+            Column(Modifier.height(180.dp)) {
+                if (devices.isEmpty()) Text(if (tab == 0 && isScanning) "Scanning for monitors…" else "No monitors")
+                devices.drop(current * 3).take(3).forEach { device ->
+                    Row(Modifier.fillMaxWidth().height(60.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(device.name ?: "Unknown monitor", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(device.address, fontSize = 12.sp, color = Color(0xFF9EAEC0))
                         }
-        )
-        }
-}
-
-@Composable
-private fun SectionHeader(title: String) {
-        Text(
-                        text = title,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        color = Color(0xFFF2F2F2)
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-}
-
-@Composable
-private fun HeartRateDeviceRow(
-                device: HeartRateDevice,
-                actionLabel: String,
-                onAction: () -> Unit,
-                titleColor: Color = Color.White,
-                subtitleColor: Color = Color(0xFFD0D0D0),
-                actionColor: Color = Color(0xFF4DA3FF)
-) {
-        Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-                Column(modifier = Modifier.weight(1f)) {
-                        Text(text = device.name ?: "Unknown", fontSize = 16.sp, color = titleColor)
-                        Text(
-                                        text = device.address,
-                                        fontSize = 16.sp,
-                                        color = subtitleColor
-                        )
+                        TextButton({ onConnectDevice(device) }) { Text("Connect") }
+                        if (tab == 1) TextButton({ onForgetDevice(device.address) }) { Text("Forget") }
+                    }
                 }
-                TextButton(onClick = onAction) {
-                        Text(actionLabel, color = actionColor)
-                }
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween) {
+                TextButton({ page = current - 1 }, enabled = current > 0) { Text("Previous") }
+                Text("${current + 1} / $pages", fontSize = 13.sp)
+                TextButton({ page = current + 1 }, enabled = current + 1 < pages) { Text("Next") }
+            }
         }
+        Divider()
+        SettingSwitch("Reconnect by name", matchByName, onSetMatchByName)
+    }
 }

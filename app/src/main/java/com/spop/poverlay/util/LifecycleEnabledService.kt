@@ -12,6 +12,7 @@ import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlin.coroutines.CoroutineContext
 
@@ -21,7 +22,7 @@ import kotlin.coroutines.CoroutineContext
  */
 abstract class LifecycleEnabledService : Service(), LifecycleOwner, SavedStateRegistryOwner, CoroutineScope {
 
-    private val coroutineScope = CoroutineScope(Dispatchers.IO)
+    private val coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override val coroutineContext: CoroutineContext
         get() = coroutineScope.coroutineContext
@@ -61,6 +62,7 @@ abstract class LifecycleEnabledService : Service(), LifecycleOwner, SavedStateRe
     override fun onDestroy() {
         super.onDestroy()
         handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+        handleLifecycleEvent(Lifecycle.Event.ON_STOP)
         handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         coroutineScope.cancel()
     }

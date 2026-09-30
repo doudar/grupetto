@@ -57,17 +57,22 @@ class LiveChart(context: Context, attrs: AttributeSet? = null) : FrameLayout(con
     
     fun setDataset(dataset: Dataset): LiveChart {
         livechart.setDataset(dataset)
-        overlay.setDataset(dataset)
+        // The touch overlay never reads its dataset while disabled, so skip the redundant work.
+        if (!disableTouchOverlay) {
+            overlay.setDataset(dataset)
+        }
         return this
     }
 
     /**
      * Set the Second [dataset] of this chart.
      */
-    
+
     fun setSecondDataset(dataset: Dataset): LiveChart {
         livechart.setSecondDataset(dataset)
-        overlay.setSecondDataset(dataset)
+        if (!disableTouchOverlay) {
+            overlay.setSecondDataset(dataset)
+        }
         return this
     }
 
@@ -237,10 +242,15 @@ class LiveChart(context: Context, attrs: AttributeSet? = null) : FrameLayout(con
         return this
     }
 
+    fun setZoneBands(bands: List<ZoneBand>): LiveChart {
+        livechart.setZoneBands(bands)
+        return this
+    }
+
     /**
      * Draw on chart and bind overlay to dataset.
      */
-    
+
     fun drawDataset() {
         livechart.drawDataset()
         if (!disableTouchOverlay) {

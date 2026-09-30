@@ -13,6 +13,7 @@ import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
 import io.mockk.verify
+import io.mockk.verifyOrder
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.channels.Channel
@@ -41,6 +42,7 @@ class BleServerTest {
         every { sensorInterface.power } returns flowOf(0f)
         every { sensorInterface.cadence } returns flowOf(0f)
         every { sensorInterface.resistance } returns flowOf(0f)
+        every { sensorInterface.incline } returns flowOf(0f)
         timeProvider = FakeTimeProvider()
         // Initialize with default time 0
         timeProvider.currentTime = 0
@@ -156,6 +158,7 @@ class BleServerTest {
         val adapter = mockk<BluetoothAdapter>(relaxed = true)
         val advertiser = mockk<BluetoothLeAdvertiser>(relaxed = true)
         every { bluetoothManager.adapter } returns adapter
+        every { adapter.state } returns BluetoothAdapter.STATE_ON
         every { adapter.bluetoothLeAdvertiser } returns advertiser
         val activeOpens = AtomicInteger(0)
         val maximumActiveOpens = AtomicInteger(0)
@@ -189,6 +192,85 @@ class BleServerTest {
     }
 
     @Test
+    fun `startup requests Grupetto name before registering GATT`() = withStartupAdapter { adapter ->
+        every { adapter.name } returns "PLTN-TTR01"
+        every { adapter.setName("Grupetto") } returns true
+
+        bleServer.start()
+
+        verifyOrder {
+            adapter.setName("Grupetto")
+            bluetoothManager.openGattServer(context, any())
+        }
+    }
+
+    @Test
+    fun `startup leaves an already correct adapter name alone`() = withStartupAdapter { adapter ->
+        every { adapter.name } returns "Grupetto"
+
+        bleServer.start()
+
+        verify(exactly = 0) { adapter.setName(any()) }
+        verify(exactly = 1) { bluetoothManager.openGattServer(context, any()) }
+    }
+
+    @Test
+    fun `rejected rename does not prevent BLE startup`() = withStartupAdapter { adapter ->
+        every { adapter.name } returns "PLTN-TTR01"
+        every { adapter.setName("Grupetto") } returns false
+
+        bleServer.start()
+
+        verify(exactly = 1) { adapter.setName("Grupetto") }
+        verify(exactly = 1) { bluetoothManager.openGattServer(context, any()) }
+    }
+
+    @Test
+    fun `permission revoked during rename does not crash startup`() = withStartupAdapter { adapter ->
+        every { adapter.name } returns "PLTN-TTR01"
+        every { adapter.setName("Grupetto") } throws SecurityException("Permission revoked")
+
+        bleServer.start()
+
+        verify(exactly = 1) { bluetoothManager.openGattServer(context, any()) }
+    }
+
+    private fun withStartupAdapter(test: (BluetoothAdapter) -> Unit) {
+        mockkStatic(ContextCompat::class)
+        every { ContextCompat.checkSelfPermission(context, any()) } returns PackageManager.PERMISSION_GRANTED
+        val adapter = mockk<BluetoothAdapter>(relaxed = true)
+        every { bluetoothManager.adapter } returns adapter
+        every { adapter.state } returns BluetoothAdapter.STATE_ON
+        every { adapter.bluetoothLeAdvertiser } returns mockk(relaxed = true)
+        // Stop at GATT registration so these tests don't need real Android services.
+        every { bluetoothManager.openGattServer(context, any()) } returns null
+        try {
+            test(adapter)
+        } finally {
+            unmockkStatic(ContextCompat::class)
+        }
+    }
+
+    @Test
+    fun `descriptor reads are forwarded to the owning service`() {
+        val device = mockk<android.bluetooth.BluetoothDevice>()
+        val descriptor = mockk<android.bluetooth.BluetoothGattDescriptor>()
+        val service = mockk<BaseBleService>(relaxed = true)
+        val uuid = java.util.UUID.fromString("00001818-0000-1000-8000-00805f9b34fb")
+        every { descriptor.characteristic.service.uuid } returns uuid
+        every { service.service.uuid } returns uuid
+        BleServer::class.java.getDeclaredField("registeredServices").apply {
+            isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            (get(bleServer) as MutableList<BaseBleService>).add(service)
+        }
+
+        bleServer.onDescriptorReadRequest(device, 7, 0, descriptor)
+
+        verify(exactly = 1) { service.onDescriptorReadRequest(device, 7, 0, descriptor) }
+    }
+
+    @Test
     fun `stop closes GATT server without clearing services first`() {
         val gattServer = mockk<BluetoothGattServer>(relaxed = true)
         BleServer::class.java.getDeclaredField("gattServer").apply {
@@ -209,7 +291,7 @@ class BleServerTest {
         every { sensorInterface.speed } returns flowOf(0f)
         val packets = Channel<ByteArray>(Channel.UNLIMITED)
         val service = mockk<BaseBleService>(relaxed = true)
-        every { service.onSensorDataUpdated(any(), any(), any(), any()) } answers {
+        every { service.onSensorDataUpdated(any(), any(), any(), any(), any()) } answers {
             packets.trySend(FitnessMachineData.encode(arg(0), arg(1), arg(2), arg(3)))
             Unit
         }

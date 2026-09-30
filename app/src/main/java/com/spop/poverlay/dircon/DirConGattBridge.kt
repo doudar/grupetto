@@ -19,6 +19,8 @@ interface DirConGattBridge {
     fun services(): List<DirConService>
     fun readCharacteristic(uuid: UUID): ByteArray?
     fun writeCharacteristic(uuid: UUID, value: ByteArray): Boolean
+    fun writeCharacteristic(client: String, uuid: UUID, value: ByteArray): Boolean = writeCharacteristic(uuid, value)
+    fun disconnected(client: String) {}
 }
 
 fun BluetoothGattService.toDirConService(): DirConService =

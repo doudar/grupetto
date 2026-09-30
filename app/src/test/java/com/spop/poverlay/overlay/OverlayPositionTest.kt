@@ -28,6 +28,9 @@ class OverlayPositionTest {
         every { preferences.getFloat(any(), any()) } answers {
             stored[firstArg<String>()] as Float? ?: secondArg<Float>()
         }
+        every { preferences.getBoolean(any(), any()) } answers {
+            stored[firstArg<String>()] as Boolean? ?: secondArg<Boolean>()
+        }
         every { preferences.edit() } returns editor
         every { editor.putFloat(any(), any()) } answers {
             stored[firstArg()] = secondArg<Float>()
@@ -35,6 +38,10 @@ class OverlayPositionTest {
         }
         every { editor.putString(any(), any()) } answers {
             stored[firstArg()] = secondArg<String>()
+            editor
+        }
+        every { editor.putBoolean(any(), any()) } answers {
+            stored[firstArg()] = secondArg<Boolean>()
             editor
         }
     }
@@ -113,6 +120,34 @@ class OverlayPositionTest {
         repository().use { config ->
             assertEquals(0f, config.overlayHorizontalOffset, 0f)
             assertEquals(OverlayLocation.Bottom, config.overlayLocation)
+        }
+    }
+
+    @Test fun `shifter visibility and spacing survive settings and service recreation`() {
+        repository().use { config ->
+            assertEquals(true, config.showShifters.value)
+            assertEquals(0f, config.shifterInset.value, 0f)
+            config.setShowShifters(false)
+            config.setShifterInset(.75f)
+        }
+        repository().use { config ->
+            assertEquals(false, config.showShifters.value)
+            assertEquals(.75f, config.shifterInset.value, 0f)
+            config.setShowShifters(true)
+            config.setShifterInset(2f)
+        }
+        repository().use { config ->
+            assertEquals(true, config.showShifters.value)
+            assertEquals(1f, config.shifterInset.value, 0f)
+        }
+    }
+
+    @Test fun `invalid saved shifter spacing cannot move windows off screen`() {
+        stored[ConfigurationRepository.Preferences.ShifterInset.key] = Float.NaN
+        repository().use { config ->
+            assertEquals(0f, config.shifterInset.value, 0f)
+            config.setShifterInset(-1f)
+            assertEquals(0f, config.shifterInset.value, 0f)
         }
     }
 }

@@ -34,7 +34,8 @@ fun StatCard(
     totalUnit: String? = null,
     color: Color = Color.White,
     onClick: () -> Unit = {},
-    onUnitClick: (() -> Unit)? = null
+    onUnitClick: (() -> Unit)? = null,
+    secondaryValue: String? = null
 ) {
     Column(
         modifier = modifier.clickable { onClick() },
@@ -66,6 +67,16 @@ fun StatCard(
             fontSize = 32.sp,
             fontWeight = FontWeight.Bold
         )
+        if (secondaryValue != null) {
+            Text(
+                text = secondaryValue,
+                color = Color.LightGray,
+                fontSize = 11.sp,
+                lineHeight = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
         // Total and max row
         Row(
             verticalAlignment = Alignment.CenterVertically

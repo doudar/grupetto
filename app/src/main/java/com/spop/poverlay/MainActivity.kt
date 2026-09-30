@@ -14,6 +14,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions
+import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.MaterialTheme
@@ -40,9 +41,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if ((application as GrupettoApplication).emulatedModel != null) {
+            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        }
         viewModel =
             ConfigurationViewModel(
-                application, ConfigurationRepository(applicationContext, this),
+                application, ConfigurationRepository(applicationContext, this,
+                    (application as GrupettoApplication).configurationPreferencesName),
                 ReleaseChecker()
             )
         viewModel.finishActivity.observe(this) {
@@ -62,6 +67,9 @@ class MainActivity : ComponentActivity() {
         }
         viewModel.requestIgnoreBatteryOptimizations.observe(this) {
             requestIgnoreBatteryOptimizations()
+        }
+        viewModel.requestBackgroundLocationPermission.observe(this) {
+            requestBackgroundLocationPermission()
         }
         viewModel.infoPopup.observe(this) {
             Toast.makeText(
@@ -129,7 +137,9 @@ class MainActivity : ComponentActivity() {
             // Explicitly stop long-running components before closing the task so Android won't revive it.
             stopService(Intent(this@MainActivity, OverlayService::class.java))
             HeartRateManager.stop()
+            (application as GrupettoApplication).powerMeterManager.stop()
             (application as GrupettoApplication).bleServer.stop()
+            (application as GrupettoApplication).antPlusServer.stop()
             delay(750L)
             finishAffinity()
             finishAndRemoveTask()
@@ -156,6 +166,11 @@ class MainActivity : ComponentActivity() {
             viewModel.onBatteryOptimizationRequestCompleted()
         }
 
+    private val backgroundLocationPermissionRequest =
+        registerForActivityResult(RequestPermission()) { granted ->
+            viewModel.onBackgroundLocationPermissionResult(granted)
+        }
+
     private fun requestScreenPermission() = Intent(
         "android.settings.action.MANAGE_OVERLAY_PERMISSION",
         Uri.parse("package:${packageName}")
@@ -165,6 +180,17 @@ class MainActivity : ComponentActivity() {
 
     private fun requestBluetoothPermissions(permissions: Array<String>) {
         bluetoothPermissionRequest.launch(permissions)
+    }
+
+    private fun requestBackgroundLocationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11+ grants "Allow all the time" through the app's settings page.
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            backgroundLocationPermissionRequest.launch(
+                android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            )
+        }
     }
 
     private fun requestIgnoreBatteryOptimizations() {

@@ -37,7 +37,7 @@ class HeartRateService(server: BleServer) : BaseBleService(server) {
         addCharacteristic(bodySensorLocationCharacteristic)
     }
 
-    override fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float) {
+    override fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float, incline: Float) {
         val heartRate = HeartRateManager.heartRate.value ?: return
         if (heartRate <= 0) return
 

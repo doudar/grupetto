@@ -1,28 +1,27 @@
 package com.spop.poverlay.overlay
 
-import android.app.Application
 import android.text.format.DateUtils
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
 import com.spop.poverlay.ConfigurationRepository
 import com.spop.poverlay.util.tickerFlow
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlin.coroutines.CoroutineContext
 import kotlin.time.ExperimentalTime
 import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalTime::class)
 open class OverlayTimerViewModel(
-    application: Application,
     private val configurationRepository: ConfigurationRepository,
-    powerFlow: Flow<Float>
-) : AndroidViewModel(application) {
+    powerFlow: Flow<Float>,
+    override val coroutineContext: CoroutineContext,
+) : CoroutineScope {
     companion object {
         // Power threshold to consider the user is actively pedaling (in watts)
         private const val POWER_THRESHOLD = 5f
     }
-    
+
     val showTimerWhenMinimized
         get() = configurationRepository.showTimerWhenMinimized
 
@@ -34,7 +33,7 @@ open class OverlayTimerViewModel(
     // Timer is running when moving
     private val mutableTimerRunning = MutableStateFlow(false)
     val timerPaused = mutableTimerRunning.map { !it }.stateIn(
-        viewModelScope,
+        this,
         SharingStarted.Eagerly,
         true
     )
@@ -48,11 +47,11 @@ open class OverlayTimerViewModel(
         } else {
             "‒ ‒:‒ ‒"
         }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, "‒ ‒:‒ ‒")
+    }.stateIn(this, SharingStarted.Eagerly, "‒ ‒:‒ ‒")
 
     init {
         // Tick every second when timer is running
-        viewModelScope.launch {
+        launch {
             tickerFlow(period = 1.seconds).collect {
                 if (mutableTimerRunning.value) {
                     accumulatedSeconds++
@@ -66,7 +65,7 @@ open class OverlayTimerViewModel(
      * Called by OverlayService to observe movement state
      */
     fun observeMovement(isMoving: StateFlow<Boolean>, sessionReset: StateFlow<Long>) {
-        viewModelScope.launch {
+        launch {
             isMoving.collect { moving ->
                 if (moving) {
                     // Start/resume timer when movement starts
@@ -79,7 +78,7 @@ open class OverlayTimerViewModel(
             }
         }
 
-        viewModelScope.launch {
+        launch {
             sessionReset.drop(1).collect {
                 // Reset timer on session reset (5-minute inactivity)
                 resetTimer()

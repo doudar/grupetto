@@ -2,7 +2,7 @@ package com.spop.poverlay.sensor.v2
 
 import android.os.IBinder
 import android.os.Parcel
-import com.spop.poverlay.sensor.BikeData
+import com.spop.poverlay.sensor.readBikeCoreData
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -33,7 +33,14 @@ class ConsecutiveErrorCounter(private val limit: Int = 5) {
     }
 }
 
-class BikePlusCombinedSensor(private val binder: IBinder) {
+class BikePlusCombinedSensor(
+    private val binder: IBinder,
+    private val onSample: (com.spop.poverlay.control.BikeSample?) -> Unit = {}
+) {
+
+    /** ITitanInterface transaction from dwj300's PR #50. */
+    fun setResistance(resistance: Int): Boolean =
+        threadRunning.get() && writeBikeResistance(binder, resistance)
 
     private val mutablePower = MutableSharedFlow<Float>(
         replay = 1,
@@ -71,19 +78,23 @@ class BikePlusCombinedSensor(private val binder: IBinder) {
                     try {
                         parcel.writeInterfaceToken(SERVICE_ACTION)
                         // Transact code 14 fetches the full BikeData
-                        binder.transact(14, parcel, parcel2, 0)
+                        check(binder.transact(14, parcel, parcel2, 0)) { "Bike+ read transaction rejected" }
                         parcel2.readException()
                         // Skip the first integer
                         parcel2.readInt()
                         
-                        val bikeData = BikeData.CREATOR.createFromParcel(parcel2)
-                        
+                        val bikeData = readBikeCoreData(parcel2)
+
                         // Emit values
                         // Power is divided by 100 in original BikePlusPowerSensor
                         // Note: Property access 'rpm' vs 'RPM' depends on interop, sticking to existing convention
                         mutablePower.tryEmit(bikeData.power.toFloat() / 100f)
                         mutableCadence.tryEmit(bikeData.rpm.toFloat())
                         mutableResistance.tryEmit(bikeData.targetResistance.toFloat())
+                        onSample(com.spop.poverlay.control.BikeSample(
+                            bikeData.power.toFloat() / 100f, bikeData.rpm.toFloat(),
+                            bikeData.targetResistance, android.os.SystemClock.elapsedRealtime()
+                        ))
 
                         errorCounter.reset()
                     } catch (e: Exception) {
@@ -104,6 +115,7 @@ class BikePlusCombinedSensor(private val binder: IBinder) {
                 Timber.e(e, "BikePlusCombinedSensor thread crashed")
             } finally {
                 threadRunning.set(false)
+                onSample(null)
                 Timber.i("BikePlus polling thread stopped")
             }
         }
@@ -111,5 +123,6 @@ class BikePlusCombinedSensor(private val binder: IBinder) {
 
     fun stop() {
         threadRunning.set(false)
+        onSample(null)
     }
 }
