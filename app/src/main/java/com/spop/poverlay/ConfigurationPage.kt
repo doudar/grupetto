@@ -104,7 +104,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         ConnectionSummary("Network", if (viewModel.isPreview) "Preview" else if (dircon) "On · DirCon" else "Off", dircon)
                         if (viewModel.antPlusSupported) ConnectionSummary("ANT+", if (viewModel.isPreview) "Preview" else if (ant) "On · IDs 1 / 2 / 3" else "Off", ant)
                         Spacer(Modifier.weight(1f))
-                        TextButton({ dialog = "connections" }, contentPadding = PaddingValues(0.dp), modifier = Modifier.height(36.dp)) { Text("Manage connections →") }
+                        TileActionButton("Manage connections", { dialog = "connections" })
                     }
                 }
                 Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -114,7 +114,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         SensorSummary("Power meter", meter?.let { it.name ?: it.address } ?: "Using built-in power",
                             externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", Color(0xFFFBBF24))
                         Spacer(Modifier.weight(1f))
-                        TextButton({ dialog = "sensors" }, contentPadding = PaddingValues(0.dp), modifier = Modifier.height(36.dp)) { Text("Pair & manage sensors →") }
+                        TileActionButton("Pair & manage sensors", { dialog = "sensors" })
                     }
                     if (bike.connected) {
                         SettingsTile("Trainer control", Modifier.weight(1f).fillMaxHeight(), Color(0xFFFBBF24)) {
@@ -135,9 +135,14 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                                 fontSize = 13.sp, lineHeight = 17.sp, color = Color(0xFF9EAEC0))
                             Text(bike.message, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Spacer(Modifier.weight(1f))
-                            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                TextButton({ dialog = "bike" }, contentPadding = PaddingValues(0.dp), modifier = Modifier.height(36.dp)) { Text("Modes & tuning →") }
-                                TextButton(viewModel::stopBikeControl, modifier = Modifier.height(36.dp)) { Text("Manual") }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TileActionButton("Modes & tuning", { dialog = "bike" }, Modifier.weight(1f))
+                                OutlinedButton(viewModel::stopBikeControl, modifier = Modifier.height(48.dp),
+                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF52728F)),
+                                    colors = ButtonDefaults.outlinedButtonColors(backgroundColor = Color.Transparent, contentColor = Color(0xFFE6F3FF))) {
+                                    Text("Manual", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                }
                             }
                         }
                     } else {
@@ -146,7 +151,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                             Text("Model ${Build.MODEL}   ·   Android ${Build.VERSION.RELEASE}", fontSize = 13.sp, lineHeight = 17.sp, color = Color(0xFF9EAEC0))
                             Text(if (externalWatts != null) "Power source: external meter" else "Power source: built-in sensors", fontSize = 13.sp, lineHeight = 17.sp)
                             Spacer(Modifier.weight(1f))
-                            TextButton({ dialog = "about" }, contentPadding = PaddingValues(0.dp), modifier = Modifier.height(36.dp)) { Text("Version & updates →") }
+                            TileActionButton("Version & updates", { dialog = "about" })
                         }
                     }
                 }
@@ -227,11 +232,22 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
 private fun SettingsTile(title: String, modifier: Modifier, accent: Color = Color(0xFF34D399), content: @Composable ColumnScope.() -> Unit) {
     Card(modifier, shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
         backgroundColor = Color(0xFF19232F), border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = .25f)), elevation = 0.dp) {
-        Column(Modifier.padding(12.dp)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text(title, fontSize = 17.sp, lineHeight = 22.sp, color = accent, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
             content()
         }
+    }
+}
+
+@Composable
+private fun TileActionButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier.fillMaxWidth()) {
+    Button(onClick, modifier.height(48.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF52728F)),
+        colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF2A4056), contentColor = Color(0xFFE6F3FF)),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
+        Text(label, fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -265,8 +281,8 @@ private fun LiveMetric(label: String, value: String, unit: String, accent: Color
 @Composable
 private fun ConnectionSummary(name: String, detail: String, enabled: Boolean) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(name, fontSize = 13.sp, color = Color(0xFFBAC6D3))
-        Text(detail, fontSize = 13.sp, color = if (enabled) Color(0xFF6EE7B7) else Color(0xFF718096))
+        Text(name, fontSize = 13.sp, lineHeight = 18.sp, color = Color(0xFFBAC6D3))
+        Text(detail, fontSize = 13.sp, lineHeight = 18.sp, color = if (enabled) Color(0xFF6EE7B7) else Color(0xFF718096))
     }
 }
 
