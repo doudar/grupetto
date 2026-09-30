@@ -28,8 +28,6 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.contentDescription
 import com.spop.poverlay.overlay.composables.OverlayMainContent
 import com.spop.poverlay.overlay.composables.OverlayMinimizedContent
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
@@ -78,9 +76,6 @@ fun Overlay(
     onTimerLayout: (IntSize) -> Unit,
     onDragFinished: () -> Unit
 ) {
-    val bikeControl by sensorViewModel.bikeControlState.collectAsState()
-    val showShifters = bikeControl.connected
-    val shiftWatts = bikeControl.mode == com.spop.poverlay.control.ControlMode.Erg
     val power by sensorViewModel.powerValue.collectAsState(initial = SensorValuePlaceholderText)
     val pelotonPowerComparison by sensorViewModel.pelotonPowerComparison.collectAsState(initial = null)
 
@@ -232,10 +227,7 @@ fun Overlay(
             onOpenSettings = { sensorViewModel.onOverlayDoubleTap() },
             onMinimizeToggle = { sensorViewModel.onOverlayPressed() },
             onLayout = onTimerLayout,
-            emulationLabel = sensorViewModel.emulatedModel,
-            showShifters = showShifters && minimized,
-            shiftWatts = shiftWatts,
-            onShift = sensorViewModel::shift
+            emulationLabel = sensorViewModel.emulatedModel
         )
     }
     val mainContent = @Composable {
@@ -274,7 +266,6 @@ fun Overlay(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-            if (showShifters) ShiftButton(false, shiftWatts) { sensorViewModel.shift(-1) }
             OverlayMainContent(
                 modifier = Modifier
                     .wrapContentWidth(unbounded = true)
@@ -320,7 +311,6 @@ fun Overlay(
                 onSpeedUnitClicked = { sensorViewModel.onClickedSpeedUnit() },
                 onChartClicked = { sensorViewModel.onOverlayPressed() }
             )
-            if (showShifters) ShiftButton(true, shiftWatts) { sensorViewModel.shift(1) }
             }
         }
     }
@@ -375,19 +365,4 @@ fun Overlay(
         }
     }
 
-}
-
-@Composable
-fun ShiftButton(up: Boolean, watts: Boolean = false, onClick: () -> Unit) {
-    Button(onClick, Modifier.size(64.dp).padding(3.dp).semantics {
-        val target = if (watts) "ERG target watts" else "resistance"
-        contentDescription = if (up) "Shift up: increase $target" else "Shift down: decrease $target"
-    },
-        contentPadding = PaddingValues(0.dp),
-        shape = RoundedCornerShape(12.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF91FFE0)),
-        colors = androidx.compose.material.ButtonDefaults.buttonColors(backgroundColor = Color(0xFF008761))) {
-        Text(if (up) "+" else "−", color = Color.White, fontSize = 32.sp,
-            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-    }
 }

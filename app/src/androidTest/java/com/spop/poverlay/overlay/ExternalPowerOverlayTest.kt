@@ -46,18 +46,18 @@ class ExternalPowerOverlayTest {
         compose.onNodeWithText("External").assertDoesNotExist()
         compose.onNodeWithText("Power").assertIsDisplayed()
     }
-    @Test fun minimizedComparisonAndBothShiftersFitOnScreen() {
+    @Test fun minimizedComparisonFitsWithoutAttachedShifters() {
         compose.setContent { MaterialTheme {
             Box(Modifier.fillMaxSize().background(Color(0xFF101820)).padding(12.dp)) {
                 OverlayMinimizedContent(true, true, OverlayLocation.Top, false,
                     "210", "85", "20.5", "40", "0", "125", true, true, true, false,
                     Color.White, 1f, "12:34", false, {}, {}, {}, {}, {},
-                    showShifters = true, powerComparison = "Peloton 145 W")
+                    powerComparison = "Peloton 145 W")
             }
         } }
         compose.onNodeWithText("Peloton 145 W").assertIsDisplayed()
-        compose.onNodeWithContentDescription("Shift down: decrease resistance").assertIsDisplayed()
-        compose.onNodeWithContentDescription("Shift up: increase resistance").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Shift down: decrease resistance").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Shift up: increase resistance").assertDoesNotExist()
         val primary = compose.onNodeWithText("210").fetchSemanticsNode().boundsInRoot
         val secondary = compose.onNodeWithText("Peloton 145 W").fetchSemanticsNode().boundsInRoot
         assertTrue(secondary.top >= primary.bottom)

@@ -77,8 +77,11 @@ After following those steps, the APK for grupetto can be found on the Releases t
   (25–1000 W), Sim, and Manual with a light selected-mode button. ERG has gain
   and watts-per-shift controls; Sim has incline, incline sensitivity, and
   resistance per shift; Manual has resistance and resistance per shift.
-  **− / +** shifters appear on both sides of either overlay size in all three
-  modes, changing target watts in ERG and resistance in Sim/Manual. Bluetooth
+  Tall **− / +** shifters stay fixed at the bottom left and right in overlay
+  mode, changing target watts in ERG and resistance in Sim/Manual. The
+  **Shifters** tab has a visibility checkbox and a shared position slider that
+  moves each button inward by up to 1/8 of the screen width. Settings hide
+  them except for a temporary preview while moving that slider. Bluetooth
   and DirCon FTMS commands automatically update the mode and target, with an
   **External control** flag identifying the active transport. Original Bike
   and Tread remain read-only.

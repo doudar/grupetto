@@ -77,6 +77,7 @@ class OverlayService : LifecycleEnabledService() {
 
         private val mutableIsRunning = MutableStateFlow(false)
         val isRunning = mutableIsRunning.asStateFlow()
+        internal val configurationVisible = MutableStateFlow(false)
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -85,6 +86,7 @@ class OverlayService : LifecycleEnabledService() {
     private var touchTargetView: View? = null
     private var windowManager: WindowManager? = null
     private var sensorViewModel: OverlaySensorViewModel? = null
+    private var shifterWindows: FixedShifterWindows? = null
     private var minimizedStateBeforeConfiguration: Boolean? = null
     private val bleServer by lazy { (application as GrupettoApplication).bleServer }
     private val antPlusServer by lazy { (application as GrupettoApplication).antPlusServer }
@@ -152,6 +154,11 @@ class OverlayService : LifecycleEnabledService() {
         releaseWakeLock()
         sensorViewModel = null
         super.onDestroy()
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        shifterWindows?.refresh()
     }
 
     private fun buildDialog() {
@@ -282,7 +289,18 @@ class OverlayService : LifecycleEnabledService() {
         wm.addView(overlay, overlayParams)
 
         wm.addView(touchTarget, touchTargetParams)
-        //touchTarget.clipChildren = false
+        if (sensorInterface.bikeControl?.supported == true) {
+            shifterWindows = FixedShifterWindows(this, this, this, onShift = sensorViewModel::shift)
+            lifecycleScope.launch {
+                repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                    combine(sensorViewModel.bikeControlState, configurationRepository.showShifters,
+                        configurationRepository.shifterInset, configurationVisible) { control, enabled, inset, configuring ->
+                        shifterWindows?.update(showRideShifters(control.connected, enabled, configuring), inset,
+                            control.mode == com.spop.poverlay.control.ControlMode.Erg)
+                    }.collect {}
+                }
+            }
+        }
         //touchTarget.clipToPadding = false
         //Subscribe to Dialog view model and update views
         lifecycleScope.launch {
@@ -521,6 +539,8 @@ class OverlayService : LifecycleEnabledService() {
     }
 
     private fun removeOverlayViews() {
+        shifterWindows?.close()
+        shifterWindows = null
         val wm = windowManager
         val hasViews = overlayView != null || touchTargetView != null
         if (wm != null && hasViews) {

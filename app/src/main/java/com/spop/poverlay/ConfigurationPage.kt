@@ -46,6 +46,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
     val scanning by viewModel.hrIsScanning.collectAsStateWithLifecycle()
     val match by viewModel.hrMatchByName.collectAsStateWithLifecycle()
     val bike by viewModel.bikeControlState.collectAsStateWithLifecycle()
+    val showShifters by viewModel.showShifters.collectAsStateWithLifecycle()
+    val shifterInset by viewModel.shifterInset.collectAsStateWithLifecycle()
     val watts by viewModel.livePower.collectAsStateWithLifecycle(initialValue = Float.NaN)
     val cadence by viewModel.liveCadence.collectAsStateWithLifecycle(initialValue = Float.NaN)
     val resistance by viewModel.liveResistance.collectAsStateWithLifecycle(initialValue = Float.NaN)
@@ -55,6 +57,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
     val meter by viewModel.powerMeterDevice.collectAsStateWithLifecycle()
     val externalWatts by viewModel.powerMeterReading.collectAsStateWithLifecycle()
     var dialog by remember { mutableStateOf<String?>(null) }
+    var previewShifters by remember { mutableStateOf(false) }
     var developerTaps by remember { mutableStateOf(0) }
     var lastDeveloperTap by remember { mutableStateOf(0L) }
     Box(Modifier.fillMaxSize().padding(16.dp)) {
@@ -208,8 +211,16 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
             }
         }
         "bike" -> if (bike.connected) SettingsDialog("Bike+ / CrossTrainer", { dialog = null }) {
-            TrainerControls(bike, viewModel::startErg, viewModel::startSimulation,
+            var tab by remember { mutableStateOf(0) }
+            TabRow(tab, backgroundColor = Color.Transparent) {
+                Tab(tab == 0, { tab = 0 }, text = { Text("Trainer") })
+                Tab(tab == 1, { tab = 1 }, text = { Text("Shifters") })
+            }
+            Spacer(Modifier.height(8.dp))
+            if (tab == 0) TrainerControls(bike, viewModel::startErg, viewModel::startSimulation,
                 viewModel::stopBikeControl, viewModel::setBikeResistance, viewModel::setBikeTuning)
+            else ShifterSettings(showShifters, shifterInset, viewModel::setShowShifters, viewModel::setShifterInset,
+                onPreview = { previewShifters = it })
         }
         "heart" -> HeartRateManagerDialog(hr, discovered, saved, scanning, match,
             viewModel::startHeartRateDiscovery, viewModel::stopHeartRateDiscovery,
@@ -226,6 +237,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
             Text("Bike+ ERG work based on dwj300's contribution (PR #50).", fontSize = 14.sp)
         }
     }
+    ShifterPositionPreview(dialog == "bike" && bike.connected && previewShifters, shifterInset)
 }
 
 @Composable

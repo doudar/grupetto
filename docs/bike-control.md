@@ -35,6 +35,15 @@ one integer resistance argument, and the remote exception reply.
 - The selected mode is light, with inactive modes dark. ERG shows target watts,
   gain, and watts per shift; Sim shows incline, incline sensitivity, and resistance
   per shift; Manual shows resistance and resistance per shift. Tuning is saved.
+- The Shifters tab saves a show/hide checkbox and one spacing control for both
+  buttons. Separate 64×112 dp windows stay at the bottom corners above system
+  navigation, independent of overlay dragging/minimization. Each moves inward
+  by up to 1/8 of screen width, with an 8 dp edge margin and 12 dp bottom margin.
+  Only the button rectangles accept touches; the space between belongs to the
+  underlying app. Disconnecting, hiding shifters, or opening settings removes
+  the ride buttons. Dragging the spacing slider temporarily previews their
+  positions even when hidden or the overlay is stopped. Preview windows cannot
+  send motor commands and disappear on release, cancellation, or leaving settings.
 - All modes clamp to 0–100 Peloton resistance and limit movement to three
   points per second. Below 25 rpm, commands pause without accumulating ERG
   corrections. Pedaling again resumes a still-active target.
@@ -122,7 +131,7 @@ does not depend on external watts and remains active through source changes.
 
 ## Validation
 
-- 208 JVM unit tests pass with strict Android stubs; `returnDefaultValues`
+- 213 JVM unit tests pass with strict Android stubs; `returnDefaultValues`
   remains disabled. New coverage includes 18 device-gating cases, motor parcel
   arguments/recycling/errors, FTMS ownership/validation, stale data, cadence,
   manual override, rate limits, pause/resume, simulation, and shifts. External
@@ -136,11 +145,15 @@ does not depend on external watts and remains active through source changes.
   ERG status, and unchanged telemetry scaling.
 - Two Compose tests pass on the Kindle: the native-power comparison appears
   below external watts, updates and disappears on fallback, and the minimized
-  comparison plus both shifters fit on screen.
+  comparison fits without the former attached shifters.
 - Two trainer Compose tests pass on the Kindle: selected-mode feedback,
   mode-specific sliders, shifts updating live targets, remote commands updating
   an open dialog, and the Bluetooth/DirCon external-control flag lifecycle.
   ERG, Sim, and Manual screenshots were checked for contrast and fit.
+- Shifter coverage includes symmetric travel limits, visibility gating, saved
+  preferences, and invalid positions. A Kindle Compose test exercises real
+  preview windows and verifies release, cancellation, and dialog dismissal
+  remove them, including when the visibility checkbox is off.
 - Debug APK build and lint pass (zero errors). The Kindle dashboard, developer
   menu, Bike+ tuning dialog, heart-rate dialog, and both overlay sizes were
   visually checked at 1280×800, density 213. A simulated shift changed resistance

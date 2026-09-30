@@ -65,6 +65,11 @@ class ConfigurationViewModel(
     val showTimerWhenMinimized
         get() = configurationRepository.showTimerWhenMinimized
 
+    val showShifters get() = configurationRepository.showShifters
+    val shifterInset get() = configurationRepository.shifterInset
+    fun setShowShifters(shown: Boolean) = configurationRepository.setShowShifters(shown)
+    fun setShifterInset(inset: Float) = configurationRepository.setShifterInset(inset)
+
     val bleTxEnabled
         get() = configurationRepository.bleTxEnabled
 
@@ -357,6 +362,7 @@ class ConfigurationViewModel(
     }
 
     fun onAppResumed() {
+        OverlayService.configurationVisible.value = true
         if (isOverlayRunning.value) {
             ContextCompat.startForegroundService(
                 getApplication(),
@@ -379,6 +385,7 @@ class ConfigurationViewModel(
     }
 
     fun onAppStopped() {
+        OverlayService.configurationVisible.value = false
         if (isOverlayRunning.value) {
             ContextCompat.startForegroundService(
                 getApplication(),
