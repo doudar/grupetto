@@ -373,6 +373,22 @@ class BleServer(
             }
         }
 
+        // setIncludeDeviceName uses the shared adapter name, not our GATT model string.
+        // Request the original name before service registration starts advertising.
+        try {
+            if (bluetoothAdapter.name != "Grupetto") {
+                if (bluetoothAdapter.setName("Grupetto")) {
+                    Timber.d("Bluetooth adapter name change to Grupetto accepted")
+                } else {
+                    Timber.w("Bluetooth adapter rejected the Grupetto name; retaining its current name")
+                }
+            }
+        } catch (e: SecurityException) {
+            Timber.w(e, "Missing Bluetooth permission to set adapter name")
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to set Bluetooth adapter name")
+        }
+
         try {
             val generation = ++gattServerGeneration
             val server = bluetoothManager.openGattServer(context, callbackForGeneration(generation))

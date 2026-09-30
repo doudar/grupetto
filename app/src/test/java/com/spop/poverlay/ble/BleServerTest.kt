@@ -13,6 +13,7 @@ import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
 import io.mockk.verify
+import io.mockk.verifyOrder
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.channels.Channel
@@ -184,6 +185,65 @@ class BleServerTest {
             workers.forEach { it.join() }
 
             assertEquals(1, maximumActiveOpens.get())
+        } finally {
+            unmockkStatic(ContextCompat::class)
+        }
+    }
+
+    @Test
+    fun `startup requests Grupetto name before registering GATT`() = withStartupAdapter { adapter ->
+        every { adapter.name } returns "PLTN-TTR01"
+        every { adapter.setName("Grupetto") } returns true
+
+        bleServer.start()
+
+        verifyOrder {
+            adapter.setName("Grupetto")
+            bluetoothManager.openGattServer(context, any())
+        }
+    }
+
+    @Test
+    fun `startup leaves an already correct adapter name alone`() = withStartupAdapter { adapter ->
+        every { adapter.name } returns "Grupetto"
+
+        bleServer.start()
+
+        verify(exactly = 0) { adapter.setName(any()) }
+        verify(exactly = 1) { bluetoothManager.openGattServer(context, any()) }
+    }
+
+    @Test
+    fun `rejected rename does not prevent BLE startup`() = withStartupAdapter { adapter ->
+        every { adapter.name } returns "PLTN-TTR01"
+        every { adapter.setName("Grupetto") } returns false
+
+        bleServer.start()
+
+        verify(exactly = 1) { adapter.setName("Grupetto") }
+        verify(exactly = 1) { bluetoothManager.openGattServer(context, any()) }
+    }
+
+    @Test
+    fun `permission revoked during rename does not crash startup`() = withStartupAdapter { adapter ->
+        every { adapter.name } returns "PLTN-TTR01"
+        every { adapter.setName("Grupetto") } throws SecurityException("Permission revoked")
+
+        bleServer.start()
+
+        verify(exactly = 1) { bluetoothManager.openGattServer(context, any()) }
+    }
+
+    private fun withStartupAdapter(test: (BluetoothAdapter) -> Unit) {
+        mockkStatic(ContextCompat::class)
+        every { ContextCompat.checkSelfPermission(context, any()) } returns PackageManager.PERMISSION_GRANTED
+        val adapter = mockk<BluetoothAdapter>(relaxed = true)
+        every { bluetoothManager.adapter } returns adapter
+        every { adapter.bluetoothLeAdvertiser } returns mockk(relaxed = true)
+        // Stop at GATT registration so these tests don't need real Android services.
+        every { bluetoothManager.openGattServer(context, any()) } returns null
+        try {
+            test(adapter)
         } finally {
             unmockkStatic(ContextCompat::class)
         }
