@@ -13,8 +13,12 @@ class ExternalPowerSensorInterface(
     scope: CoroutineScope,
     clock: () -> Long
 ) : SensorInterface by bike {
-    private val ticks = flow { while (true) { emit(clock()); delay(250) } }
-    private val externalPower = combine(readings, ticks, ::freshExternalPower)
+    private val ticks = flow { while (true) { emit(Unit); delay(250) } }
+    private val externalPower = combine(readings, ticks) { reading, _ ->
+        // A packet can arrive after the last tick. Evaluate against the current
+        // clock so a fresh packet is not briefly mistaken for future/stale data.
+        freshExternalPower(reading, clock())
+    }
         .shareIn(scope, SharingStarted.Lazily, replay = 1)
     override val nativePower = bike.nativePower
     override val usesExternalPower = externalPower.map { it != null }.distinctUntilChanged()

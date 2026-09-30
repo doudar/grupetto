@@ -256,10 +256,12 @@ private fun LiveMetric(label: String, value: String, unit: String, accent: Color
     Surface(modifier.fillMaxHeight(), color = Color(0xFF111C27),
         shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) {
-            Text(label, fontSize = 10.sp, letterSpacing = 1.sp, color = Color(0xFF9EAEC0))
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(value, fontSize = 25.sp, fontWeight = FontWeight.Bold, color = accent)
-                Text(" $unit", fontSize = 12.sp, color = Color(0xFF9EAEC0), modifier = Modifier.padding(bottom = 4.dp))
+            Text(label, fontSize = 10.sp, lineHeight = 14.sp, letterSpacing = 1.sp, color = Color(0xFF9EAEC0))
+            Row {
+                Text(value, fontSize = 25.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold,
+                    color = accent, modifier = Modifier.alignByBaseline())
+                Text(" $unit", fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFF9EAEC0),
+                    modifier = Modifier.alignByBaseline())
             }
         }
     }

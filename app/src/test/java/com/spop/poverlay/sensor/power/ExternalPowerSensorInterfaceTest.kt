@@ -57,6 +57,22 @@ class ExternalPowerSensorInterfaceTest {
         assertEquals(145f, sensor.power.first { it == 145f })
         assertFalse(sensor.usesExternalPower.first { !it })
     }
+    @Test fun freshPacketsBetweenTimerTicksNeverSwitchBackToNativePower() = fixture { sensor ->
+        readings.value = ExternalPowerReading(210, now, "meter")
+        val activeStates = mutableListOf<Boolean>()
+        val watts = mutableListOf<Float>()
+        val observers = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            observers.launch { sensor.usesExternalPower.collect { activeStates.add(it) } }
+            observers.launch { sensor.power.collect { watts.add(it) } }
+            assertEquals(210f, sensor.power.first())
+            // A newer packet arrives before the next 250 ms timer tick.
+            now += 100
+            readings.value = ExternalPowerReading(220, now, "meter")
+            assertEquals(listOf(true), activeStates)
+            assertEquals(listOf(210f, 220f), watts)
+        } finally { observers.cancel() }
+    }
     @Test fun sourceChangesReachTheSharedErgController() = fixture { sensor ->
         bike.bikeControl.acceptSample(BikeSample(145f, 80f, 40, now))
         assertTrue(bike.bikeControl.localErg(200))

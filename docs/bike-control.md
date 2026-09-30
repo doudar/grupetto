@@ -98,6 +98,9 @@ and ERG feedback. Cadence, resistance, and speed keep their existing bike source
 Native watts remain visible as a smaller **Peloton … W** line beneath external
 watts in both overlay sizes. The Peloton service watchdog still observes native
 telemetry, so a working external meter cannot conceal a stalled bike connection.
+Freshness uses the current monotonic clock on both packet arrivals and periodic
+checks; comparing a new packet against a previous timer tick incorrectly made
+the source and comparison flicker off between updates.
 
 After three seconds without a valid packet, display/broadcast falls back to native
 watts and hides the comparison. After twelve seconds, the meter connection is
@@ -107,7 +110,7 @@ does not depend on external watts and remains active through source changes.
 
 ## Validation
 
-- 200 JVM unit tests pass with strict Android stubs; `returnDefaultValues`
+- 201 JVM unit tests pass with strict Android stubs; `returnDefaultValues`
   remains disabled. New coverage includes 18 device-gating cases, motor parcel
   arguments/recycling/errors, FTMS ownership/validation, stale data, cadence,
   manual override, rate limits, pause/resume, simulation, and shifts. External
