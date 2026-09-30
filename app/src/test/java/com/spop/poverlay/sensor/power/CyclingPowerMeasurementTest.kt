@@ -29,8 +29,20 @@ class CyclingPowerMeasurementTest {
         assertNull(decodeCyclingPower(bytes))
         assertEquals(99, decodeCyclingPower(bytes.copyOf(13)))
     }
-    @Test fun rejectsReservedFlags() {
-        for (flag in listOf(0x20, 0x40, 0x80)) assertNull(decodeCyclingPower(byteArrayOf(0, flag.toByte(), 0, 0)))
+    @Test fun ignoresReservedFlagsAndUnknownTrailingData() {
+        for (flag in listOf(0x20, 0x40, 0x80, 0xe0)) {
+            assertEquals(42, decodeCyclingPower(byteArrayOf(0, flag.toByte(), 42, 0)))
+            assertEquals(42, decodeCyclingPower(byteArrayOf(0, flag.toByte(), 42, 0, 99, 99)))
+            // Known optional fields must still be complete even with RFU flags present.
+            assertNull(decodeCyclingPower(byteArrayOf(1, flag.toByte(), 42, 0)))
+        }
+    }
+    @Test fun decodesCapturedP715PacketWithRfuFlags() {
+        // Captured on the Peloton: flags 0x602f, power 32 W, optional and extension data.
+        val packet = "2f6020005ed7a261b1e1653a4a1412".chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        assertEquals(32, decodeCyclingPower(packet))
+        assertEquals(32, decodeCyclingPower(packet.copyOf(11)))
+        assertNull(decodeCyclingPower(packet.copyOf(10)))
     }
     @Test fun freshnessIncludesZeroAndRejectsMissingOldOrFutureData() {
         assertEquals(0f, freshExternalPower(ExternalPowerReading(0, 1000, "a"), 1000))

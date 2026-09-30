@@ -47,7 +47,7 @@ class PowerMeterManagerTest {
         every { access.enableNotifications(gatt, measurement, descriptor) } returns true
         // The clock is advanced explicitly; no Android clock stubs or background watcher races.
         val scope = CoroutineScope(Job().apply { cancel() })
-        manager = PowerMeterManager(context, access, scope) { now }
+        manager = PowerMeterManager(context, access, scope, log = {}) { now }
     }
     @After fun cleanup() { manager.stop() }
     private fun connected() {
@@ -74,6 +74,19 @@ class PowerMeterManagerTest {
         manager.checkConnection()
         assertNull(manager.reading.value)
         assertEquals(info, manager.connectedDevice.value)
+    }
+    @Test fun p715NotificationsKeepConnectionAlivePastDataTimeout() {
+        connected()
+        val packet = "2f6020005ed7a261b1e1653a4a1412".chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        every { measurement.value } returns packet
+        repeat(30) {
+            now += 1000
+            receive() // Peloton Android 11 uses the legacy notification callback.
+            manager.checkConnection()
+            assertEquals(ExternalPowerReading(32, now, info.address), manager.reading.value)
+            assertEquals(info, manager.connectedDevice.value)
+        }
+        verify(exactly = 0) { access.disconnect(gatt); access.close(gatt) }
     }
     @Test fun reconnectionDeadlineUsesLastPacketEvenAfterDisplayTimeoutClearsReading() {
         connected(); now += 20000; receive()

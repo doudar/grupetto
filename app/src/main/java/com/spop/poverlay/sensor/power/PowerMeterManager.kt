@@ -18,6 +18,7 @@ class PowerMeterManager internal constructor(
     // The existing access layer is characteristic-agnostic and checks permissions per operation.
     private val access: HeartRateBluetoothAccess = HeartRateBluetoothAccess(context),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    private val log: (String) -> Unit = { android.util.Log.i("PowerMeter", it) },
     private val clock: () -> Long = SystemClock::elapsedRealtime
 ) {
     companion object {
@@ -33,6 +34,7 @@ class PowerMeterManager internal constructor(
     private var connecting: HeartRateDevice? = null
     private var connectionAt = 0L
     private var lastMeasurementAt: Long? = null
+    private var loggedPacket = false
     private var scan: ScanCallback? = null
     private var watcher: Job? = null
     private var nextReconnectAt = 0L
@@ -85,6 +87,7 @@ class PowerMeterManager internal constructor(
             mutableStatus.value = "Power data lost · using bike meter"
         }
         if (gatt != null && now - (lastMeasurementAt ?: connectionAt) > 12000) {
+            log("Data timeout: connected=${mutableConnected.value != null}, receivedPacket=$loggedPacket, lastValidAge=${lastMeasurementAt?.let { now - it }}")
             release(); nextReconnectAt = now + 3000
             mutableStatus.value = "Reconnecting to power meter"
         }
@@ -149,6 +152,7 @@ class PowerMeterManager internal constructor(
         connecting = device
         connectionAt = clock()
         mutableStatus.value = "Connecting to ${device.name ?: device.address}"
+        log("Connecting to selected power meter")
         gatt = access.connect(remote, callback)
         if (gatt == null) fail("Connection failed")
     }
@@ -173,10 +177,12 @@ class PowerMeterManager internal constructor(
         val old = gatt
         gatt = null; connecting = null
         lastMeasurementAt = null
+        loggedPacket = false
         mutableConnected.value = null; mutableReading.value = null
         if (old != null) { access.disconnect(old); access.close(old) }
     }
     private fun fail(reason: String) {
+        log(reason)
         release()
         mutableStatus.value = reason
         nextReconnectAt = clock() + 3000
@@ -185,6 +191,7 @@ class PowerMeterManager internal constructor(
         override fun onConnectionStateChange(link: BluetoothGatt, status: Int, newState: Int) {
             synchronized(this@PowerMeterManager) {
                 if (gatt !== link) { access.close(link); return }
+                log("Connection state: status=$status state=$newState")
                 if (status != BluetoothGatt.GATT_SUCCESS || newState == BluetoothProfile.STATE_DISCONNECTED) {
                     fail("Power meter disconnected · using bike meter"); return
                 }
@@ -196,6 +203,7 @@ class PowerMeterManager internal constructor(
                 if (gatt !== link) return
                 val characteristic = link.getService(Service)?.getCharacteristic(Measurement)
                 val descriptor = characteristic?.getDescriptor(Cccd)
+                log("Services: status=$status measurement=${characteristic != null} cccd=${descriptor != null}")
                 if (status != BluetoothGatt.GATT_SUCCESS || characteristic == null || descriptor == null ||
                     !access.enableNotifications(link, characteristic, descriptor)) fail("Cycling Power notifications unavailable")
             }
@@ -203,6 +211,7 @@ class PowerMeterManager internal constructor(
         override fun onDescriptorWrite(link: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             synchronized(this@PowerMeterManager) {
                 if (gatt !== link || descriptor.uuid != Cccd) return
+                log("Notification subscription: status=$status")
                 if (status != BluetoothGatt.GATT_SUCCESS) { fail("Power notification subscription failed"); return }
                 mutableConnected.value = connecting
                 mutableStatus.value = "Connected · waiting for watts"
@@ -220,7 +229,12 @@ class PowerMeterManager internal constructor(
     @Synchronized private fun receive(link: BluetoothGatt, uuid: UUID, bytes: ByteArray) {
         if (gatt !== link || uuid != Measurement) return
         if (!access.canConnect()) { fail("Bluetooth permission lost"); return }
-        val watts = decodeCyclingPower(bytes) ?: return
+        val watts = decodeCyclingPower(bytes)
+        if (!loggedPacket) {
+            log("First power packet: bytes=${bytes.size} data=${bytes.take(32).joinToString("") { "%02x".format(it.toInt() and 255) }} decoded=$watts")
+            loggedPacket = true
+        }
+        if (watts == null) return
         val device = connecting ?: return
         mutableConnected.value = device
         val now = clock()

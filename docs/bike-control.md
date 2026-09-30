@@ -83,6 +83,16 @@ Disconnect clears the automatic selection, while Forget also removes the saved
 device. Truncated packets do not refresh the reading timestamp. Signed negative
 watts are decoded correctly and clamped to zero for ride metrics.
 
+Reserved flag bits and extra trailing bytes are ignored, as required by
+[Cycling Power Profile 1.1, section 4.5](https://www.bluetooth.org/DocMan/handlers/DownloadDoc.ashx?doc_id=412769).
+The P715 sends flags `0x602f`; rejecting its reserved bits previously discarded
+valid watt readings and caused a 12-second reconnect loop. Regression tests use
+an actual captured packet and verify sustained notifications keep the link alive.
+Connection stages, subscription status, the first packet, and data timeouts are
+logged under the `PowerMeter` tag, including in release builds. On Peloton builds
+that filter informational logs, temporarily enable them with
+`adb shell setprop log.tag.PowerMeter INFO` and read `adb logcat -s PowerMeter`.
+
 Fresh external watts replace native watts in the shared overlay/broadcast stream
 and ERG feedback. Cadence, resistance, and speed keep their existing bike sources.
 Native watts remain visible as a smaller **Peloton … W** line beneath external
@@ -97,7 +107,7 @@ does not depend on external watts and remains active through source changes.
 
 ## Validation
 
-- 198 JVM unit tests pass with strict Android stubs; `returnDefaultValues`
+- 200 JVM unit tests pass with strict Android stubs; `returnDefaultValues`
   remains disabled. New coverage includes 18 device-gating cases, motor parcel
   arguments/recycling/errors, FTMS ownership/validation, stale data, cadence,
   manual override, rate limits, pause/resume, simulation, and shifts. External
@@ -115,7 +125,11 @@ does not depend on external watts and remains active through source changes.
   menu, Bike+ tuning dialog, heart-rate dialog, and both overlay sizes were
   visually checked at 1280×800, density 213. A simulated shift changed resistance
   from 40 to 42. The visual pass caught and corrected the gain slider range.
-- Physical motor behavior and training-app interoperability on actual Bike+
-  and CrossTrainer hardware still need validation, as do pairing and ERG
-  feedback with a physical external power meter. No motor commands were sent
-  to physical Peloton hardware during this work.
+- A physical P715 power meter was verified on an original Peloton Bike
+  (PLTN-RB1VO-2, Android 11) using the release build. Service discovery and
+  notification subscription succeeded, and live external watts remained active
+  beyond a minute without the previous 12-second reconnect loop.
+- Physical motor behavior, external-meter ERG feedback, and training-app
+  interoperability on actual Bike+ and CrossTrainer hardware still need
+  validation. No motor commands were sent to physical Peloton hardware during
+  this work.
