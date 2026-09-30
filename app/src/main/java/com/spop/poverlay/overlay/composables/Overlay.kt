@@ -79,7 +79,8 @@ fun Overlay(
     onDragFinished: () -> Unit
 ) {
     val bikeControl by sensorViewModel.bikeControlState.collectAsState()
-    val showShifters = bikeControl.connected && bikeControl.mode == com.spop.poverlay.control.ControlMode.Simulation
+    val showShifters = bikeControl.connected
+    val shiftWatts = bikeControl.mode == com.spop.poverlay.control.ControlMode.Erg
     val power by sensorViewModel.powerValue.collectAsState(initial = SensorValuePlaceholderText)
     val pelotonPowerComparison by sensorViewModel.pelotonPowerComparison.collectAsState(initial = null)
 
@@ -233,6 +234,7 @@ fun Overlay(
             onLayout = onTimerLayout,
             emulationLabel = sensorViewModel.emulatedModel,
             showShifters = showShifters && minimized,
+            shiftWatts = shiftWatts,
             onShift = sensorViewModel::shift
         )
     }
@@ -272,7 +274,7 @@ fun Overlay(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-            if (showShifters) ShiftButton(false) { sensorViewModel.shift(-1) }
+            if (showShifters) ShiftButton(false, shiftWatts) { sensorViewModel.shift(-1) }
             OverlayMainContent(
                 modifier = Modifier
                     .wrapContentWidth(unbounded = true)
@@ -318,7 +320,7 @@ fun Overlay(
                 onSpeedUnitClicked = { sensorViewModel.onClickedSpeedUnit() },
                 onChartClicked = { sensorViewModel.onOverlayPressed() }
             )
-            if (showShifters) ShiftButton(true) { sensorViewModel.shift(1) }
+            if (showShifters) ShiftButton(true, shiftWatts) { sensorViewModel.shift(1) }
             }
         }
     }
@@ -376,9 +378,10 @@ fun Overlay(
 }
 
 @Composable
-fun ShiftButton(up: Boolean, onClick: () -> Unit) {
+fun ShiftButton(up: Boolean, watts: Boolean = false, onClick: () -> Unit) {
     Button(onClick, Modifier.size(64.dp).padding(3.dp).semantics {
-        contentDescription = if (up) "Shift up: increase resistance" else "Shift down: decrease resistance"
+        val target = if (watts) "ERG target watts" else "resistance"
+        contentDescription = if (up) "Shift up: increase $target" else "Shift down: decrease $target"
     },
         contentPadding = PaddingValues(0.dp),
         shape = RoundedCornerShape(12.dp),

@@ -68,4 +68,24 @@ class FitnessMachineControlIntegrationTest {
         control.disconnect("ble:a")
         assertEquals(1, ftms.handleControl("dircon:b", byteArrayOf(0))[2].toInt())
     }
+    @Test fun bothTransportsOverrideLocalControlsThroughFtmsService() = fixture(DeviceType.Bike, true) { ftms, control ->
+        for (client in listOf("ble:a", "dircon:b")) {
+            control.localErg(150)
+            assertEquals(1, ftms.handleControl(client, byteArrayOf(0))[2].toInt())
+            control.localManual()
+            assertEquals(1, ftms.handleControl(client, byteArrayOf(5, 225.toByte(), 0))[2].toInt())
+            assertEquals(ControlMode.Erg, control.state.value.mode)
+            assertEquals(225, control.state.value.targetWatts)
+            control.localResistance(30)
+            assertEquals(1, ftms.handleControl(client, byteArrayOf(0x11, 0, 0, 12, 254.toByte(), 40, 51))[2].toInt())
+            assertEquals(ControlMode.Simulation, control.state.value.mode)
+            assertEquals(-5f, control.state.value.targetIncline, .001f)
+            control.localSimulation(3f)
+            assertEquals(1, ftms.handleControl(client, byteArrayOf(4, 38, 2))[2].toInt())
+            assertEquals(ControlMode.Resistance, control.state.value.mode)
+            assertEquals(55, control.state.value.targetResistance)
+            assertEquals(if (client.startsWith("ble:")) "Bluetooth" else "DirCon", control.state.value.externalControl)
+            control.disconnect(client)
+        }
+    }
 }

@@ -19,15 +19,22 @@ one integer resistance argument, and the remote exception reply.
 
 - ERG: 25–1000 W; adjustable proportional gain 0.001–0.030, default 0.007.
   Power smoothing uses a two-second time constant with a three-watt deadband.
+  Overlay shifts adjust the watt target by 1–50 W (default 10 W).
 - Sim: start from current resistance as the flat-road baseline. Grade changes
-  add two Peloton resistance points per percentage point. Wind, rolling
+  add an adjustable 0–5 Peloton resistance points per percentage point (default 2). Wind, rolling
   resistance and wind resistance coefficient are converted to equivalent grade
   using fixed reference values of 30 km/h and 85 kg. This is a resistance/feel
   model, not calibrated road physics for the rider. It deliberately does not
   feed the existing power-derived broadcast speed back into motor control.
-- Shifts add/subtract a persistent resistance offset (1–10 points, default 2)
-  in Sim only. Grade updates preserve shifts; leaving Sim clears the offset.
+- Sim shifts add/subtract a persistent resistance offset (1–10 points, default 2).
+  Grade updates preserve shifts; leaving Sim clears the offset.
   Shift saturation does not accumulate hidden shifts beyond the motor limits.
+- Manual provides a 0–100 resistance target. Its overlay shifts adjust that
+  target using the same resistance-per-shift setting as Sim. Selecting Manual
+  starts from the current measured resistance; the physical knob still overrides it.
+- The selected mode is light, with inactive modes dark. ERG shows target watts,
+  gain, and watts per shift; Sim shows incline, incline sensitivity, and resistance
+  per shift; Manual shows resistance and resistance per shift. Tuning is saved.
 - All modes clamp to 0–100 Peloton resistance and limit movement to three
   points per second. Below 25 rpm, commands pause without accumulating ERG
   corrections. Pedaling again resumes a still-active target.
@@ -36,9 +43,14 @@ one integer resistance argument, and the remote exception reply.
   A new target is required after these events. The physical knob is not fought:
   no further write occurs while the reported target differs from the expected
   target; after 1.5 seconds control is relinquished.
-- Manual in settings always relinquishes control. A second BLE/DirCon/local
-  controller cannot take ownership until the owner releases/disconnects or
-  Manual is selected. BLE shutdown/restart releases BLE ownership.
+- Local settings and shifts do not acquire or revoke remote FTMS ownership.
+  The next accepted Bluetooth or DirCon command overrides the local mode and
+  target, including the controls in an open settings dialog. Only one remote
+  client may own control at a time. BLE shutdown/restart releases BLE ownership.
+- The dashboard and trainer dialog show **External control · Bluetooth/DirCon**
+  after an accepted remote target or resume. Request Control alone does not show
+  it. Local mode/target/shift actions, Stop/Reset/Pause, disconnects, and safety
+  stops clear it. The flag indicates the source of active control, not radio traffic.
 
 ## FTMS
 
@@ -110,20 +122,25 @@ does not depend on external watts and remains active through source changes.
 
 ## Validation
 
-- 201 JVM unit tests pass with strict Android stubs; `returnDefaultValues`
+- 208 JVM unit tests pass with strict Android stubs; `returnDefaultValues`
   remains disabled. New coverage includes 18 device-gating cases, motor parcel
   arguments/recycling/errors, FTMS ownership/validation, stale data, cadence,
   manual override, rate limits, pause/resume, simulation, and shifts. External
   power tests cover signed/optional packet parsing, zero watts, freshness,
   fallback, native comparison, source changes, ERG direction, notification
   subscription, permission loss, late callbacks, and reconnect timing.
-- Three Android integration tests pass on the attached Amazon Kindle
+- Four Android integration tests pass on the attached Amazon Kindle
   (KFRAPWI, Android 11), using real GATT characteristic objects and a fake motor.
   They cover advertised capabilities/ranges, read-only Bike/Tread, shared
-  BLE/DirCon procedure handling, ERG status, and unchanged telemetry scaling.
+  BLE/DirCon procedure handling, remote override of local modes and targets,
+  ERG status, and unchanged telemetry scaling.
 - Two Compose tests pass on the Kindle: the native-power comparison appears
   below external watts, updates and disappears on fallback, and the minimized
   comparison plus both shifters fit on screen.
+- Two trainer Compose tests pass on the Kindle: selected-mode feedback,
+  mode-specific sliders, shifts updating live targets, remote commands updating
+  an open dialog, and the Bluetooth/DirCon external-control flag lifecycle.
+  ERG, Sim, and Manual screenshots were checked for contrast and fit.
 - Debug APK build and lint pass (zero errors). The Kindle dashboard, developer
   menu, Bike+ tuning dialog, heart-rate dialog, and both overlay sizes were
   visually checked at 1280×800, density 213. A simulated shift changed resistance

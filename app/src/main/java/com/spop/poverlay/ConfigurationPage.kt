@@ -69,6 +69,10 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Grupetto", fontSize = 30.sp, fontWeight = FontWeight.Bold)
                             Text("  /  RIDE CONSOLE", color = Color(0xFF34D399), fontSize = 11.sp, letterSpacing = 1.sp)
+                            bike.externalControl?.let {
+                                Spacer(Modifier.width(12.dp))
+                                ExternalControlFlag(it)
+                            }
                         }
                         Text(viewModel.emulatedModel?.let { "${it.label} emulation · Simulated data · Radios off" }
                             ?: "Your ride, connected", color = Color(0xFF9EAEC0), fontSize = 14.sp)
@@ -115,12 +119,19 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                     if (bike.connected) {
                         SettingsTile("Trainer control", Modifier.weight(1f).fillMaxHeight(), Color(0xFFFBBF24)) {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text(if (bike.mode == com.spop.poverlay.control.ControlMode.Erg) "ERG · ${bike.targetWatts} W"
-                                    else bike.mode.name, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6EE7B7))
+                                Text(when (bike.mode) {
+                                    com.spop.poverlay.control.ControlMode.Erg -> "ERG · ${bike.targetWatts} W"
+                                    com.spop.poverlay.control.ControlMode.Simulation -> "Sim · ${"%.1f".format(java.util.Locale.US, bike.targetIncline)}%"
+                                    else -> "Manual · ${bike.targetResistance}"
+                                }, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6EE7B7))
                                 Spacer(Modifier.weight(1f))
                                 Text(if (externalWatts != null) "EXTERNAL POWER" else "BUILT-IN POWER", fontSize = 10.sp, color = Color(0xFF9EAEC0))
                             }
-                            Text("Shift ${bike.shiftSize} pts   ·   Gain ${"%.3f".format(java.util.Locale.US, bike.gain)}",
+                            Text(when (bike.mode) {
+                                com.spop.poverlay.control.ControlMode.Erg -> "Shift ${bike.wattsPerShift} W   ·   Gain ${"%.3f".format(java.util.Locale.US, bike.gain)}"
+                                com.spop.poverlay.control.ControlMode.Simulation -> "Shift ${bike.shiftSize} pts   ·   ${"%.1f".format(java.util.Locale.US, bike.inclineSensitivity)} pts / 1% incline"
+                                else -> "Shift ${bike.shiftSize} pts"
+                            },
                                 fontSize = 13.sp, lineHeight = 17.sp, color = Color(0xFF9EAEC0))
                             Text(bike.message, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Spacer(Modifier.weight(1f))
@@ -192,24 +203,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
             }
         }
         "bike" -> if (bike.connected) SettingsDialog("Bike+ / CrossTrainer", { dialog = null }) {
-            var ergTargetWatts by remember { mutableStateOf(bike.targetWatts.toFloat()) }
-            Text("ERG target · ${ergTargetWatts.toInt()} W")
-            Slider(ergTargetWatts, { ergTargetWatts = it }, valueRange = 25f..1000f, steps = 194)
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button({ viewModel.startErg(ergTargetWatts.toInt()) }) { Text("Start ERG") }
-                OutlinedButton(viewModel::startSimulation) { Text("Start Sim") }
-                TextButton(viewModel::stopBikeControl) { Text("Manual") }
-            }
-            Divider(Modifier.padding(vertical = 12.dp))
-            Text("Resistance per shift · ${bike.shiftSize} points")
-            Slider(bike.shiftSize.toFloat(), { viewModel.setBikeTuning(it.toInt(), bike.gain) },
-                valueRange = 1f..10f, steps = 8)
-            Text("Proportional gain · ${"%.3f".format(java.util.Locale.US, bike.gain)}")
-            Slider(bike.gain, { viewModel.setBikeTuning(bike.shiftSize, it) },
-                valueRange = .001f..0.030f, steps = 28)
-            Text("Higher gain reacts faster in ERG. Sim shifters adjust resistance on either side of the overlay.",
-                fontSize = 13.sp, color = Color(0xFF9EAEC0))
-            Text(bike.message, fontSize = 13.sp)
+            TrainerControls(bike, viewModel::startErg, viewModel::startSimulation,
+                viewModel::stopBikeControl, viewModel::setBikeResistance, viewModel::setBikeTuning)
         }
         "heart" -> HeartRateManagerDialog(hr, discovered, saved, scanning, match,
             viewModel::startHeartRateDiscovery, viewModel::stopHeartRateDiscovery,
@@ -342,10 +337,10 @@ private fun PowerMeterDialog(viewModel: ConfigurationViewModel, onDismiss: () ->
 }
 
 @Composable
-private fun SettingsDialog(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+internal fun SettingsDialog(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     androidx.compose.ui.window.Dialog(onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.widthIn(max = 660.dp).fillMaxWidth(.9f),
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp), color = Color(0xFF1B2430)) {
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp), color = Color(0xFF1B2430), contentColor = Color(0xFFE8EEF5)) {
             Column(Modifier.padding(24.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(title, Modifier.weight(1f), fontSize = 22.sp, fontWeight = FontWeight.Bold)

@@ -45,7 +45,7 @@ class BikeControlTest {
         acquire()
         assertEquals(5, command(0, client = "dircon:b").result)
         assertEquals(5, command(5, 200, 0, client = "dircon:b").result)
-        assertFalse(control.localErg(200))
+        assertTrue(control.localErg(200))
         assertEquals(1, command(5, 200, 0).result)
         control.disconnect("dircon:b")
         assertEquals(ControlMode.Erg, control.state.value.mode)
@@ -249,5 +249,121 @@ class BikeControlTest {
         assertEquals(1, control.state.value.permissionLostCount)
         assertEquals(5, command(5, 200, 0).result)
         assertTrue(control.localSimulation())
+    }
+
+    @Test fun remoteCommandsOverrideAllLocalModesAndTargetsOnBothTransports() {
+        sample()
+        for (client in listOf("ble:a", "dircon:b")) {
+            control.localErg(150)
+            assertEquals(1, command(0, client = client).result) // Local mode does not block acquisition.
+            control.localManual()
+            assertEquals(1, command(5, 210, 0, client = client).result)
+            assertEquals(ControlMode.Erg, control.state.value.mode)
+            assertEquals(210, control.state.value.targetWatts)
+            control.localResistance(30)
+            assertEquals(1, command(0x11, 0, 0, 12, 254, 40, 51, client = client).result)
+            assertEquals(ControlMode.Simulation, control.state.value.mode)
+            assertEquals(-5f, control.state.value.targetIncline, .001f)
+            control.localErg(180)
+            assertEquals(1, command(4, 38, 2, client = client).result) // 550 tenths = 55.
+            assertEquals(ControlMode.Resistance, control.state.value.mode)
+            assertEquals(55, control.state.value.targetResistance)
+            control.disconnect(client)
+        }
+    }
+
+    @Test fun ergShiftsUseWattsAndClampWithoutAccumulating() {
+        sample(); control.tune(3, .007f, 20, 2f); control.localErg(150)
+        control.shift(1)
+        assertEquals(170, control.state.value.targetWatts)
+        assertTrue(writes.isEmpty()) // A shift changes the target, not the motor directly.
+        repeat(100) { control.shift(1) }
+        assertEquals(1000, control.state.value.targetWatts)
+        control.shift(-1)
+        assertEquals(980, control.state.value.targetWatts)
+        repeat(100) { control.shift(-1) }
+        assertEquals(25, control.state.value.targetWatts)
+        control.shift(1)
+        assertEquals(45, control.state.value.targetWatts)
+    }
+
+    @Test fun manualShiftsAccumulateAgainstTargetAndRespectRateAndCadenceLimits() {
+        sample(); control.tune(3, .007f); control.shift(1); control.shift(1)
+        assertEquals(ControlMode.Resistance, control.state.value.mode)
+        assertEquals(46, control.state.value.targetResistance)
+        repeat(10) { sample(cadence = 0f) }
+        assertTrue(writes.isEmpty())
+        sample()
+        assertEquals(41, resistance)
+        repeat(100) { control.shift(1) }
+        assertEquals(100, control.state.value.targetResistance)
+        control.shift(-1)
+        assertEquals(97, control.state.value.targetResistance)
+        repeat(100) { control.shift(-1) }
+        assertEquals(0, control.state.value.targetResistance)
+    }
+
+    @Test fun inclineSensitivityScalesGradeAndTuningPersistsAcrossModeChanges() {
+        sample(); control.tune(4, .01f, 15, 1f); control.localSimulation(5f)
+        repeat(20) { sample() }
+        assertEquals(45, resistance)
+        control.tune(4, .01f, 15, 3f)
+        repeat(40) { sample() }
+        assertEquals(55, resistance)
+        control.localErg(150); control.localManual()
+        assertEquals(15, control.state.value.wattsPerShift)
+        assertEquals(3f, control.state.value.inclineSensitivity, 0f)
+        assertEquals(55, control.state.value.targetResistance)
+    }
+
+    @Test fun externalFlagRequiresAcceptedTargetAndClearsOnLocalOrSafetyEvents() {
+        acquire()
+        assertNull(control.state.value.externalControl)
+        command(5, 200, 0)
+        assertEquals("Bluetooth", control.state.value.externalControl)
+        val before = control.state.value
+        command(5, 0, 0)
+        command(5, 230, 0, client = "dircon:b")
+        assertEquals(before, control.state.value)
+        control.shift(1)
+        assertNull(control.state.value.externalControl)
+        command(5, 220, 0)
+        assertEquals("Bluetooth", control.state.value.externalControl)
+        now += 1501; control.tick()
+        assertNull(control.state.value.externalControl)
+        sample(); command(0, client = "dircon:b"); command(5, 240, 0, client = "dircon:b")
+        assertEquals("DirCon", control.state.value.externalControl)
+        control.disconnect("dircon:b")
+        assertNull(control.state.value.externalControl)
+    }
+
+    @Test fun pauseResumeRetainsResistanceTargetDespiteLiveTelemetry() {
+        acquire(); command(4, 88, 2) // 60 resistance.
+        command(8, 2)
+        repeat(5) { sample() }
+        assertNull(control.state.value.externalControl)
+        assertEquals(40, control.state.value.targetResistance)
+        command(7)
+        assertEquals(ControlMode.Resistance, control.state.value.mode)
+        assertEquals(60, control.state.value.targetResistance)
+        assertEquals("Bluetooth", control.state.value.externalControl)
+    }
+
+    @Test fun newTuningAndLocalTargetsValidateInputs() {
+        control.tune(2, .007f, 100, Float.NaN)
+        assertEquals(50, control.state.value.wattsPerShift)
+        assertEquals(2f, control.state.value.inclineSensitivity, 0f)
+        control.tune(2, .007f, -1, 100f)
+        assertEquals(1, control.state.value.wattsPerShift)
+        assertEquals(5f, control.state.value.inclineSensitivity, 0f)
+        assertFalse(control.localManual())
+        assertFalse(control.localResistance(40))
+        sample()
+        val before = control.state.value
+        assertFalse(control.localResistance(101))
+        assertFalse(control.localResistance(-1))
+        assertFalse(control.localSimulation(Float.NaN))
+        assertFalse(control.localSimulation(Float.POSITIVE_INFINITY))
+        assertEquals(before, control.state.value)
     }
 }

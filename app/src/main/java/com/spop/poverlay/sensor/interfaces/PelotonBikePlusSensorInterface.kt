@@ -34,7 +34,8 @@ class PelotonBikePlusSensorInterface(val context: Context, controlSupported: Boo
     init {
         if (controlSupported) {
             val preferences = context.getSharedPreferences(com.spop.poverlay.ConfigurationRepository.SharedPrefsName, Context.MODE_PRIVATE)
-            bikeControl.tune(preferences.getInt("bikeShiftSize", 2), preferences.getFloat("bikeProportionalGain", .007f))
+            bikeControl.tune(preferences.getInt("bikeShiftSize", 2), preferences.getFloat("bikeProportionalGain", .007f),
+                preferences.getInt("bikeWattsPerShift", 10), preferences.getFloat("bikeInclineSensitivity", 2f))
             launch { while (isActive) { bikeControl.tick(); delay(100) } }
         }
     }

@@ -109,21 +109,23 @@ class ConfigurationViewModel(
     fun forgetPowerMeter(address: String) { powerMeters.forget(address) }
     val bikeControlState = bikeControl?.state ?: MutableStateFlow(com.spop.poverlay.control.ControlState())
 
-    fun setBikeTuning(shiftSize: Int, gain: Float) {
-        bikeControl?.tune(shiftSize, gain)
+    fun setBikeTuning(shiftSize: Int, gain: Float, wattsPerShift: Int, inclineSensitivity: Float) {
+        bikeControl?.tune(shiftSize, gain, wattsPerShift, inclineSensitivity)
         if (isPreview) return
         bikeControl?.state?.value?.let { state ->
             getApplication<Application>().getSharedPreferences(ConfigurationRepository.SharedPrefsName, Context.MODE_PRIVATE)
-                .edit().putInt("bikeShiftSize", state.shiftSize).putFloat("bikeProportionalGain", state.gain).apply()
+                .edit().putInt("bikeShiftSize", state.shiftSize).putFloat("bikeProportionalGain", state.gain)
+                .putInt("bikeWattsPerShift", state.wattsPerShift).putFloat("bikeInclineSensitivity", state.inclineSensitivity).apply()
         }
     }
     fun startErg(watts: Int) {
-        if (bikeControl?.localErg(watts) != true) infoPopup.value = "Release control in your training app first, or use Manual to take over."
+        if (bikeControl?.localErg(watts) != true) infoPopup.value = "Waiting for fresh Bike+ / CrossTrainer data."
     }
-    fun startSimulation() {
-        if (bikeControl?.localSimulation() != true) infoPopup.value = "Release control in your training app first, or use Manual to take over."
+    fun startSimulation(incline: Float) {
+        if (bikeControl?.localSimulation(incline) != true) infoPopup.value = "Waiting for fresh Bike+ / CrossTrainer data."
     }
-    fun stopBikeControl() { bikeControl?.stop() }
+    fun setBikeResistance(resistance: Int) { bikeControl?.localResistance(resistance) }
+    fun stopBikeControl() { bikeControl?.localManual() }
     private var batteryOptimizationPromptShownThisSession = false
 
     init {

@@ -62,7 +62,8 @@ fun OverlayMinimizedContent(
     showShifters: Boolean = false,
     emulationLabel: String? = null,
     onShift: (Int) -> Unit = {},
-    powerComparison: String? = null
+    powerComparison: String? = null,
+    shiftWatts: Boolean = false
 ) {
     val backgroundShape = if (isMinimized) {
         RoundedCornerShape(8.dp)
@@ -109,7 +110,7 @@ fun OverlayMinimizedContent(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (showShifters) com.spop.poverlay.overlay.ShiftButton(false) { onShift(-1) }
+        if (showShifters) com.spop.poverlay.overlay.ShiftButton(false, shiftWatts) { onShift(-1) }
         if (emulationLabel != null) Text("DEMO", color = Color(0xFFFFCC44), fontSize = 11.sp,
             modifier = Modifier.padding(end = 6.dp))
         val infiniteTransition = rememberInfiniteTransition()
@@ -229,7 +230,7 @@ fun OverlayMinimizedContent(
                 textColor = heartRateColor
             )
         }
-        if (showShifters) com.spop.poverlay.overlay.ShiftButton(true) { onShift(1) }
+        if (showShifters) com.spop.poverlay.overlay.ShiftButton(true, shiftWatts) { onShift(1) }
     }
 }
 

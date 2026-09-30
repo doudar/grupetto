@@ -74,10 +74,14 @@ After following those steps, the APK for grupetto can be found on the Releases t
 # Usage
 
 - On a connected Bike+ or G700 CrossTrainer, **Modes & tuning** provides ERG
-  (25–1000 W), Sim mode, resistance points per shift (1–10), and proportional
-  gain. FTMS clients can set power, resistance, or simulation parameters over
-  Bluetooth or DirCon. In Sim mode, **− / +** shifters appear on both sides of
-  the expanded and minimized overlay. Original Bike and Tread remain read-only.
+  (25–1000 W), Sim, and Manual with a light selected-mode button. ERG has gain
+  and watts-per-shift controls; Sim has incline, incline sensitivity, and
+  resistance per shift; Manual has resistance and resistance per shift.
+  **− / +** shifters appear on both sides of either overlay size in all three
+  modes, changing target watts in ERG and resistance in Sim/Manual. Bluetooth
+  and DirCon FTMS commands automatically update the mode and target, with an
+  **External control** flag identifying the active transport. Original Bike
+  and Tread remain read-only.
   The ERG/motor work builds on [dwj300's PR #50](https://github.com/doudar/grupetto/pull/50).
 - Settings show live metrics and connection status in a compact dashboard, with
   dialogs for connections, **External Sensors**, and bike control. Sensor lists

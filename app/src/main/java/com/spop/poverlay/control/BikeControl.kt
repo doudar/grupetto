@@ -20,6 +20,11 @@ data class ControlState(
     val connected: Boolean = false,
     val mode: ControlMode = ControlMode.Manual,
     val targetWatts: Int = 150,
+    val targetResistance: Int = 0,
+    val targetIncline: Float = 0f,
+    val wattsPerShift: Int = 10,
+    val inclineSensitivity: Float = 2f,
+    val externalControl: String? = null,
     val shiftOffset: Int = 0,
     val shiftSize: Int = 2,
     val gain: Float = .007f,
@@ -30,10 +35,10 @@ data class Simulation(val wind: Float, val grade: Float, val rolling: Float, val
     // A repeatable resistance model: 2 Peloton points per percent grade, with wind and
     // rolling resistance expressed as equivalent grade at 30 km/h and 85 kg total mass.
     // This is a trainer feel model, not a claim of calibrated road power or rider mass.
-    fun resistanceOffset(): Float {
+    fun resistanceOffset(sensitivity: Float = 2f): Float {
         val airSpeed = 30f / 3.6f + wind
         val extraForce = drag * airSpeed * abs(airSpeed) - .51f * (30f / 3.6f) * (30f / 3.6f)
-        return 2f * (grade + (rolling - .004f) * 100f + extraForce / (85f * 9.80665f) * 100f)
+        return sensitivity * (grade + (rolling - .004f) * 100f + extraForce / (85f * 9.80665f) * 100f)
     }
 }
 
@@ -56,9 +61,9 @@ class BikeControl(
     private var previousTick = 0L
     private var simBase = 0f
     private var simulation = Simulation(0f, 0f, .004f, .51f)
-    private var resistanceTarget = 0
     private var pausedMode: ControlMode? = null
     private var pausedShift = 0
+    private var pausedResistance = 0
     private var externalPower: com.spop.poverlay.sensor.power.ExternalPowerReading? = null
 
     @Synchronized fun useExternalPower(reading: com.spop.poverlay.sensor.power.ExternalPowerReading?) {
@@ -71,8 +76,12 @@ class BikeControl(
         externalPower = next
     }
 
-    @Synchronized fun tune(shiftSize: Int, gain: Float) {
+    @Synchronized fun tune(shiftSize: Int, gain: Float,
+        wattsPerShift: Int = state.value.wattsPerShift,
+        inclineSensitivity: Float = state.value.inclineSensitivity) {
         mutableState.value = state.value.copy(shiftSize = shiftSize.coerceIn(1, 10),
+            wattsPerShift = wattsPerShift.coerceIn(1, 50),
+            inclineSensitivity = if (inclineSensitivity.isFinite()) inclineSensitivity.coerceIn(0f, 5f) else 2f,
             gain = if (gain.isFinite()) gain.coerceIn(.001f, .03f) else .007f)
     }
 
@@ -87,6 +96,7 @@ class BikeControl(
         sample = value
         if (clock() - value.timestamp !in 0..1500) { unavailable("Bike+ data is stale"); return }
         mutableState.value = state.value.copy(connected = true,
+            targetResistance = if (state.value.mode == ControlMode.Manual) value.resistance else state.value.targetResistance,
             message = if (!state.value.connected) "Ready" else state.value.message)
     }
 
@@ -101,7 +111,8 @@ class BikeControl(
         pausedMode = null
         expectedResistance = null
         filteredPower = null
-        mutableState.value = state.value.copy(mode = ControlMode.Manual, shiftOffset = 0, message = reason,
+        mutableState.value = state.value.copy(mode = ControlMode.Manual, shiftOffset = 0, message = reason, externalControl = null,
+            targetResistance = sample?.resistance ?: state.value.targetResistance,
             permissionLostCount = state.value.permissionLostCount + if (lostPermission) 1 else 0)
     }
     @Synchronized fun disconnect(client: String) { if (owner == client) stop("Controller disconnected") }
@@ -121,25 +132,46 @@ class BikeControl(
         mutableState.value = state.value.copy(message = "${mode.name} active")
     }
     @Synchronized fun localErg(watts: Int): Boolean {
-        if (!fresh() || watts !in 25..1000 || (owner != null && owner != "local")) return false
-        owner = "local"
+        if (!fresh() || watts !in 25..1000) return false
         setMode(ControlMode.Erg)
-        mutableState.value = state.value.copy(targetWatts = watts)
+        mutableState.value = state.value.copy(targetWatts = watts, externalControl = null)
         return true
     }
-    @Synchronized fun localSimulation(): Boolean {
-        if (!fresh() || (owner != null && owner != "local")) return false
-        owner = "local"
-        simulation = Simulation(0f, 0f, .004f, .51f)
+    @Synchronized fun localSimulation(grade: Float = state.value.targetIncline): Boolean {
+        if (!fresh() || !grade.isFinite() || grade !in -327.68f..327.67f) return false
+        simulation = Simulation(0f, grade, .004f, .51f)
         setMode(ControlMode.Simulation)
+        mutableState.value = state.value.copy(targetIncline = grade, externalControl = null)
+        return true
+    }
+    // Local adjustments do not acquire or revoke the remote FTMS lease. The next
+    // command from its owner wins, including while the settings dialog is open.
+    @Synchronized fun localManual(): Boolean {
+        if (!fresh()) return false
+        return localResistance(sample!!.resistance)
+    }
+    @Synchronized fun localResistance(level: Int): Boolean {
+        if (!fresh() || level !in 0..100) return false
+        setMode(ControlMode.Resistance)
+        mutableState.value = state.value.copy(targetResistance = level, message = "Manual active", externalControl = null)
         return true
     }
     @Synchronized fun shift(direction: Int) {
-        if (!fresh() || state.value.mode != ControlMode.Simulation) return
-        val base = simBase + simulation.resistanceOffset()
+        if (!fresh()) return
+        val step = direction.coerceIn(-1, 1)
+        if (step == 0) return
+        when (state.value.mode) {
+            ControlMode.Erg -> { localErg((state.value.targetWatts + step * state.value.wattsPerShift).coerceIn(25, 1000)); return }
+            ControlMode.Manual, ControlMode.Resistance -> {
+                val base = if (state.value.mode == ControlMode.Manual) sample!!.resistance else state.value.targetResistance
+                localResistance((base + step * state.value.shiftSize).coerceIn(0, 100)); return
+            }
+            ControlMode.Simulation -> Unit
+        }
+        val base = simBase + simulation.resistanceOffset(state.value.inclineSensitivity)
         val current = (base + state.value.shiftOffset).coerceIn(0f, 100f)
         val next = (current + direction.coerceIn(-1, 1) * state.value.shiftSize).coerceIn(0f, 100f)
-        mutableState.value = state.value.copy(shiftOffset = (next - base).roundToInt())
+        mutableState.value = state.value.copy(shiftOffset = (next - base).roundToInt(), externalControl = null)
     }
 
     /** Called at 100 ms; only new telemetry drives feedback. Stale data disarms control. */
@@ -173,8 +205,8 @@ class BikeControl(
                 val error = state.value.targetWatts - power
                 requestedResistance + if (abs(error) <= 3f) 0f else state.value.gain * error * dt / .1f
             }
-            ControlMode.Simulation -> simBase + simulation.resistanceOffset() + state.value.shiftOffset
-            ControlMode.Resistance -> resistanceTarget.toFloat()
+            ControlMode.Simulation -> simBase + simulation.resistanceOffset(state.value.inclineSensitivity) + state.value.shiftOffset
+            ControlMode.Resistance -> state.value.targetResistance.toFloat()
             else -> return
         }
         // Limit every mode to 3 Peloton resistance points / second, including mode changes.
@@ -202,7 +234,7 @@ class BikeControl(
         }
         if (owner != client) return Reply(5)
         fun signed(index: Int) = ((bytes[index].toInt() and 255) or (bytes[index + 1].toInt() shl 8)).toShort().toInt()
-        return when (op) {
+        val reply = when (op) {
             1 -> { stop("Reset", releaseControl = false); Reply(1, byteArrayOf(1)) }
             7 -> {
                 pausedMode?.let { mode ->
@@ -210,7 +242,8 @@ class BikeControl(
                     expectedResistance = sample!!.resistance
                     previousTick = clock()
                     commandTime = clock()
-                    mutableState.value = state.value.copy(mode = mode, shiftOffset = pausedShift, message = "${mode.name} active")
+                    mutableState.value = state.value.copy(mode = mode, shiftOffset = pausedShift,
+                        targetResistance = pausedResistance, message = "${mode.name} active")
                 }
                 pausedMode = null
                 Reply(1, byteArrayOf(4))
@@ -220,8 +253,9 @@ class BikeControl(
                 else {
                     val mode = state.value.mode
                     val shift = state.value.shiftOffset
+                    val resistance = state.value.targetResistance
                     stop(if (bytes[1].toInt() == 2) "Paused" else "Stopped", releaseControl = false)
-                    if (bytes[1].toInt() == 2) { pausedMode = mode; pausedShift = shift }
+                    if (bytes[1].toInt() == 2) { pausedMode = mode; pausedShift = shift; pausedResistance = resistance }
                     Reply(1, byteArrayOf(2, bytes[1]))
                 }
             }
@@ -229,7 +263,8 @@ class BikeControl(
                 // Corrected FTMS format: SINT16 in tenths (FTMS TS p6 BV-25-C).
                 val level = signed(1)
                 if (level !in 0..1000 || level % 10 != 0) Reply(3) else {
-                    resistanceTarget = level / 10; setMode(ControlMode.Resistance)
+                    setMode(ControlMode.Resistance)
+                    mutableState.value = state.value.copy(targetResistance = level / 10, message = "Manual active")
                     Reply(1, byteArrayOf(7) + bytes.copyOfRange(1, 3))
                 }
             }
@@ -245,8 +280,13 @@ class BikeControl(
                 simulation = Simulation(signed(1) * .001f, signed(3) * .01f,
                     (bytes[5].toInt() and 255) * .0001f, (bytes[6].toInt() and 255) * .01f)
                 setMode(ControlMode.Simulation)
+                mutableState.value = state.value.copy(targetIncline = simulation.grade)
                 Reply(1, byteArrayOf(0x12) + bytes.copyOfRange(1, 7))
             }
         }
+        if (reply.result == 1 && (op == 4 || op == 5 || op == 0x11 || (op == 7 && state.value.mode != ControlMode.Manual))) {
+            mutableState.value = state.value.copy(externalControl = if (client.startsWith("dircon:")) "DirCon" else "Bluetooth")
+        }
+        return reply
     }
 }
