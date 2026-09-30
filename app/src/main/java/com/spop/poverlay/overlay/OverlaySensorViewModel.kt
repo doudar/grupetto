@@ -323,6 +323,9 @@ class OverlaySensorViewModel(
     val powerValue = sensorInterface.power
         .sample(UiUpdatePeriod)
         .map { "%.0f".format(it) }
+    val pelotonPowerComparison = combine(sensorInterface.nativePower, sensorInterface.usesExternalPower) { watts, external ->
+        if (external) "Peloton %.0f W".format(watts) else null
+    }
     val rpmValue = sensorInterface.cadence
         .sample(UiUpdatePeriod)
         .map { "%.0f".format(it) }

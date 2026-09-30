@@ -137,6 +137,7 @@ class MainActivity : ComponentActivity() {
             // Explicitly stop long-running components before closing the task so Android won't revive it.
             stopService(Intent(this@MainActivity, OverlayService::class.java))
             HeartRateManager.stop()
+            (application as GrupettoApplication).powerMeterManager.stop()
             (application as GrupettoApplication).bleServer.stop()
             (application as GrupettoApplication).antPlusServer.stop()
             delay(750L)

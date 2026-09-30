@@ -30,6 +30,7 @@ class GrupettoApplication : Application() {
         bleServer.stop()
         bleServer.stopDirConOnly()
         antPlusServer.stop()
+        powerMeterManager.stop()
         getSharedPreferences("developer", MODE_PRIVATE).edit().putString("emulatedModel", model?.name).commit()
     }
     // Use one detection result for both Bluetooth and every overlay instance.
@@ -42,6 +43,9 @@ class GrupettoApplication : Application() {
 
     lateinit var antPlusServer: AntPlusServer
         private set
+    lateinit var powerMeterManager: com.spop.poverlay.sensor.power.PowerMeterManager
+        private set
+    private val sensorScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
 
     override fun onCreate() {
         super.onCreate()
@@ -50,7 +54,11 @@ class GrupettoApplication : Application() {
         }
 
         val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        sensorInterface = createSensorInterface()
+        powerMeterManager = com.spop.poverlay.sensor.power.PowerMeterManager(this)
+        val bike = createSensorInterface()
+        sensorInterface = if (emulatedModel == null) com.spop.poverlay.sensor.power.ExternalPowerSensorInterface(
+            bike, powerMeterManager.reading, sensorScope, android.os.SystemClock::elapsedRealtime
+        ) else bike
         bleServer = BleServer(this, bluetoothManager, sensorInterface)
         antPlusServer = AntPlusServer(this, sensorInterface)
     }

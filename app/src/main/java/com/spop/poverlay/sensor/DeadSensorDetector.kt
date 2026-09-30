@@ -61,7 +61,8 @@ class DeadSensorDetector(
     // Whenever a value is received for a sensor, reset the dead sensor timeout
     private fun setupTimeoutReset() {
         launch(Dispatchers.IO) {
-            sensorInterface.power.collect(object : FlowCollector<Float> {
+            // An external meter must not hide a stalled Peloton sensor service.
+            sensorInterface.nativePower.collect(object : FlowCollector<Float> {
                 override suspend fun emit(value: Float) {
                     resetTimeoutChannel.trySend(Unit)
                 }

@@ -69,25 +69,53 @@ Five taps on the version label opens the model selector. Choosing a model
 restarts the app so the overlay, settings, and sensor selection stay consistent.
 Selection persists in separate developer preferences. Each emulated sensor is
 purely synthetic: it never binds Affernet or writes a real motor. Bluetooth,
-DirCon, ANT+ transmission and HR discovery are disabled during emulation.
+DirCon, ANT+ transmission and external sensor discovery are disabled during emulation.
 The original connection/overlay preferences are preserved in a separate file.
 Use **Detected hardware** to return to normal. Emulation also works in release
 builds, so the hidden menu can be used on an installed tablet.
 
+## External power
+
+External Sensors supports one Bluetooth Cycling Power meter alongside the existing
+heart-rate connection. Discovery filters for service 0x1818 and subscribes to
+measurement 0x2A63. The selected device is saved for reconnection; explicit
+Disconnect clears the automatic selection, while Forget also removes the saved
+device. Truncated packets do not refresh the reading timestamp. Signed negative
+watts are decoded correctly and clamped to zero for ride metrics.
+
+Fresh external watts replace native watts in the shared overlay/broadcast stream
+and ERG feedback. Cadence, resistance, and speed keep their existing bike sources.
+Native watts remain visible as a smaller **Peloton … W** line beneath external
+watts in both overlay sizes. The Peloton service watchdog still observes native
+telemetry, so a working external meter cannot conceal a stalled bike connection.
+
+After three seconds without a valid packet, display/broadcast falls back to native
+watts and hides the comparison. After twelve seconds, the meter connection is
+released for reconnection. Any source change—including loss while ERG is paused—
+disarms ERG and releases ownership; a new explicit target is required. Simulation
+does not depend on external watts and remains active through source changes.
+
 ## Validation
 
-- 173 JVM unit tests pass with strict Android stubs; `returnDefaultValues`
+- 198 JVM unit tests pass with strict Android stubs; `returnDefaultValues`
   remains disabled. New coverage includes 18 device-gating cases, motor parcel
   arguments/recycling/errors, FTMS ownership/validation, stale data, cadence,
-  manual override, rate limits, pause/resume, simulation, and shifts.
+  manual override, rate limits, pause/resume, simulation, and shifts. External
+  power tests cover signed/optional packet parsing, zero watts, freshness,
+  fallback, native comparison, source changes, ERG direction, notification
+  subscription, permission loss, late callbacks, and reconnect timing.
 - Three Android integration tests pass on the attached Amazon Kindle
   (KFRAPWI, Android 11), using real GATT characteristic objects and a fake motor.
   They cover advertised capabilities/ranges, read-only Bike/Tread, shared
   BLE/DirCon procedure handling, ERG status, and unchanged telemetry scaling.
+- Two Compose tests pass on the Kindle: the native-power comparison appears
+  below external watts, updates and disappears on fallback, and the minimized
+  comparison plus both shifters fit on screen.
 - Debug APK build and lint pass (zero errors). The Kindle dashboard, developer
   menu, Bike+ tuning dialog, heart-rate dialog, and both overlay sizes were
   visually checked at 1280×800, density 213. A simulated shift changed resistance
   from 40 to 42. The visual pass caught and corrected the gain slider range.
 - Physical motor behavior and training-app interoperability on actual Bike+
-  and CrossTrainer hardware still need validation. No motor commands were sent
+  and CrossTrainer hardware still need validation, as do pairing and ERG
+  feedback with a physical external power meter. No motor commands were sent
   to physical Peloton hardware during this work.

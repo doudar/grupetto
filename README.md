@@ -79,8 +79,15 @@ After following those steps, the APK for grupetto can be found on the Releases t
   Bluetooth or DirCon. In Sim mode, **− / +** shifters appear on both sides of
   the expanded and minimized overlay. Original Bike and Tread remain read-only.
   The ERG/motor work builds on [dwj300's PR #50](https://github.com/doudar/grupetto/pull/50).
-- Settings use a compact dashboard with dialogs for connections, heart-rate
-  monitors/zones, and bike control. Monitor lists use pages instead of scrolling.
+- Settings show live metrics and connection status in a compact dashboard, with
+  dialogs for connections, **External Sensors**, and bike control. Sensor lists
+  use pages instead of scrolling. External Sensors includes heart-rate monitors,
+  HR zones, and Bluetooth Cycling Power meters; HR and power can connect together.
+- A selected external power meter supplies watts for the overlay, broadcasts,
+  and ERG. A small **Peloton … W** comparison appears below external watts in
+  both overlay sizes. Missing data falls back to built-in power after three
+  seconds. Changing or losing the power source stops ERG until explicitly
+  restarted. Cadence, resistance, and speed remain supplied by the bike.
 - Developer menu: tap the version label at the bottom left **five times**, with
   no more than two seconds between taps. Select Bike, Bike+, CrossTrainer, or
   Tread to restart into emulation. **Use detected hardware** restores normal

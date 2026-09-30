@@ -27,6 +27,9 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import com.spop.poverlay.overlay.composables.OverlayMainContent
 import com.spop.poverlay.overlay.composables.OverlayMinimizedContent
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
@@ -49,7 +52,7 @@ val OverlayCornerRadius = 25.dp
 val StatCardWidth = 105.dp
 val PowerChartFullWidth = 200.dp
 val PowerChartShrunkWidth = 120.dp
-val BackgroundColorDefault = Color(20, 20, 20)
+val BackgroundColorDefault = Color(20, 20, 20, 230)
 
 // Shown when a sensor hasn't reported a value yet
 const val SensorValuePlaceholderText = "-"
@@ -78,6 +81,7 @@ fun Overlay(
     val bikeControl by sensorViewModel.bikeControlState.collectAsState()
     val showShifters = bikeControl.connected && bikeControl.mode == com.spop.poverlay.control.ControlMode.Simulation
     val power by sensorViewModel.powerValue.collectAsState(initial = SensorValuePlaceholderText)
+    val pelotonPowerComparison by sensorViewModel.pelotonPowerComparison.collectAsState(initial = null)
 
     val defaultMetric by sensorViewModel.defaultMetric.collectAsState()
     val selectedMetric by sensorViewModel.selectedMetric.collectAsState(initial = defaultMetric)
@@ -155,8 +159,9 @@ fun Overlay(
     val size = remember { mutableStateOf(IntSize.Zero) }
 
 
+    val contentHeight = height + if (pelotonPowerComparison != null) 14.dp else 0.dp
     val mainContentHeight = with(LocalDensity.current) {
-        height.roundToPx()
+        contentHeight.roundToPx()
     }
 
     val timerAlpha by animateFloatAsState(
@@ -208,6 +213,7 @@ fun Overlay(
             location = location,
             isTread = isTread,
             powerLabel = power,
+            powerComparison = pelotonPowerComparison,
             contentAlpha = timerAlpha,
             timerLabel = timerLabel,
             cadenceLabel = rpm,
@@ -232,7 +238,7 @@ fun Overlay(
     }
     val mainContent = @Composable {
         Box(modifier = Modifier
-            .requiredHeight(height)
+            .requiredHeight(contentHeight)
             .wrapContentWidth(unbounded = true)
             .onSizeChanged {
                 if (it.width != size.value.width || it.height != size.value.height) {
@@ -275,6 +281,7 @@ fun Overlay(
                 rowAlignment = rowAlignment,
                 isTread = isTread,
                 power = power,
+                powerComparison = pelotonPowerComparison,
                 rpm = rpm,
                 pauseChart = isCurrentlyAnimating,
                 currentGraph = currentGraph,
@@ -370,9 +377,14 @@ fun Overlay(
 
 @Composable
 fun ShiftButton(up: Boolean, onClick: () -> Unit) {
-    Button(onClick, Modifier.size(52.dp).padding(2.dp),
+    Button(onClick, Modifier.size(64.dp).padding(3.dp).semantics {
+        contentDescription = if (up) "Shift up: increase resistance" else "Shift down: decrease resistance"
+    },
         contentPadding = PaddingValues(0.dp),
-        colors = androidx.compose.material.ButtonDefaults.buttonColors(backgroundColor = Color(0xFF245C49))) {
-        Text(if (up) "+" else "−", color = Color.White, fontSize = androidx.compose.ui.unit.TextUnit.Unspecified)
+        shape = RoundedCornerShape(12.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF91FFE0)),
+        colors = androidx.compose.material.ButtonDefaults.buttonColors(backgroundColor = Color(0xFF008761))) {
+        Text(if (up) "+" else "−", color = Color.White, fontSize = 32.sp,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
     }
 }

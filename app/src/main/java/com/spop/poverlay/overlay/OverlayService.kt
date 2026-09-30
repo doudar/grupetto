@@ -113,6 +113,8 @@ class OverlayService : LifecycleEnabledService() {
             startForeground(OverlayServiceId, notification)
         }
         if ((application as GrupettoApplication).emulatedModel == null) HeartRateManager.start(this)
+        if ((application as GrupettoApplication).emulatedModel == null)
+            (application as GrupettoApplication).powerMeterManager.start()
         syncBackgroundExecutionGuards()
         buildDialog()
     }
@@ -269,7 +271,7 @@ class OverlayService : LifecycleEnabledService() {
                     }
                 )
             }
-            alpha = 0.9f
+            alpha = 1f
             isFocusable = false
             clipToPadding = false
             clipChildren = false

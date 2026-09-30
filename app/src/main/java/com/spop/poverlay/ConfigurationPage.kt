@@ -46,19 +46,30 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
     val scanning by viewModel.hrIsScanning.collectAsStateWithLifecycle()
     val match by viewModel.hrMatchByName.collectAsStateWithLifecycle()
     val bike by viewModel.bikeControlState.collectAsStateWithLifecycle()
+    val watts by viewModel.livePower.collectAsStateWithLifecycle(initialValue = Float.NaN)
+    val cadence by viewModel.liveCadence.collectAsStateWithLifecycle(initialValue = Float.NaN)
+    val resistance by viewModel.liveResistance.collectAsStateWithLifecycle(initialValue = Float.NaN)
+    val speed by viewModel.liveSpeed.collectAsStateWithLifecycle(initialValue = Float.NaN)
+    val incline by viewModel.liveIncline.collectAsStateWithLifecycle(initialValue = Float.NaN)
+    val bpm by HeartRateManager.heartRate.collectAsStateWithLifecycle()
+    val meter by viewModel.powerMeterDevice.collectAsStateWithLifecycle()
+    val externalWatts by viewModel.powerMeterReading.collectAsStateWithLifecycle()
     var dialog by remember { mutableStateOf<String?>(null) }
     var developerTaps by remember { mutableStateOf(0) }
     var lastDeveloperTap by remember { mutableStateOf(0L) }
-    Box(Modifier.fillMaxSize().padding(20.dp)) {
+    Box(Modifier.fillMaxSize().padding(16.dp)) {
         if (permission) {
             Column(Modifier.align(Alignment.Center)) {
                 PermissionPage(viewModel::onGrantPermissionClicked, UiScale(.7f))
             }
         } else {
-            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Grupetto", fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Grupetto", fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                            Text("  /  RIDE CONSOLE", color = Color(0xFF34D399), fontSize = 11.sp, letterSpacing = 1.sp)
+                        }
                         Text(viewModel.emulatedModel?.let { "${it.label} emulation · Simulated data · Radios off" }
                             ?: "Your ride, connected", color = Color(0xFF9EAEC0), fontSize = 14.sp)
                     }
@@ -67,43 +78,64 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                     }
                     TextButton(viewModel::onQuitClicked, Modifier.padding(start = 12.dp)) { Text("Quit") }
                 }
-                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SettingsTile("Overlay", Modifier.weight(1f).fillMaxHeight()) {
+                Row(Modifier.fillMaxWidth().height(58.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (viewModel.isTread) {
+                        LiveMetric("SPEED", displayMetric(speed, 1), "mph", Color(0xFF60A5FA), Modifier.weight(1f))
+                        LiveMetric("INCLINE", displayMetric(incline, 1), "%", Color(0xFF34D399), Modifier.weight(1f))
+                    } else {
+                        LiveMetric("POWER", displayMetric(watts), "W", Color(0xFFFBBF24), Modifier.weight(1f))
+                        LiveMetric("CADENCE", displayMetric(cadence), "rpm", Color(0xFF34D399), Modifier.weight(1f))
+                        LiveMetric("RESISTANCE", displayMetric(resistance), "%", Color(0xFF60A5FA), Modifier.weight(1f))
+                    }
+                    LiveMetric("HEART RATE", bpm?.toString() ?: "—", "bpm", Color(0xFFFB7185), Modifier.weight(1f))
+                }
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingsTile(if (running) "Overlay · Running" else "Overlay · Ready", Modifier.weight(1f).fillMaxHeight(), Color(0xFF34D399)) {
                         SettingSwitch("Start on boot", boot, viewModel::onAutoStartOnBootClicked)
                         SettingSwitch("Timer when minimized", timer, viewModel::onShowTimerWhenMinimizedClicked)
-                        if (boot && !background) Text("Allow all-the-time location for HR at boot.", fontSize = 13.sp, color = Color(0xFFFFCC44))
                     }
-                    SettingsTile("Connections", Modifier.weight(1f).fillMaxHeight()) {
-                        Text(listOfNotNull(if (ble) "Bluetooth" else null, if (dircon) "Network" else null,
-                            if (ant && viewModel.antPlusSupported) "ANT+" else null).joinToString(" · ").ifEmpty { "Broadcasting off" },
-                            color = Color(0xFF9EAEC0))
+                    SettingsTile("Broadcast connections", Modifier.weight(1f).fillMaxHeight(), Color(0xFF60A5FA)) {
+                        ConnectionSummary("Bluetooth", if (viewModel.isPreview) "Preview" else if (ble) "On · Grupetto" else "Off", ble)
+                        ConnectionSummary("Network", if (viewModel.isPreview) "Preview" else if (dircon) "On · DirCon" else "Off", dircon)
+                        if (viewModel.antPlusSupported) ConnectionSummary("ANT+", if (viewModel.isPreview) "Preview" else if (ant) "On · IDs 1 / 2 / 3" else "Off", ant)
                         Spacer(Modifier.weight(1f))
-                        OutlinedButton({ dialog = "connections" }) { Text("Manage connections") }
+                        TextButton({ dialog = "connections" }, contentPadding = PaddingValues(0.dp), modifier = Modifier.height(36.dp)) { Text("Manage connections →") }
                     }
                 }
-                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SettingsTile("Heart rate", Modifier.weight(1f).fillMaxHeight()) {
-                        Text(hr?.let { it.name ?: it.address } ?: "No monitor connected",
-                            maxLines = 1, overflow = TextOverflow.Ellipsis, color = Color(0xFF9EAEC0))
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingsTile("External Sensors", Modifier.weight(1f).fillMaxHeight(), Color(0xFFFB7185)) {
+                        SensorSummary("Heart rate", hr?.let { it.name ?: it.address } ?: "Not connected",
+                            bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185))
+                        SensorSummary("Power meter", meter?.let { it.name ?: it.address } ?: "Using built-in power",
+                            externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", Color(0xFFFBBF24))
                         Spacer(Modifier.weight(1f))
-                        OutlinedButton({ dialog = "heart" }) { Text("Monitors & zones") }
+                        TextButton({ dialog = "sensors" }, contentPadding = PaddingValues(0.dp), modifier = Modifier.height(36.dp)) { Text("Pair & manage sensors →") }
                     }
                     if (bike.connected) {
-                        SettingsTile("Bike+ / CrossTrainer control", Modifier.weight(1f).fillMaxHeight()) {
-                            Text(if (bike.mode == com.spop.poverlay.control.ControlMode.Erg) "ERG · ${bike.targetWatts} W"
-                                else bike.mode.name, color = Color(0xFF6EE7B7))
-                            Text(bike.message, fontSize = 13.sp, maxLines = 2)
+                        SettingsTile("Trainer control", Modifier.weight(1f).fillMaxHeight(), Color(0xFFFBBF24)) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text(if (bike.mode == com.spop.poverlay.control.ControlMode.Erg) "ERG · ${bike.targetWatts} W"
+                                    else bike.mode.name, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6EE7B7))
+                                Spacer(Modifier.weight(1f))
+                                Text(if (externalWatts != null) "EXTERNAL POWER" else "BUILT-IN POWER", fontSize = 10.sp, color = Color(0xFF9EAEC0))
+                            }
+                            Text("Shift ${bike.shiftSize} pts   ·   Gain ${"%.3f".format(java.util.Locale.US, bike.gain)}",
+                                fontSize = 13.sp, lineHeight = 17.sp, color = Color(0xFF9EAEC0))
+                            Text(bike.message, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Spacer(Modifier.weight(1f))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton({ dialog = "bike" }) { Text("Modes & tuning") }
-                                TextButton(viewModel::stopBikeControl) { Text("Manual") }
+                            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                TextButton({ dialog = "bike" }, contentPadding = PaddingValues(0.dp), modifier = Modifier.height(36.dp)) { Text("Modes & tuning →") }
+                                TextButton(viewModel::stopBikeControl, modifier = Modifier.height(36.dp)) { Text("Manual") }
                             }
                         }
                     } else {
-                        SettingsTile("About", Modifier.weight(1f).fillMaxHeight()) {
-                            Text("Live metrics over your favorite training apps.", color = Color(0xFF9EAEC0))
+                        SettingsTile("Device & app", Modifier.weight(1f).fillMaxHeight(), Color(0xFFA78BFA)) {
+                            Text(if (viewModel.isTread) "Tread · Speed & incline" else "Bike · Live telemetry", fontSize = 18.sp, lineHeight = 22.sp)
+                            Text("Model ${Build.MODEL}   ·   Android ${Build.VERSION.RELEASE}", fontSize = 13.sp, lineHeight = 17.sp, color = Color(0xFF9EAEC0))
+                            Text(if (externalWatts != null) "Power source: external meter" else "Power source: built-in sensors", fontSize = 13.sp, lineHeight = 17.sp)
                             Spacer(Modifier.weight(1f))
-                            OutlinedButton({ dialog = "about" }) { Text("Version & updates") }
+                            TextButton({ dialog = "about" }, contentPadding = PaddingValues(0.dp), modifier = Modifier.height(36.dp)) { Text("Version & updates →") }
                         }
                     }
                 }
@@ -121,6 +153,18 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
         }
     }
     when (dialog) {
+        "sensors" -> SettingsDialog("External Sensors", { dialog = null }) {
+            SensorSummary("Heart rate", hr?.let { it.name ?: it.address } ?: "Pair a heart-rate monitor",
+                bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185))
+            OutlinedButton({ dialog = "heart" }, Modifier.fillMaxWidth()) { Text("Heart-rate monitors & zones") }
+            Divider(Modifier.padding(vertical = 12.dp))
+            SensorSummary("Power meter", meter?.let { it.name ?: it.address } ?: "Use an external Cycling Power sensor",
+                externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", Color(0xFFFBBF24))
+            OutlinedButton({ dialog = "power" }, Modifier.fillMaxWidth()) { Text("Pair & manage power meters") }
+            Text("External watts are used for display, broadcasting, and ERG. Changing or losing the source stops ERG until restarted.",
+                fontSize = 13.sp, color = Color(0xFF9EAEC0))
+        }
+        "power" -> PowerMeterDialog(viewModel) { dialog = null }
         "developer" -> SettingsDialog("Developer · Model emulation", { dialog = null }) {
             Text("Emulation uses simulated sensors and motor control. Broadcasts are disabled. Selecting a model restarts Grupetto.",
                 fontSize = 14.sp, color = Color(0xFF9EAEC0))
@@ -137,6 +181,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
             SettingSwitch("Bluetooth FTMS", ble, viewModel::onBleTxEnabledClicked)
             SettingSwitch("Network / DirCon", dircon, viewModel::onDirConEnabledClicked)
             Text("Bluetooth name: Grupetto", fontSize = 14.sp, color = Color(0xFF9EAEC0))
+            if (boot && !background) Text("Allow location all the time in Android settings for sensor reconnection after boot.",
+                fontSize = 12.sp, color = Color(0xFFFBBF24))
             if (viewModel.antPlusSupported) {
                 Divider(Modifier.padding(vertical = 12.dp))
                 SettingSwitch("ANT+ broadcast", ant, viewModel::onAntPlusTxEnabledClicked)
@@ -144,11 +190,11 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
             }
         }
         "bike" -> if (bike.connected) SettingsDialog("Bike+ / CrossTrainer", { dialog = null }) {
-            var watts by remember { mutableStateOf(bike.targetWatts.toFloat()) }
-            Text("ERG target · ${watts.toInt()} W")
-            Slider(watts, { watts = it }, valueRange = 25f..1000f, steps = 194)
+            var ergTargetWatts by remember { mutableStateOf(bike.targetWatts.toFloat()) }
+            Text("ERG target · ${ergTargetWatts.toInt()} W")
+            Slider(ergTargetWatts, { ergTargetWatts = it }, valueRange = 25f..1000f, steps = 194)
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button({ viewModel.startErg(watts.toInt()) }) { Text("Start ERG") }
+                Button({ viewModel.startErg(ergTargetWatts.toInt()) }) { Text("Start ERG") }
                 OutlinedButton(viewModel::startSimulation) { Text("Start Sim") }
                 TextButton(viewModel::stopBikeControl) { Text("Manual") }
             }
@@ -181,12 +227,12 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
 }
 
 @Composable
-private fun SettingsTile(title: String, modifier: Modifier, content: @Composable ColumnScope.() -> Unit) {
+private fun SettingsTile(title: String, modifier: Modifier, accent: Color = Color(0xFF34D399), content: @Composable ColumnScope.() -> Unit) {
     Card(modifier, shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-        backgroundColor = Color(0xFF1B2430), elevation = 0.dp) {
-        Column(Modifier.padding(16.dp)) {
-            Text(title, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(8.dp))
+        backgroundColor = Color(0xFF19232F), border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = .25f)), elevation = 0.dp) {
+        Column(Modifier.padding(12.dp)) {
+            Text(title, fontSize = 17.sp, lineHeight = 22.sp, color = accent, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
             content()
         }
     }
@@ -197,6 +243,97 @@ private fun SettingSwitch(label: String, checked: Boolean, onChange: (Boolean) -
     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), fontSize = 16.sp)
         Switch(checked, onChange)
+    }
+}
+
+private fun displayMetric(value: Float, decimals: Int = 0): String =
+    if (value.isFinite()) String.format(java.util.Locale.US, "%.$decimals" + "f", value) else "—"
+
+@Composable
+private fun LiveMetric(label: String, value: String, unit: String, accent: Color, modifier: Modifier) {
+    Surface(modifier.fillMaxHeight(), color = Color(0xFF111C27),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) {
+            Text(label, fontSize = 10.sp, letterSpacing = 1.sp, color = Color(0xFF9EAEC0))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(value, fontSize = 25.sp, fontWeight = FontWeight.Bold, color = accent)
+                Text(" $unit", fontSize = 12.sp, color = Color(0xFF9EAEC0), modifier = Modifier.padding(bottom = 4.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConnectionSummary(name: String, detail: String, enabled: Boolean) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(name, fontSize = 13.sp, color = Color(0xFFBAC6D3))
+        Text(detail, fontSize = 13.sp, color = if (enabled) Color(0xFF6EE7B7) else Color(0xFF718096))
+    }
+}
+
+@Composable
+private fun SensorSummary(label: String, name: String, value: String, accent: Color) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(label, fontSize = 13.sp, lineHeight = 16.sp, color = Color(0xFFBAC6D3))
+            Text(name, fontSize = 11.sp, lineHeight = 14.sp, color = Color(0xFF8796A8), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text(value, color = accent, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun PowerMeterDialog(viewModel: ConfigurationViewModel, onDismiss: () -> Unit) {
+    val connected by viewModel.powerMeterDevice.collectAsStateWithLifecycle()
+    val reading by viewModel.powerMeterReading.collectAsStateWithLifecycle()
+    val status by viewModel.powerMeterStatus.collectAsStateWithLifecycle()
+    val discovered by viewModel.powerMeterDiscovered.collectAsStateWithLifecycle()
+    val saved by viewModel.powerMeterSaved.collectAsStateWithLifecycle()
+    val scanning by viewModel.powerMeterScanning.collectAsStateWithLifecycle()
+    var tab by remember { mutableStateOf(0) }
+    var page by remember { mutableStateOf(0) }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        viewModel.managePowerMeters(true)
+        onDispose { viewModel.managePowerMeters(false) }
+    }
+    SettingsDialog("External Sensors · Power", onDismiss) {
+        SensorSummary("Power meter",
+            connected?.let { it.name ?: it.address } ?: status,
+            "${reading?.watts?.coerceAtLeast(0) ?: "—"} W", Color(0xFFFBBF24))
+        if (connected != null) Row {
+            TextButton(viewModel::disconnectPowerMeter) { Text("Disconnect") }
+            TextButton({ connected?.let { viewModel.forgetPowerMeter(it.address) } }) { Text("Forget") }
+        }
+        Text(if (viewModel.isPreview) "Model emulation: pairing is disabled" else status,
+            fontSize = 12.sp, color = Color(0xFF9EAEC0))
+        TabRow(tab, backgroundColor = Color.Transparent) {
+            listOf("Discover", "Saved").forEachIndexed { index, name ->
+                Tab(tab == index, { tab = index; page = 0 }, text = { Text(name) })
+            }
+        }
+        val devices = (if (tab == 0) discovered else saved).filter { it.address != connected?.address }
+        val pages = maxOf(1, (devices.size + 1) / 2)
+        val current = page.coerceAtMost(pages - 1)
+        Column(Modifier.height(128.dp).padding(top = 8.dp)) {
+            if (devices.isEmpty()) Text(if (scanning) "Scanning… Wake your power meter by pedaling." else "No power meters found")
+            devices.drop(current * 2).take(2).forEach { device ->
+                Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(device.name ?: "Power meter", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(device.address, fontSize = 12.sp, color = Color(0xFF9EAEC0))
+                    }
+                    TextButton({ viewModel.connectPowerMeter(device) }) { Text("Connect") }
+                    if (tab == 1) TextButton({ viewModel.forgetPowerMeter(device.address) }) { Text("Forget") }
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            TextButton({ page = current - 1 }, enabled = current > 0) { Text("Previous") }
+            Text("${current + 1} / $pages", Modifier.padding(top = 12.dp), fontSize = 13.sp)
+            TextButton({ page = current + 1 }, enabled = current + 1 < pages) { Text("Next") }
+        }
+        Text("A connected meter supplies watts to the overlay, all broadcasts, and ERG. Cadence and resistance still come from the bike.",
+            fontSize = 12.sp, color = Color(0xFF9EAEC0))
     }
 }
 

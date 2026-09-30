@@ -65,7 +65,8 @@ fun OverlayMainContent(
         showResistanceCard: Boolean,
         onMetricSelected: (MetricType) -> Unit,
         onSpeedUnitClicked: () -> Unit,
-        onChartClicked: () -> Unit
+        onChartClicked: () -> Unit,
+        powerComparison: String? = null
 ) {
     var shrinkChart by remember { mutableStateOf(false) }
 
@@ -139,8 +140,9 @@ fun OverlayMainContent(
 
     val powerCard = @Composable {
         StatCard(
-                name = "Power",
+                name = if (powerComparison != null) "External" else "Power",
                 value = power,
+                secondaryValue = powerComparison,
                 unit = "watts",
                 modifier = statCardModifier,
                 iconDrawable = R.drawable.ic_power,

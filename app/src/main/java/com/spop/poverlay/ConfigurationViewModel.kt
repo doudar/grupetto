@@ -81,6 +81,32 @@ class ConfigurationViewModel(
     private val bleServer = (application as GrupettoApplication).bleServer
     private val antPlusServer = (application as GrupettoApplication).antPlusServer
     private val bikeControl = (application as GrupettoApplication).sensorInterface.bikeControl
+    private val powerMeters = (application as GrupettoApplication).powerMeterManager
+    val powerMeterDevice = powerMeters.connectedDevice
+    val powerMeterReading = powerMeters.reading
+    val powerMeterStatus = powerMeters.status
+    val powerMeterDiscovered = powerMeters.discoveredDevices
+    val powerMeterSaved = powerMeters.savedDevices
+    val powerMeterScanning = powerMeters.scanning
+    val livePower = (application as GrupettoApplication).sensorInterface.power
+    val liveCadence = (application as GrupettoApplication).sensorInterface.cadence
+    val liveResistance = (application as GrupettoApplication).sensorInterface.resistance
+    val liveSpeed = (application as GrupettoApplication).sensorInterface.speed
+    val liveIncline = (application as GrupettoApplication).sensorInterface.incline
+    val isTread = (application as GrupettoApplication).sensorInterface.deviceType == com.spop.poverlay.sensor.interfaces.DeviceType.Tread
+    private var managingPowerMeters = false
+    fun managePowerMeters(active: Boolean) {
+        if (isPreview) return
+        managingPowerMeters = active
+        if (active && !hasBluetoothPermissions()) {
+            requestBluetoothPermissions.value = getRequiredBluetoothPermissions()
+            return
+        }
+        powerMeters.manage(active)
+    }
+    fun connectPowerMeter(device: HeartRateDevice) { if (!isPreview) powerMeters.connect(device) }
+    fun disconnectPowerMeter() { powerMeters.disconnect() }
+    fun forgetPowerMeter(address: String) { powerMeters.forget(address) }
     val bikeControlState = bikeControl?.state ?: MutableStateFlow(com.spop.poverlay.control.ControlState())
 
     fun setBikeTuning(shiftSize: Int, gain: Float) {
@@ -103,6 +129,7 @@ class ConfigurationViewModel(
     init {
         updatePermissionState()
         if (!isPreview) HeartRateManager.start(getApplication())
+        if (!isPreview) powerMeters.start()
         syncOutboundTransports()
         syncAntPlusTransport()
     }
@@ -187,6 +214,10 @@ class ConfigurationViewModel(
 
     fun onBluetoothPermissionsResult(granted: Boolean) {
         if (granted) {
+            if (!isPreview) {
+                powerMeters.start()
+                if (managingPowerMeters) powerMeters.manage(true)
+            }
             syncOutboundTransports()
             requestBatteryOptimizationExemptionIfNeeded()
             infoPopup.postValue("Bluetooth permissions granted. BLE service started.")
@@ -275,6 +306,7 @@ class ConfigurationViewModel(
 
     fun onQuitClicked() {
         bikeControl?.stop()
+        powerMeters.stop()
         requestQuit.value = Unit
     }
 

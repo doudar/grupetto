@@ -59,6 +59,17 @@ class BikeControl(
     private var resistanceTarget = 0
     private var pausedMode: ControlMode? = null
     private var pausedShift = 0
+    private var externalPower: com.spop.poverlay.sensor.power.ExternalPowerReading? = null
+
+    @Synchronized fun useExternalPower(reading: com.spop.poverlay.sensor.power.ExternalPowerReading?) {
+        val next = reading?.takeIf { com.spop.poverlay.sensor.power.freshExternalPower(it, clock()) != null }
+        if (externalPower?.address != next?.address) {
+            if (state.value.mode == ControlMode.Erg || pausedMode == ControlMode.Erg)
+                stop("Power source changed · restart ERG")
+            filteredPower = null
+        }
+        externalPower = next
+    }
 
     @Synchronized fun tune(shiftSize: Int, gain: Float) {
         mutableState.value = state.value.copy(shiftSize = shiftSize.coerceIn(1, 10),
@@ -134,6 +145,8 @@ class BikeControl(
     /** Called at 100 ms; only new telemetry drives feedback. Stale data disarms control. */
     private var lastSampleTime = Long.MIN_VALUE
     @Synchronized fun tick() {
+        if (externalPower != null && com.spop.poverlay.sensor.power.freshExternalPower(externalPower, clock()) == null)
+            useExternalPower(null)
         if (!fresh()) { if (state.value.connected) unavailable("Bike+ data is stale"); return }
         val reading = sample ?: return
         if (state.value.mode == ControlMode.Manual || reading.timestamp == lastSampleTime) return
@@ -154,7 +167,8 @@ class BikeControl(
         }
         val target = when (state.value.mode) {
             ControlMode.Erg -> {
-                val power = filteredPower?.let { it + dt / (2f + dt) * (reading.power - it) } ?: reading.power
+                val measured = com.spop.poverlay.sensor.power.freshExternalPower(externalPower, clock()) ?: reading.power
+                val power = filteredPower?.let { it + dt / (2f + dt) * (measured - it) } ?: measured
                 filteredPower = power
                 val error = state.value.targetWatts - power
                 requestedResistance + if (abs(error) <= 3f) 0f else state.value.gain * error * dt / .1f

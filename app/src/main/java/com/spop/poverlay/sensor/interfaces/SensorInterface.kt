@@ -11,6 +11,9 @@ enum class DeviceType { Bike, Tread }
 interface SensorInterface {
     val bikeControl: com.spop.poverlay.control.BikeControl? get() = null
     val power: Flow<Float>
+    /** Native watts remain available for comparison when an external meter supplies [power]. */
+    val nativePower: Flow<Float> get() = power
+    val usesExternalPower: Flow<Boolean> get() = flowOf(false)
     val cadence: Flow<Float>
     val resistance: Flow<Float>
     val speed
