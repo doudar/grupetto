@@ -73,6 +73,24 @@ After following those steps, the APK for grupetto can be found on the Releases t
 
 # Usage
 
+- On a connected Bike+ or G700 CrossTrainer, **Modes & tuning** provides ERG
+  (25–1000 W), Sim mode, resistance points per shift (1–10), and proportional
+  gain. FTMS clients can set power, resistance, or simulation parameters over
+  Bluetooth or DirCon. In Sim mode, **− / +** shifters appear on both sides of
+  the expanded and minimized overlay. Original Bike and Tread remain read-only.
+  The ERG/motor work builds on [dwj300's PR #50](https://github.com/doudar/grupetto/pull/50).
+- Settings use a compact dashboard with dialogs for connections, heart-rate
+  monitors/zones, and bike control. Monitor lists use pages instead of scrolling.
+- Developer menu: tap the version label at the bottom left **five times**, with
+  no more than two seconds between taps. Select Bike, Bike+, CrossTrainer, or
+  Tread to restart into emulation. **Use detected hardware** restores normal
+  operation. Emulation persists until changed, displays a banner and **DEMO**
+  on the overlay, uses simulated sensors/motor commands, and disables broadcasts.
+  Its configuration preferences are separate from normal settings.
+
+See [Bike control implementation and validation](docs/bike-control.md) for protocol
+details, Sim behavior, limits, and hardware validation still needed.
+
 - Bikes can optionally broadcast power, speed/cadence, and heart rate over ANT+
   in addition to BLE and DirCon. Enable **ANT+** in settings on a tablet with
   ANT Radio Service installed and a compatible radio. Pair device **1** for power,

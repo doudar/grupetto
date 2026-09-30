@@ -42,7 +42,7 @@ class SystemTimeProvider : TimeProvider {
 abstract class BaseBleService(val server: BleServer) {
     abstract val service: BluetoothGattService
     abstract fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float, incline: Float)
-    protected val connectedDevices = mutableSetOf<BluetoothDevice>()
+    protected val connectedDevices = java.util.concurrent.CopyOnWriteArraySet<BluetoothDevice>()
 
     fun hasConnectedDevices(): Boolean = connectedDevices.isNotEmpty()
 
@@ -215,6 +215,8 @@ class BleServer(
         }
 
         override fun writeCharacteristic(uuid: UUID, value: ByteArray): Boolean {
+            // Control writes require a session identity; the session-aware overload handles them.
+            if (uuid == FitnessMachineConstants.ControlPointUUID) return false
             val characteristic = findGattCharacteristic(uuid) ?: return false
             val writable = characteristic.properties and
                 (BluetoothGattCharacteristic.PROPERTY_WRITE or
@@ -225,11 +227,21 @@ class BleServer(
             characteristic.value = value
             return true
         }
+
+        override fun writeCharacteristic(client: String, uuid: UUID, value: ByteArray): Boolean {
+            if (uuid != FitnessMachineConstants.ControlPointUUID) return writeCharacteristic(uuid, value)
+            val service = advertisedServices().filterIsInstance<FitnessMachineService>().firstOrNull() ?: return false
+            val response = service.handleControl(client, value)
+            dirConServer?.notifyCharacteristicChanged(uuid, response, client)
+            return true
+        }
+
+        override fun disconnected(client: String) { sensorInterface.bikeControl?.disconnect(client) }
     }
 
     private fun baseServices(): List<BaseBleService> {
         return buildList {
-            add(FitnessMachineService(this@BleServer, sensorInterface.deviceType))
+            add(FitnessMachineService(this@BleServer, sensorInterface.deviceType, sensorInterface.bikeControl))
             if (sensorInterface.deviceType != DeviceType.Tread) {
                 add(CyclingPowerService(this@BleServer))
                 add(CyclingSpeedAndCadenceService(this@BleServer))
@@ -458,6 +470,7 @@ class BleServer(
 
     @Synchronized
     fun stop() {
+        sensorInterface.bikeControl?.disconnectTransport("ble:")
         isServerStarted = false
         isDirConOnlyStarted = false
         gattServerGeneration++
@@ -693,6 +706,7 @@ class BleServer(
     private fun handleBluetoothStateChange(state: Int) {
         when (state) {
             BluetoothAdapter.STATE_OFF -> {
+                sensorInterface.bikeControl?.disconnectTransport("ble:")
                 Timber.w("Bluetooth turned off, stopping advertising")
                 isAdvertising = false
                 // Don't call stopAdvertising() as Bluetooth is already off
@@ -798,6 +812,7 @@ class BleServer(
         }
 
         Timber.i("Restarting GATT and advertising: $reason")
+        sensorInterface.bikeControl?.disconnectTransport("ble:")
         
         try {
             // Stop current advertising
@@ -1125,6 +1140,14 @@ class BleServer(
     private fun startSensorDataUpdates() {
         sensorDataJob?.cancel()
         sensorDataJob = launch {
+            sensorInterface.bikeControl?.takeIf { it.supported }?.let { control ->
+                launch {
+                    control.state.collect { state ->
+                        registeredServices.filterIsInstance<FitnessMachineService>()
+                            .forEach { it.onControlStateChanged(state) }
+                    }
+                }
+            }
             val mutex = Mutex()
             val cadenceBuffer = mutableListOf<Float>()
             val powerBuffer = mutableListOf<Float>()

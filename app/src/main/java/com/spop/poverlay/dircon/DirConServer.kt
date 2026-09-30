@@ -72,7 +72,7 @@ class DirConServer(
         coroutineContext.cancelChildren()
     }
 
-    fun notifyCharacteristicChanged(uuid: UUID, value: ByteArray) {
+    fun notifyCharacteristicChanged(uuid: UUID, value: ByteArray, client: String? = null) {
         val message = DirConMessage(
             identifier = DirConConstants.MessageUnsolicitedCharacteristicNotification,
             sequenceNumber = 0,
@@ -83,7 +83,7 @@ class DirConServer(
 
         synchronized(clients) {
             clients
-                .filter { it.isSubscribed(uuid) }
+                .filter { it.isSubscribed(uuid) && (client == null || client == it.id) }
                 .forEach { it.write(encoded) }
         }
     }
@@ -129,7 +129,7 @@ class DirConServer(
             DirConConstants.MessageWriteCharacteristic -> {
                 val characteristicUuid = message.uuid
                     ?: return errorResponse(message, DirConConstants.ResponseCharacteristicNotFound)
-                if (!bridge.writeCharacteristic(characteristicUuid, message.data)) {
+                if (!bridge.writeCharacteristic(session.id, characteristicUuid, message.data)) {
                     return errorResponse(message, DirConConstants.ResponseCharacteristicWriteFailed)
                 }
                 DirConMessage(
@@ -168,6 +168,7 @@ class DirConServer(
         )
 
     private inner class ClientSession(private val socket: Socket) {
+        val id = "dircon:${UUID.randomUUID()}"
         private val subscriptions = Collections.synchronizedSet(mutableSetOf<UUID>())
 
         fun run() {
@@ -229,6 +230,7 @@ class DirConServer(
         }
 
         fun close() {
+            bridge.disconnected(id)
             runCatching { socket.close() }
         }
     }

@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.map
 enum class DeviceType { Bike, Tread }
 
 interface SensorInterface {
+    val bikeControl: com.spop.poverlay.control.BikeControl? get() = null
     val power: Flow<Float>
     val cadence: Flow<Float>
     val resistance: Flow<Float>

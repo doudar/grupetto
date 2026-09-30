@@ -112,7 +112,7 @@ class OverlayService : LifecycleEnabledService() {
         } else {
             startForeground(OverlayServiceId, notification)
         }
-        HeartRateManager.start(this)
+        if ((application as GrupettoApplication).emulatedModel == null) HeartRateManager.start(this)
         syncBackgroundExecutionGuards()
         buildDialog()
     }
@@ -163,7 +163,8 @@ class OverlayService : LifecycleEnabledService() {
         // Shared, Application-scoped sensor interface (also used by bleServer/antPlusServer) -
         // do not .stop() it here, its lifetime is the process lifetime.
         val sensorInterface = (application as GrupettoApplication).sensorInterface
-        val configurationRepository = ConfigurationRepository(applicationContext, this)
+        val configurationRepository = ConfigurationRepository(applicationContext, this,
+            (application as GrupettoApplication).configurationPreferencesName)
 
         val timerViewModel = OverlayTimerViewModel(
             configurationRepository,
@@ -441,6 +442,7 @@ class OverlayService : LifecycleEnabledService() {
     }
 
     private fun syncBackgroundExecutionGuards() {
+        if ((application as GrupettoApplication).emulatedModel != null) return
         val bleEnabled = isBleTxEnabled()
         val dirConEnabled = isDirConEnabled()
         val shouldRunBle = bleEnabled && hasBleRuntimePermissions()

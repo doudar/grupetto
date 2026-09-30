@@ -28,6 +28,15 @@ class ConfigurationViewModel(
     private val configurationRepository: ConfigurationRepository,
     private val releaseChecker: ReleaseChecker,
 ) : AndroidViewModel(application) {
+    val emulatedModel get() = (getApplication<Application>() as GrupettoApplication).emulatedModel
+    val isPreview get() = emulatedModel != null
+    fun emulateModel(model: com.spop.poverlay.sensor.interfaces.EmulatedModel?) {
+        val app = getApplication<Application>() as GrupettoApplication
+        app.stopService(Intent(app, OverlayService::class.java))
+        HeartRateManager.stop()
+        app.setEmulatedModel(model)
+        requestRestart.value = Unit
+    }
     val finishActivity = MutableLiveData<Unit>()
     val requestOverlayPermission = MutableLiveData<Unit>()
     val requestRestart = MutableLiveData<Unit>()
@@ -71,11 +80,29 @@ class ConfigurationViewModel(
 
     private val bleServer = (application as GrupettoApplication).bleServer
     private val antPlusServer = (application as GrupettoApplication).antPlusServer
+    private val bikeControl = (application as GrupettoApplication).sensorInterface.bikeControl
+    val bikeControlState = bikeControl?.state ?: MutableStateFlow(com.spop.poverlay.control.ControlState())
+
+    fun setBikeTuning(shiftSize: Int, gain: Float) {
+        bikeControl?.tune(shiftSize, gain)
+        if (isPreview) return
+        bikeControl?.state?.value?.let { state ->
+            getApplication<Application>().getSharedPreferences(ConfigurationRepository.SharedPrefsName, Context.MODE_PRIVATE)
+                .edit().putInt("bikeShiftSize", state.shiftSize).putFloat("bikeProportionalGain", state.gain).apply()
+        }
+    }
+    fun startErg(watts: Int) {
+        if (bikeControl?.localErg(watts) != true) infoPopup.value = "Release control in your training app first, or use Manual to take over."
+    }
+    fun startSimulation() {
+        if (bikeControl?.localSimulation() != true) infoPopup.value = "Release control in your training app first, or use Manual to take over."
+    }
+    fun stopBikeControl() { bikeControl?.stop() }
     private var batteryOptimizationPromptShownThisSession = false
 
     init {
         updatePermissionState()
-        HeartRateManager.start(getApplication())
+        if (!isPreview) HeartRateManager.start(getApplication())
         syncOutboundTransports()
         syncAntPlusTransport()
     }
@@ -109,7 +136,7 @@ class ConfigurationViewModel(
 
     fun onAutoStartOnBootClicked(isChecked: Boolean) {
         configurationRepository.setAutoStartOnBoot(isChecked)
-        if (isChecked && !hasBackgroundLocationPermission()) {
+        if (!isPreview && isChecked && !hasBackgroundLocationPermission()) {
             requestBackgroundLocationPermission.value = Unit
         }
     }
@@ -120,6 +147,7 @@ class ConfigurationViewModel(
 
     fun onBleTxEnabledClicked(isChecked: Boolean) {
         configurationRepository.setBleTxEnabled(isChecked)
+        if (isPreview) return
         if (isChecked) {
             if (hasBluetoothPermissions()) {
                 syncOutboundTransports()
@@ -134,10 +162,10 @@ class ConfigurationViewModel(
         }
     }
 
-    val antPlusSupported: Boolean get() = antPlusServer.isSupported
+    val antPlusSupported: Boolean get() = (isPreview && emulatedModel != com.spop.poverlay.sensor.interfaces.EmulatedModel.Tread) || antPlusServer.isSupported
 
     fun onAntPlusTxEnabledClicked(isChecked: Boolean) {
-        if (isChecked && (!antPlusSupported || !antPlusServer.isAntPlusAvailable())) {
+        if (!isPreview && isChecked && (!antPlusSupported || !antPlusServer.isAntPlusAvailable())) {
             infoPopup.postValue("ANT+ requires a supported bike and ANT Radio Service.")
             return
         }
@@ -147,6 +175,7 @@ class ConfigurationViewModel(
     }
 
     private fun syncAntPlusTransport() {
+        if (isPreview) return
         if (antPlusTxEnabled.value && antPlusSupported) antPlusServer.start()
         else antPlusServer.stop()
     }
@@ -171,6 +200,7 @@ class ConfigurationViewModel(
     }
 
     private fun syncOutboundTransports() {
+        if (isPreview) return
         val shouldRunBle = bleTxEnabled.value && hasBluetoothPermissions()
         if (shouldRunBle) {
             bleServer.setDirConTransportEnabled(dirConEnabled.value)
@@ -244,6 +274,7 @@ class ConfigurationViewModel(
     }
 
     fun onQuitClicked() {
+        bikeControl?.stop()
         requestQuit.value = Unit
     }
 
@@ -254,6 +285,7 @@ class ConfigurationViewModel(
     }
 
     fun startHeartRateDiscovery() {
+        if (isPreview) return
         HeartRateManager.startDiscovery()
     }
 
@@ -299,6 +331,7 @@ class ConfigurationViewModel(
                 }
             )
         }
+        if (isPreview) return
         syncOutboundTransports()
         if (bleTxEnabled.value && !hasBluetoothPermissions()) {
             val permissions = getRequiredBluetoothPermissions()
@@ -332,6 +365,7 @@ class ConfigurationViewModel(
     }
 
     private fun requestBatteryOptimizationExemptionIfNeeded() {
+        if (isPreview) return
         if ((!bleTxEnabled.value && !dirConEnabled.value && !antPlusTxEnabled.value) || batteryOptimizationPromptShownThisSession) {
             return
         }

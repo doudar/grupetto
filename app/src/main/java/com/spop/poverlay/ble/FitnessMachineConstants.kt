@@ -5,6 +5,8 @@ import kotlin.math.atan
 import kotlin.math.roundToInt
 
 object FitnessMachineConstants {
+    val MachineStatusUUID: UUID = UUID.fromString("00002ada-0000-1000-8000-00805f9b34fb")
+    val SupportedPowerRangeUUID: UUID = UUID.fromString("00002ad8-0000-1000-8000-00805f9b34fb")
     val ServiceUUID: UUID = UUID.fromString("00001826-0000-1000-8000-00805f9b34fb")
     val IndoorBikeDataUUID: UUID = UUID.fromString("00002ad2-0000-1000-8000-00805f9b34fb")
     val TreadmillDataUUID: UUID = UUID.fromString("00002acd-0000-1000-8000-00805f9b34fb")

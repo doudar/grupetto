@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.shareIn
 import kotlin.coroutines.CoroutineContext
 import timber.log.Timber
 
-class PelotonBikePlusSensorInterface(val context: Context) : SensorInterface, CoroutineScope {
+class PelotonBikePlusSensorInterface(val context: Context, controlSupported: Boolean = false) : SensorInterface, CoroutineScope {
     companion object{
         /**
          * Resistance is filtered with a moving window since it occasionally spikes
@@ -26,8 +26,21 @@ class PelotonBikePlusSensorInterface(val context: Context) : SensorInterface, Co
 
     private val job = SupervisorJob()
     override val coroutineContext: CoroutineContext = job + Dispatchers.IO
+    @Volatile private var activeSensor: BikePlusCombinedSensor? = null
+    override val bikeControl = com.spop.poverlay.control.BikeControl(
+        controlSupported, android.os.SystemClock::elapsedRealtime
+    ) { activeSensor?.setResistance(it) == true }
+
+    init {
+        if (controlSupported) {
+            val preferences = context.getSharedPreferences(com.spop.poverlay.ConfigurationRepository.SharedPrefsName, Context.MODE_PRIVATE)
+            bikeControl.tune(preferences.getInt("bikeShiftSize", 2), preferences.getFloat("bikeProportionalGain", .007f))
+            launch { while (isActive) { bikeControl.tick(); delay(100) } }
+        }
+    }
 
     fun stop() {
+        bikeControl.stop()
         job.cancel()
     }
 
@@ -35,12 +48,14 @@ class PelotonBikePlusSensorInterface(val context: Context) : SensorInterface, Co
         try {
             val binding = getV2Binder(context)
             try {
-                val sensor = BikePlusCombinedSensor(binding.binder)
+                val sensor = BikePlusCombinedSensor(binding.binder, bikeControl::acceptSample)
+                activeSensor = sensor
                 try {
                     sensor.start()
                     emit(sensor)
                     awaitCancellation()
                 } finally {
+                    activeSensor = null
                     sensor.stop()
                 }
             } finally {
@@ -65,5 +80,10 @@ class PelotonBikePlusSensorInterface(val context: Context) : SensorInterface, Co
                 // So take the least of the last few readings
                 readings.minOf { it }
             }
+
+    init {
+        // Settings must detect the connected controllable bike even with all transmitters off.
+        if (controlSupported) launch { power.collect {} }
+    }
 
 }

@@ -41,9 +41,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if ((application as GrupettoApplication).emulatedModel != null) {
+            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        }
         viewModel =
             ConfigurationViewModel(
-                application, ConfigurationRepository(applicationContext, this),
+                application, ConfigurationRepository(applicationContext, this,
+                    (application as GrupettoApplication).configurationPreferencesName),
                 ReleaseChecker()
             )
         viewModel.finishActivity.observe(this) {

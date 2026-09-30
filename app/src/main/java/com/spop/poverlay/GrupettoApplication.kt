@@ -17,6 +17,21 @@ import com.spop.poverlay.util.readPelotonPlatform
 import timber.log.Timber
 
 class GrupettoApplication : Application() {
+    val emulatedModel by lazy {
+        val name = getSharedPreferences("developer", MODE_PRIVATE).getString("emulatedModel", null)
+        com.spop.poverlay.sensor.interfaces.EmulatedModel.values().firstOrNull { it.name == name }
+    }
+    val configurationPreferencesName get() =
+        if (emulatedModel == null) ConfigurationRepository.SharedPrefsName else "developer-preview-configuration"
+
+    fun setEmulatedModel(model: com.spop.poverlay.sensor.interfaces.EmulatedModel?) {
+        // The activity restarts the process so services and overlay share one immutable device selection.
+        sensorInterface.bikeControl?.stop()
+        bleServer.stop()
+        bleServer.stopDirConOnly()
+        antPlusServer.stop()
+        getSharedPreferences("developer", MODE_PRIVATE).edit().putString("emulatedModel", model?.name).commit()
+    }
     // Use one detection result for both Bluetooth and every overlay instance.
     val sensorSelection by lazy { selectSensorForCurrentDevice(this) }
     lateinit var sensorInterface: SensorInterface
@@ -41,6 +56,7 @@ class GrupettoApplication : Application() {
     }
 
     private fun createSensorInterface(): SensorInterface {
+        emulatedModel?.let { return com.spop.poverlay.sensor.interfaces.EmulatedSensorInterface(it) }
         // Detection is synchronous and reads Settings.Global["peloton_platform"], the
         // value affernetservice writes from the mainboard USB VID/PID ("prism" = Tread,
         // "titan" = Bike+, "caesar" = Row). The tablet model string is NOT usable: Bike+,
@@ -58,7 +74,8 @@ class GrupettoApplication : Application() {
         )
         return when (selection) {
             SensorSelection.Tread -> PelotonTreadSensorInterface(this)
-            SensorSelection.BikePlus -> PelotonBikePlusSensorInterface(this)
+            SensorSelection.BikePlus -> PelotonBikePlusSensorInterface(this,
+                com.spop.poverlay.control.supportsBikeControl(Build.BRAND == "Peloton", readPelotonPlatform(this), Build.MODEL))
             SensorSelection.BikeV1 -> PelotonBikeSensorInterfaceV1New(this)
             SensorSelection.Dummy -> DummySensorInterface()
         }

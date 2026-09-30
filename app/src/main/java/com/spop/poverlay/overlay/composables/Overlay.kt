@@ -75,6 +75,8 @@ fun Overlay(
     onTimerLayout: (IntSize) -> Unit,
     onDragFinished: () -> Unit
 ) {
+    val bikeControl by sensorViewModel.bikeControlState.collectAsState()
+    val showShifters = bikeControl.connected && bikeControl.mode == com.spop.poverlay.control.ControlMode.Simulation
     val power by sensorViewModel.powerValue.collectAsState(initial = SensorValuePlaceholderText)
 
     val defaultMetric by sensorViewModel.defaultMetric.collectAsState()
@@ -222,7 +224,10 @@ fun Overlay(
             onLongPress = { timerViewModel.onTimerLongPress() },
             onOpenSettings = { sensorViewModel.onOverlayDoubleTap() },
             onMinimizeToggle = { sensorViewModel.onOverlayPressed() },
-            onLayout = onTimerLayout
+            onLayout = onTimerLayout,
+            emulationLabel = sensorViewModel.emulatedModel,
+            showShifters = showShifters && minimized,
+            onShift = sensorViewModel::shift
         )
     }
     val mainContent = @Composable {
@@ -260,6 +265,8 @@ fun Overlay(
                 OverlayLocation.Bottom -> Alignment.Bottom
             }
 
+            Row(verticalAlignment = Alignment.CenterVertically) {
+            if (showShifters) ShiftButton(false) { sensorViewModel.shift(-1) }
             OverlayMainContent(
                 modifier = Modifier
                     .wrapContentWidth(unbounded = true)
@@ -304,6 +311,8 @@ fun Overlay(
                 onSpeedUnitClicked = { sensorViewModel.onClickedSpeedUnit() },
                 onChartClicked = { sensorViewModel.onOverlayPressed() }
             )
+            if (showShifters) ShiftButton(true) { sensorViewModel.shift(1) }
+            }
         }
     }
 
@@ -357,4 +366,13 @@ fun Overlay(
         }
     }
 
+}
+
+@Composable
+fun ShiftButton(up: Boolean, onClick: () -> Unit) {
+    Button(onClick, Modifier.size(52.dp).padding(2.dp),
+        contentPadding = PaddingValues(0.dp),
+        colors = androidx.compose.material.ButtonDefaults.buttonColors(backgroundColor = Color(0xFF245C49))) {
+        Text(if (up) "+" else "−", color = Color.White, fontSize = androidx.compose.ui.unit.TextUnit.Unspecified)
+    }
 }

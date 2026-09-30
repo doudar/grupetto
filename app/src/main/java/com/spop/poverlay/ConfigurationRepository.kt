@@ -9,7 +9,7 @@ import androidx.lifecycle.LifecycleOwner
 import com.spop.poverlay.overlay.OverlayLocation
 import kotlinx.coroutines.flow.MutableStateFlow
 
-class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) : AutoCloseable {
+class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner, preferencesName: String = SharedPrefsName) : AutoCloseable {
 
     enum class Preferences(val key: String) {
         ShowTimerWhenMinimized("showTimerWhenMinimized"),
@@ -58,7 +58,7 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
     private val listener : SharedPreferences.OnSharedPreferenceChangeListener
 
     init {
-        sharedPreferences = context.getSharedPreferences(SharedPrefsName, Context.MODE_PRIVATE)
+        sharedPreferences = context.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
         updateFromSharedPrefs()
 
         listener = createSharedPreferencesListener()

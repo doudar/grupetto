@@ -81,6 +81,10 @@ class OverlaySensorViewModel(
     private val timerViewModel: OverlayTimerViewModel,
     override val coroutineContext: CoroutineContext,
 ) : CoroutineScope {
+    val emulatedModel = (sensorInterface as? com.spop.poverlay.sensor.interfaces.EmulatedSensorInterface)?.model?.label
+    val bikeControlState = sensorInterface.bikeControl?.state
+        ?: MutableStateFlow(com.spop.poverlay.control.ControlState())
+    fun shift(direction: Int) { sensorInterface.bikeControl?.shift(direction) }
 
     companion object {
         // The sensor does not necessarily return new value this quickly
