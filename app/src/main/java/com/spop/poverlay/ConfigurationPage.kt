@@ -147,7 +147,9 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                             lastDeveloperTap = now
                             if (developerTaps >= 5) { developerTaps = 0; dialog = "developer" }
                         }.padding(vertical = 8.dp))
-                    TextButton({ dialog = "about" }, Modifier.height(32.dp), contentPadding = PaddingValues(0.dp)) { Text("About & updates", fontSize = 12.sp) }
+                    TextButton({ dialog = "about" }, Modifier.height(32.dp), contentPadding = PaddingValues(0.dp)) {
+                        Text(if (release?.isCurrentlyInstalled == false) "New Version Available" else "About & updates", fontSize = 12.sp)
+                    }
                 }
             }
         }
