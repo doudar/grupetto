@@ -27,22 +27,17 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.spop.poverlay.ConfigurationRepository
 import com.spop.poverlay.GrupettoApplication
+import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.MainActivity
 import com.spop.poverlay.R
 
 import com.spop.poverlay.sensor.CadenceWatchdog
 import com.spop.poverlay.sensor.DeadSensorDetector
-import com.spop.poverlay.sensor.SensorSelection
-import com.spop.poverlay.sensor.interfaces.DummySensorInterface
-import com.spop.poverlay.sensor.interfaces.PelotonBikeSensorInterfaceV1New
-import com.spop.poverlay.sensor.interfaces.PelotonBikePlusSensorInterface
-import com.spop.poverlay.sensor.interfaces.PelotonTreadSensorInterface
 import com.spop.poverlay.util.LifecycleEnabledService
 import com.spop.poverlay.util.disableAnimations
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -80,9 +75,6 @@ class OverlayService : LifecycleEnabledService() {
         //Defined relative to the height of the screen
         const val VerticalMoveDragThreshold = .5f
 
-        // Replace with DeadSensorInterface to simulate a dead sensor
-        val EmulatorSensorInterface by lazy { DummySensorInterface() }
-
         private val mutableIsRunning = MutableStateFlow(false)
         val isRunning = mutableIsRunning.asStateFlow()
     }
@@ -95,28 +87,33 @@ class OverlayService : LifecycleEnabledService() {
     private var sensorViewModel: OverlaySensorViewModel? = null
     private var minimizedStateBeforeConfiguration: Boolean? = null
     private val bleServer by lazy { (application as GrupettoApplication).bleServer }
+    private val antPlusServer by lazy { (application as GrupettoApplication).antPlusServer }
 
     override fun onCreate() {
         super.onCreate()
         mutableIsRunning.value = true
-        syncBackgroundExecutionGuards()
         val notification = prepareNotification(NotificationManagerCompat.from(this))
+        val locationType = if (hasBackgroundLocationAccess()) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
-                OverlayServiceId, 
+                OverlayServiceId,
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                        locationType
             )
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 OverlayServiceId,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+                        locationType
             )
         } else {
             startForeground(OverlayServiceId, notification)
         }
+        HeartRateManager.start(this)
+        syncBackgroundExecutionGuards()
         buildDialog()
     }
 
@@ -163,43 +160,23 @@ class OverlayService : LifecycleEnabledService() {
             resources.displayMetrics.heightPixels.toFloat()
         )
 
-        // Detection is synchronous and reads Settings.Global["peloton_platform"]
-        // ("prism" = Tread, "titan" = Bike+, "caesar" = Row); the shared Topaz tablet
-        // model (PLTN-TTR01) cannot discriminate. The correct interface (and metric set)
-        // is chosen from the first frame with zero delay and no ANR risk. A bind-probe
-        // was unreliable — AffernetService returns a non-null ITreadInterface binder on
-        // a bike too, so it misdetected bikes as Treads (Incline+Speed HUD on a bike).
-        val sensorInterface = when (
-            (application as GrupettoApplication).sensorSelection
-        ) {
-            SensorSelection.Tread -> PelotonTreadSensorInterface(this)
-            SensorSelection.BikePlus -> PelotonBikePlusSensorInterface(this)
-            SensorSelection.BikeV1 -> PelotonBikeSensorInterfaceV1New(this)
-            SensorSelection.Dummy -> EmulatorSensorInterface
-        }
-        // Stop the sensor interface when the service is destroyed to release bindings.
-        lifecycle.addObserver(LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_DESTROY) {
-                when (sensorInterface) {
-                    is PelotonTreadSensorInterface -> sensorInterface.stop()
-                    is PelotonBikeSensorInterfaceV1New -> sensorInterface.stop()
-                    is PelotonBikePlusSensorInterface -> sensorInterface.stop()
-                }
-            }
-        })
-
+        // Shared, Application-scoped sensor interface (also used by bleServer/antPlusServer) -
+        // do not .stop() it here, its lifetime is the process lifetime.
+        val sensorInterface = (application as GrupettoApplication).sensorInterface
         val configurationRepository = ConfigurationRepository(applicationContext, this)
+
         val timerViewModel = OverlayTimerViewModel(
-            application,
             configurationRepository,
-            sensorInterface.power
+            sensorInterface.power,
+            this.coroutineContext,
         )
 
         val sensorViewModel = OverlaySensorViewModel(
             application,
             sensorInterface,
             DeadSensorDetector(sensorInterface, this.coroutineContext),
-            timerViewModel
+            timerViewModel,
+            this.coroutineContext,
         )
         this.sensorViewModel = sensorViewModel
         // Wire up timer to auto-start/pause based on movement
@@ -476,11 +453,26 @@ class OverlayService : LifecycleEnabledService() {
             bleServer.setDirConTransportEnabled(dirConEnabled)
         }
 
-        if (shouldRunBle || dirConEnabled) {
+        val antEnabled = antPlusServer.isSupported && getSharedPreferences(
+            ConfigurationRepository.SharedPrefsName, MODE_PRIVATE
+        ).getBoolean(ConfigurationRepository.Preferences.AntPlusTxEnabled.key, false)
+        if (antEnabled) antPlusServer.start() else antPlusServer.stop()
+
+        if (shouldRunBle || dirConEnabled || antEnabled) {
             acquireWakeLock()
         } else {
             releaseWakeLock()
         }
+    }
+
+    private fun hasBackgroundLocationAccess(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+        val granted = PackageManager.PERMISSION_GRANTED
+        return ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) == granted &&
+            ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) == granted &&
+            androidx.core.location.LocationManagerCompat.isLocationEnabled(
+                getSystemService(LOCATION_SERVICE) as android.location.LocationManager
+            )
     }
 
     private fun isBleTxEnabled(): Boolean {

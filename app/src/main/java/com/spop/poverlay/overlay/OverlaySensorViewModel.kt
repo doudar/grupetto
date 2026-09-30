@@ -5,14 +5,13 @@ package com.spop.poverlay.overlay
 import android.app.Application
 import android.content.Intent
 import androidx.compose.runtime.mutableStateListOf
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
 import com.spop.poverlay.MainActivity
 import com.spop.poverlay.sensor.DeadSensorDetector
 import com.spop.poverlay.sensor.interfaces.DeviceType
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.sensor.interfaces.SensorInterface
 import com.spop.poverlay.util.smoothSensorValue
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +25,7 @@ import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.CoroutineContext
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
@@ -75,11 +75,12 @@ private const val CyclingEfficiency = 0.22 // 22% efficiency (typical for cyclin
 private const val CaloriesPerJoule = 4184.0 // Joules per kcal (thermochemical calorie definition)
 
 class OverlaySensorViewModel(
-    application: Application,
+    private val application: Application,
     private val sensorInterface: SensorInterface,
     private val deadSensorDetector: DeadSensorDetector,
-    private val timerViewModel: OverlayTimerViewModel
-) : AndroidViewModel(application) {
+    private val timerViewModel: OverlayTimerViewModel,
+    override val coroutineContext: CoroutineContext,
+) : CoroutineScope {
 
     companion object {
         // The sensor does not necessarily return new value this quickly
@@ -98,19 +99,19 @@ class OverlaySensorViewModel(
     // metric set from it keeps the overlay's cards consistent with the chosen device.
     private val deviceType: StateFlow<DeviceType> =
         sensorInterface.deviceTypeFlow.stateIn(
-            viewModelScope, SharingStarted.Eagerly, sensorInterface.deviceType
+            this, SharingStarted.Eagerly, sensorInterface.deviceType
         )
 
     // Device-appropriate metric set (single source of truth). See deviceMetrics().
     private val visibleMetrics: StateFlow<List<MetricType>> =
         deviceType.map(::deviceMetrics).stateIn(
-            viewModelScope, SharingStarted.Eagerly, deviceMetrics(sensorInterface.deviceType)
+            this, SharingStarted.Eagerly, deviceMetrics(sensorInterface.deviceType)
         )
 
     /** Default chart metric for this device (Power on a bike, Speed on a tread). */
     val defaultMetric: StateFlow<MetricType> =
         deviceType.map(::defaultMetricFor).stateIn(
-            viewModelScope, SharingStarted.Eagerly, defaultMetricFor(sensorInterface.deviceType)
+            this, SharingStarted.Eagerly, defaultMetricFor(sensorInterface.deviceType)
         )
 
     /** Which primary metric cards to show, derived reactively from [visibleMetrics]. */
@@ -126,12 +127,12 @@ class OverlaySensorViewModel(
     // layout (incline left, chart center, speed right) mirroring the Tread's physical
     // controls; the bike layout is used otherwise.
     val isTread: StateFlow<Boolean> = deviceType.map { it == DeviceType.Tread }.stateIn(
-        viewModelScope, SharingStarted.Eagerly, sensorInterface.deviceType == DeviceType.Tread
+        this, SharingStarted.Eagerly, sensorInterface.deviceType == DeviceType.Tread
     )
 
     private fun visibleMetricFlow(metric: MetricType): StateFlow<Boolean> =
         visibleMetrics.map { metric in it }.stateIn(
-            viewModelScope, SharingStarted.Eagerly, metric in visibleMetrics.value
+            this, SharingStarted.Eagerly, metric in visibleMetrics.value
         )
 
     //TODO: Move this logic to dialog view model
@@ -161,7 +162,7 @@ class OverlaySensorViewModel(
     }
 
     fun onOverlayDoubleTap() {
-        getApplication<Application>().apply {
+        application.apply {
             val intent = Intent(this, MainActivity::class.java)
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(intent)
@@ -170,7 +171,7 @@ class OverlaySensorViewModel(
 
     fun onMetricSelected(metric: MetricType) {
         if (metric != MetricType.HEART_RATE && metric !in visibleMetrics.value) return
-        viewModelScope.launch {
+        launch(Dispatchers.Main.immediate) {
             mutableSelectedMetric.emit(metric)
         }
     }
@@ -349,7 +350,7 @@ class OverlaySensorViewModel(
         .map { "%.1f".format(it) }
 
     fun onClickedSpeedUnit() {
-        viewModelScope.launch {
+        launch(Dispatchers.Main.immediate) {
             useMph.emit(!useMph.value)
         }
     }
@@ -368,7 +369,7 @@ class OverlaySensorViewModel(
     private fun setupCaloriesAccumulation() {
         var lastUpdateTime = System.currentTimeMillis()
         
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             combine(
                 sensorInterface.power,
                 timerViewModel.elapsedSeconds
@@ -413,7 +414,7 @@ class OverlaySensorViewModel(
 
     private fun setupGraphData() {
         // Power graph
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             sensorInterface.power.smoothSensorValue()
                 .sample(UiUpdatePeriod)
                 .collect(object : FlowCollector<Float> {
@@ -429,7 +430,7 @@ class OverlaySensorViewModel(
         }
 
         // Cadence graph
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             sensorInterface.cadence.smoothSensorValue()
                 .sample(UiUpdatePeriod)
                 .collect(object : FlowCollector<Float> {
@@ -445,7 +446,7 @@ class OverlaySensorViewModel(
         }
 
         // Resistance graph
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             sensorInterface.resistance.smoothSensorValue()
                 .sample(UiUpdatePeriod)
                 .collect(object : FlowCollector<Float> {
@@ -461,7 +462,7 @@ class OverlaySensorViewModel(
         }
 
         // Speed graph
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             sensorInterface.speed.smoothSensorValue()
                 .sample(UiUpdatePeriod)
                 .collect(object : FlowCollector<Float> {
@@ -477,7 +478,7 @@ class OverlaySensorViewModel(
         }
 
         // Heart rate graph
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             HeartRateManager.heartRate
                 .map { (it ?: 0).toFloat() }
                 .smoothSensorValue()
@@ -495,7 +496,7 @@ class OverlaySensorViewModel(
         }
 
         // Incline graph
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             sensorInterface.incline.smoothSensorValue()
                 .sample(UiUpdatePeriod)
                 .collect(object : FlowCollector<Float> {
@@ -512,7 +513,7 @@ class OverlaySensorViewModel(
     }
 
     private fun setupMaxTracking() {
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             combine(
                 sensorInterface.power,
                 sensorInterface.cadence,
@@ -540,7 +541,7 @@ class OverlaySensorViewModel(
         // When the active device swaps (Bike->Tread), reset the chart selection if the
         // previously selected metric no longer applies to the new device. Heart rate is
         // gated separately (on a connected monitor), so leave that selection alone.
-        viewModelScope.launch {
+        launch(Dispatchers.Main.immediate) {
             deviceType.collect { type ->
                 val selected = mutableSelectedMetric.value
                 if (selected != MetricType.HEART_RATE && selected !in deviceMetrics(type)) {
@@ -549,7 +550,7 @@ class OverlaySensorViewModel(
             }
         }
 
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             deadSensorDetector.deadSensorDetected.collect(object : FlowCollector<Unit> {
                 override suspend fun emit(value: Unit) {
                     onDeadSensor()
@@ -557,7 +558,7 @@ class OverlaySensorViewModel(
             })
         }
 
-        viewModelScope.launch(Dispatchers.IO) {
+        launch(Dispatchers.IO) {
             errorMessage.collect(object : FlowCollector<String?> {
                 override suspend fun emit(value: String?) {
                     // Leave minimized state if we're showing an error message

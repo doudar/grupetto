@@ -1,18 +1,17 @@
 package com.spop.poverlay.sensor.interfaces
 
 import android.content.Context
-import android.os.IBinder
 import com.spop.poverlay.sensor.v2.BikePlusCombinedSensor
 import com.spop.poverlay.sensor.v2.getV2Binder
 import com.spop.poverlay.util.windowed
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.shareIn
-import kotlinx.coroutines.flow.transformLatest
 import kotlin.coroutines.CoroutineContext
+import timber.log.Timber
 
 class PelotonBikePlusSensorInterface(val context: Context) : SensorInterface, CoroutineScope {
     companion object{
@@ -24,33 +23,35 @@ class PelotonBikePlusSensorInterface(val context: Context) : SensorInterface, Co
          */
         const val ResistanceMovingAverageWindowSize = 3
     }
-    private val binder = MutableSharedFlow<IBinder>(replay = 1)
 
-    init {
-        launch(Dispatchers.IO) {
-            val service = getV2Binder(context)
-            binder.emit(service)
-        }
-    }
-
-    override val coroutineContext: CoroutineContext
-        get() = SupervisorJob()
+    private val job = SupervisorJob()
+    override val coroutineContext: CoroutineContext = job + Dispatchers.IO
 
     fun stop() {
-        coroutineContext.cancelChildren()
+        job.cancel()
     }
 
-    private val combinedSensorState = binder.transformLatest { service ->
-        val sensor = BikePlusCombinedSensor(service)
-        sensor.start()
-        emit(sensor)
+    private val combinedSensorState = flow {
         try {
-            awaitCancellation()
-        } finally {
-            sensor.stop()
+            val binding = getV2Binder(context)
+            try {
+                val sensor = BikePlusCombinedSensor(binding.binder)
+                try {
+                    sensor.start()
+                    emit(sensor)
+                    awaitCancellation()
+                } finally {
+                    sensor.stop()
+                }
+            } finally {
+                binding.close()
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to connect to bike sensor service")
         }
     }.shareIn(this, SharingStarted.Lazily, 1)
-
     override val power: Flow<Float>
         get() = combinedSensorState.flatMapLatest { it.power }
 

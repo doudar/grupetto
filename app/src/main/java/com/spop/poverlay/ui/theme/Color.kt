@@ -19,3 +19,10 @@ val MetricResistanceColor = Color(0xFFD9182B) // Red
 val MetricHeartRateColor = Color(0xFFFF5252)  // Light red
 val MetricCalorieColor = Color(color = 0xFFC0C0C0)    // light grey
 val MetricInclineColor = Color(0xFFFF9800)     // Orange
+
+// Heart rate zone colors (zone 1 = easy blue → zone 5 = max red)
+val HrZone1Color = Color(0xFF90CAF9)  // Light blue
+val HrZone2Color = Color(0xFF4CAF50)  // Green
+val HrZone3Color = Color(0xFFFFEB3B)  // Yellow
+val HrZone4Color = Color(0xFFFF9800)  // Orange
+val HrZone5Color = Color(0xFFFF5252)  // Red

@@ -73,6 +73,18 @@ After following those steps, the APK for grupetto can be found on the Releases t
 
 # Usage
 
+- Bikes can optionally broadcast power, speed/cadence, and heart rate over ANT+
+  in addition to BLE and DirCon. Enable **ANT+** in settings on a tablet with
+  ANT Radio Service installed and a compatible radio. Pair device **1** for power,
+  **2** for speed/cadence, and **3** for heart rate. The cycling ANT+ option is
+  hidden on detected Treads; their BLE speed/incline support is unchanged.
+- **Auto-start on boot** is opt-in and requires permission to draw over other
+  apps. For automatic heart-rate reconnection after boot, allow background
+  location when Android requests it and keep the saved monitor nearby.
+- Heart-rate values and graph segments use the configured five zone colors.
+  Default boundaries are 108, 126, 144, and 162 bpm; adjust them in heart-rate
+  settings for your own zones.
+
 - When first run, grupetto will ask for permission to draw over other apps. This permission is
   required for the app to function.
 

@@ -2,7 +2,7 @@ package com.spop.poverlay.sensor.v1new
 
 import android.os.IBinder
 import android.os.Parcel
-import com.spop.poverlay.sensor.BikeData
+import com.spop.poverlay.sensor.readBikeCoreData
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -116,9 +116,9 @@ class V1NewCombinedSensor(
                         data.enforceInterface(CALLBACK_DESCRIPTOR)
                         
                         val hasData = data.readInt()
-                        
+
                         val bikeData = if (hasData != 0) {
-                            BikeData.CREATOR.createFromParcel(data)
+                            readBikeCoreData(data)
                         } else {
                             null
                         }

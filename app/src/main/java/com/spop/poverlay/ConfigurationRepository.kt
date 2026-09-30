@@ -18,6 +18,8 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         BleFtmsDeviceName("bleFtmsDeviceName"),
         OverlayHorizontalOffset("overlayHorizontalOffset"),
         OverlayLocation("overlayLocation"),
+        AntPlusTxEnabled("antPlusTxEnabled"),
+        AutoStartOnBoot("autoStartOnBoot"),
         SerialNumber("serialNumber")
     }
 
@@ -33,12 +35,16 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
     private val mutableBleTxEnabled = MutableStateFlow(true)
     private val mutableDirConEnabled = MutableStateFlow(true)
     private val mutableBleFtmsDeviceName = MutableStateFlow("Grupetto FTMS")
+    private val mutableAntPlusTxEnabled = MutableStateFlow(false)
+    private val mutableAutoStartOnBoot = MutableStateFlow(false)
     private val mutableSerialNumber = MutableStateFlow("")
 
     val showTimerWhenMinimized = mutableShowTimerWhenMinimized
     val bleTxEnabled = mutableBleTxEnabled
     val dirConEnabled = mutableDirConEnabled
     val bleFtmsDeviceName = mutableBleFtmsDeviceName
+    val antPlusTxEnabled = mutableAntPlusTxEnabled
+    val autoStartOnBoot = mutableAutoStartOnBoot
     val serialNumber = mutableSerialNumber
 
     private val sharedPreferences: SharedPreferences
@@ -93,6 +99,20 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         }
     }
 
+    fun setAntPlusTxEnabled(enabled: Boolean) {
+        mutableAntPlusTxEnabled.value = enabled
+        sharedPreferences.edit {
+            putBoolean(Preferences.AntPlusTxEnabled.key, enabled)
+        }
+    }
+
+    fun setAutoStartOnBoot(enabled: Boolean) {
+        mutableAutoStartOnBoot.value = enabled
+        sharedPreferences.edit {
+            putBoolean(Preferences.AutoStartOnBoot.key, enabled)
+        }
+    }
+
     fun setSerialNumber(serial: String) {
         val normalized = serial.trim().uppercase()
         mutableSerialNumber.value = normalized
@@ -138,6 +158,13 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner) 
         mutableBleFtmsDeviceName.value =
             sharedPreferences
                 .getString(Preferences.BleFtmsDeviceName.key, "Grupetto FTMS") ?: "Grupetto FTMS"
+
+        mutableAntPlusTxEnabled.value =
+            sharedPreferences
+                .getBoolean(Preferences.AntPlusTxEnabled.key, false)
+
+        mutableAutoStartOnBoot.value =
+            sharedPreferences.getBoolean(Preferences.AutoStartOnBoot.key, false)
 
         // Ensure a serial number exists and keep it in memory
         val existingSerial = sharedPreferences.getString(Preferences.SerialNumber.key, null)

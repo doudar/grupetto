@@ -40,6 +40,9 @@ class CyclingPowerService(server: BleServer) : BaseBleService(server) {
         BluetoothGattCharacteristic.PERMISSION_READ
     ).apply { value = byteArrayOf(0x05) } // Left Crank
 
+    // Reused across onSensorDataUpdated() calls to avoid allocating a fresh array every tick.
+    private val measurementBuffer = ByteArray(14)
+
     override val service = BluetoothGattService(
         CyclingPowerConstants.ServiceUUID,
         BluetoothGattService.SERVICE_TYPE_PRIMARY
@@ -63,29 +66,31 @@ class CyclingPowerService(server: BleServer) : BaseBleService(server) {
         val crankTime = server.cscLastCrankEvtTime and 0xFFFF
 
         // Build payload: Flags(2) + Power(2) + Wheel Pair(6) + Crank Pair(4)
-        val bytes = byteArrayOf(
-            (flags and 0xFF).toByte(),
-            ((flags shr 8) and 0xFF).toByte(),
-            (powerValue and 0xFF).toByte(),
-            ((powerValue shr 8) and 0xFF).toByte(),
-            // Wheel revolutions (uint32 LE)
-            (wheelRevs and 0xFF).toByte(),
-            ((wheelRevs shr 8) and 0xFF).toByte(),
-            ((wheelRevs shr 16) and 0xFF).toByte(),
-            ((wheelRevs shr 24) and 0xFF).toByte(),
-            // Last wheel event time (uint16 LE)
-            (wheelTime and 0xFF).toByte(),
-            ((wheelTime shr 8) and 0xFF).toByte(),
-            // Crank revolutions (uint16 LE)
-            (crankRevs and 0xFF).toByte(),
-            ((crankRevs shr 8) and 0xFF).toByte(),
-            // Last crank event time (uint16 LE)
-            (crankTime and 0xFF).toByte(),
-            ((crankTime shr 8) and 0xFF).toByte()
-        )
+        measurementBuffer[0] = (flags and 0xFF).toByte()
+        measurementBuffer[1] = ((flags shr 8) and 0xFF).toByte()
+        measurementBuffer[2] = (powerValue and 0xFF).toByte()
+        measurementBuffer[3] = ((powerValue shr 8) and 0xFF).toByte()
+        // Wheel revolutions (uint32 LE)
+        measurementBuffer[4] = (wheelRevs and 0xFF).toByte()
+        measurementBuffer[5] = ((wheelRevs shr 8) and 0xFF).toByte()
+        measurementBuffer[6] = ((wheelRevs shr 16) and 0xFF).toByte()
+        measurementBuffer[7] = ((wheelRevs shr 24) and 0xFF).toByte()
+        // Last wheel event time (uint16 LE)
+        measurementBuffer[8] = (wheelTime and 0xFF).toByte()
+        measurementBuffer[9] = ((wheelTime shr 8) and 0xFF).toByte()
+        // Crank revolutions (uint16 LE)
+        measurementBuffer[10] = (crankRevs and 0xFF).toByte()
+        measurementBuffer[11] = ((crankRevs shr 8) and 0xFF).toByte()
+        // Last crank event time (uint16 LE)
+        measurementBuffer[12] = (crankTime and 0xFF).toByte()
+        measurementBuffer[13] = ((crankTime shr 8) and 0xFF).toByte()
 
-        measurementCharacteristic.setValue(bytes)
+        // Readers can run on Binder threads; publish an immutable snapshot of this tick.
+        measurementCharacteristic.setValue(measurementBuffer.copyOf())
         server.notifyDirConCharacteristicChanged(measurementCharacteristic)
+        server.logBleDebug(
+            "BLE CPS notify power=${powerValue}W cadence=${cadence.toInt()}rpm wheelRev=$wheelRevs crankRev=$crankRevs payloadLen=${measurementBuffer.size} devices=${connectedDevices.size}"
+        )
         for (device in connectedDevices) {
             server.notifyCharacteristicChanged(device, measurementCharacteristic, false)
         }

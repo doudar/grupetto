@@ -190,6 +190,25 @@ class BleServerTest {
     }
 
     @Test
+    fun `descriptor reads are forwarded to the owning service`() {
+        val device = mockk<android.bluetooth.BluetoothDevice>()
+        val descriptor = mockk<android.bluetooth.BluetoothGattDescriptor>()
+        val service = mockk<BaseBleService>(relaxed = true)
+        val uuid = java.util.UUID.fromString("00001818-0000-1000-8000-00805f9b34fb")
+        every { descriptor.characteristic.service.uuid } returns uuid
+        every { service.service.uuid } returns uuid
+        BleServer::class.java.getDeclaredField("registeredServices").apply {
+            isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            (get(bleServer) as MutableList<BaseBleService>).add(service)
+        }
+
+        bleServer.onDescriptorReadRequest(device, 7, 0, descriptor)
+
+        verify(exactly = 1) { service.onDescriptorReadRequest(device, 7, 0, descriptor) }
+    }
+
+    @Test
     fun `stop closes GATT server without clearing services first`() {
         val gattServer = mockk<BluetoothGattServer>(relaxed = true)
         BleServer::class.java.getDeclaredField("gattServer").apply {
