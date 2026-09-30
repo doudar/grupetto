@@ -1,11 +1,8 @@
 package com.spop.poverlay.sensor.heartrate
 
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
-import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
@@ -94,6 +91,8 @@ object HeartRateManager {
     @Volatile
     private var appContext: Context? = null
 
+    private var bluetoothAccess: HeartRateBluetoothAccess? = null
+
     private var prefs: SharedPreferences? = null
     private var selectedAddress: String? = null
     private val stopped = AtomicBoolean(true)
@@ -114,8 +113,10 @@ object HeartRateManager {
     @Synchronized
     fun start(context: Context) {
         try {
-            if (appContext != null && bluetoothGatt != null) return
+            if (appContext != null && bluetoothGatt != null && bluetoothAccess?.canConnect() == true) return
+            if (bluetoothGatt != null) releaseCurrentGatt()
             appContext = context.applicationContext
+            bluetoothAccess = HeartRateBluetoothAccess(context.applicationContext)
             prefs = appContext?.getSharedPreferences(PrefsName, Context.MODE_PRIVATE)
             loadHeartRateZones()
             _matchByName.value = prefs?.getBoolean(PrefMatchByName, false) ?: false
@@ -141,11 +142,25 @@ object HeartRateManager {
         manageSessionJob = null
         isManaging = false
         stopDiscovery()
-        try { bluetoothGatt?.disconnect() } catch (_: Exception) {}
-        try { bluetoothGatt?.close() } catch (_: Exception) {}
-        bluetoothGatt = null
+        releaseCurrentGatt()
+    }
+
+    private fun clearConnectionState() {
         _heartRate.value = null
         _connectedDevice.value = null
+        lastHeartRateAtMs = 0L
+        lastConnectedAtMs = 0L
+    }
+
+    private fun releaseCurrentGatt() {
+        val gatt = bluetoothGatt
+        bluetoothGatt = null
+        clearConnectionState()
+        if (gatt != null) {
+            bluetoothAccess?.disconnect(gatt)
+            // A denied disconnect must not prevent the separate close attempt.
+            bluetoothAccess?.close(gatt)
+        }
     }
 
     private fun readIntOrNull(key: String): Int? {
@@ -200,41 +215,51 @@ object HeartRateManager {
     // instead, since it can run continuously (whenever no strap is connected) and fast
     // discovery there isn't worth the extra battery/CPU draw.
     fun startDiscovery(scanMode: Int = ScanSettings.SCAN_MODE_LOW_LATENCY) {
-        val adapter = BluetoothAdapter.getDefaultAdapter() ?: return
-        val scanner = adapter.bluetoothLeScanner ?: return
+        val access = bluetoothAccess ?: return
+        if (!access.canScan()) {
+            stopDiscovery()
+            return
+        }
         if (_isScanning.value) return
 
         val filter = ScanFilter.Builder().setServiceUuid(ParcelUuid(HR_SERVICE)).build()
         val settings = ScanSettings.Builder().setScanMode(scanMode).build()
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
+                if (discoveryCallback !== this) return
                 val device = result.device ?: return
                 val hasHrService = result.scanRecord?.serviceUuids?.any { it.uuid == HR_SERVICE } == true
                 if (!hasHrService) return
-                if (maybeAutoConnectSaved(device)) return
-                addDiscoveredDevice(device)
+                val info = access.deviceInfo(device) ?: return
+                if (maybeAutoConnectSaved(info)) return
+                addDiscoveredDevice(info)
             }
 
             override fun onBatchScanResults(results: MutableList<ScanResult>) {
                 results.forEach { onScanResult(0, it) }
             }
+
+            override fun onScanFailed(errorCode: Int) {
+                if (discoveryCallback !== this) return
+                discoveryCallback = null
+                _isScanning.value = false
+                Timber.w("HR scan failed: %s", errorCode)
+            }
         }
 
         discoveryCallback = callback
-        try {
-            scanner.startScan(listOf(filter), settings, callback)
-            _isScanning.value = true
-        } catch (sec: SecurityException) {
-            Timber.w(sec, "Failed to start HR scan")
+        _isScanning.value = true
+        if (!access.startScan(listOf(filter), settings, callback)) {
             discoveryCallback = null
+            _isScanning.value = false
         }
     }
 
     fun stopDiscovery() {
-        val callback = discoveryCallback ?: return
-        try { BluetoothAdapter.getDefaultAdapter()?.bluetoothLeScanner?.stopScan(callback) } catch (_: Exception) {}
+        val callback = discoveryCallback
         discoveryCallback = null
         _isScanning.value = false
+        if (callback != null) bluetoothAccess?.stopScan(callback)
     }
 
     fun setManaging(active: Boolean) {
@@ -253,11 +278,8 @@ object HeartRateManager {
                     if (lastSignalAtMs > 0) {
                         val ageMs = System.currentTimeMillis() - lastSignalAtMs
                         if (ageMs > StaleHeartRateTimeoutMs) {
-                            try { bluetoothGatt?.disconnect() } catch (_: Exception) {}
-                            _connectedDevice.value = null
-                            _heartRate.value = null
-                            lastConnectedAtMs = 0L
-                            lastHeartRateAtMs = 0L
+                            releaseCurrentGatt()
+                            scheduleReconnect()
                         }
                     }
                 }
@@ -279,11 +301,7 @@ object HeartRateManager {
         autoReconnectJob = null
         stopDiscovery()
         selectedAddress = null
-        _heartRate.value = null
-        _connectedDevice.value = null
-        lastConnectedAtMs = 0L
-        lastHeartRateAtMs = 0L
-        try { bluetoothGatt?.disconnect() } catch (_: Exception) {}
+        releaseCurrentGatt()
     }
 
     fun forgetDevice(address: String) {
@@ -297,7 +315,7 @@ object HeartRateManager {
         }
         if (selectedAddress == address) {
             selectedAddress = null
-            try { bluetoothGatt?.disconnect() } catch (_: Exception) {}
+            releaseCurrentGatt()
         }
         loadSavedDevices()
         pruneDiscovered()
@@ -323,21 +341,21 @@ object HeartRateManager {
             .sortedBy { it.name ?: it.address }
     }
 
-    private fun addDiscoveredDevice(device: BluetoothDevice) {
-        val address = device.address ?: return
+    private fun addDiscoveredDevice(device: HeartRateDevice) {
+        val address = device.address
         if (address == selectedAddress) return
         if (_savedDevices.value.any { it.address == address }) return
         val current = _discoveredDevices.value.toMutableList()
         if (current.none { it.address == address }) {
-            current.add(HeartRateDevice(address, device.name))
+            current.add(device)
             _discoveredDevices.value = current.sortedBy { it.name ?: it.address }
         }
     }
 
-    private fun maybeAutoConnectSaved(device: BluetoothDevice): Boolean {
+    private fun maybeAutoConnectSaved(device: HeartRateDevice): Boolean {
         if (manualDisconnectRequested) return false
         if (_connectedDevice.value != null) return false
-        val address = device.address ?: return false
+        val address = device.address
 
         // Exact MAC match
         if (_savedDevices.value.any { it.address == address }) {
@@ -388,62 +406,60 @@ object HeartRateManager {
     }
 
     private fun connectToAddress(address: String) {
-        val context = appContext ?: return
-        val adapter = BluetoothAdapter.getDefaultAdapter() ?: return
-        try {
-            connect(context, adapter.getRemoteDevice(address))
-        } catch (ex: IllegalArgumentException) {
-            Timber.w(ex, "Invalid HR device address: %s", address)
-        }
-    }
+        val access = bluetoothAccess ?: return
+        releaseCurrentGatt()
+        val device = access.remoteDevice(address) ?: return
+        bluetoothGatt = access.connect(device, object : BluetoothGattCallback() {
+            private fun connectionFailed(gatt: BluetoothGatt) {
+                if (bluetoothGatt !== gatt) {
+                    access.close(gatt)
+                    return
+                }
+                releaseCurrentGatt()
+                scheduleReconnect()
+            }
 
-    private fun connect(context: Context, device: BluetoothDevice) {
-        try { bluetoothGatt?.disconnect(); bluetoothGatt?.close() } catch (_: Exception) {}
-        bluetoothGatt = device.connectGatt(context.applicationContext, false, object : BluetoothGattCallback() {
             override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+                if (bluetoothGatt !== gatt) {
+                    access.close(gatt)
+                    return
+                }
                 if (status != BluetoothGatt.GATT_SUCCESS) {
-                    try { gatt.close() } catch (_: Exception) {}
-                    if (bluetoothGatt === gatt) bluetoothGatt = null
-                    _connectedDevice.value = null
-                    _heartRate.value = null
-                    if (!manualDisconnectRequested) {
-                        scheduleReconnect()
-                    }
+                    connectionFailed(gatt)
                     return
                 }
                 when (newState) {
                     BluetoothProfile.STATE_CONNECTED -> {
+                        val info = access.deviceInfo(device)
+                        if (info == null || !access.discoverServices(gatt)) {
+                            connectionFailed(gatt)
+                            return
+                        }
                         lastConnectedAtMs = System.currentTimeMillis()
-                        val name = device.name ?: prefs?.getString(PrefNamePrefix + device.address, null)
-                        _connectedDevice.value = HeartRateDevice(device.address, name)
-                        gatt.discoverServices()
+                        val name = info.name ?: prefs?.getString(PrefNamePrefix + info.address, null)
+                        _connectedDevice.value = info.copy(name = name)
                     }
                     BluetoothProfile.STATE_DISCONNECTED -> {
-                        try { gatt.close() } catch (_: Exception) {}
-                        if (bluetoothGatt === gatt) bluetoothGatt = null
-                        _heartRate.value = null
-                        _connectedDevice.value = null
-                        lastConnectedAtMs = 0L
-                        if (!manualDisconnectRequested) {
-                            scheduleReconnect()
-                        }
+                        connectionFailed(gatt)
                     }
                 }
             }
 
             override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+                if (bluetoothGatt !== gatt) return
                 if (status != BluetoothGatt.GATT_SUCCESS) return
                 val service = gatt.getService(HR_SERVICE) ?: return
                 val characteristic = service.getCharacteristic(HR_MEASUREMENT) ?: return
-                if (!gatt.setCharacteristicNotification(characteristic, true)) return
                 val desc = characteristic.getDescriptor(CCC_UUID) ?: return
-                desc.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                try { gatt.writeDescriptor(desc) } catch (sec: SecurityException) {
-                    Timber.w(sec, "Failed to write HR CCC")
-                }
+                if (!access.enableNotifications(gatt, characteristic, desc)) connectionFailed(gatt)
             }
 
             override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+                if (bluetoothGatt !== gatt) return
+                if (!access.canConnect()) {
+                    connectionFailed(gatt)
+                    return
+                }
                 if (characteristic.uuid != HR_MEASUREMENT) return
                 val data = characteristic.value ?: return
                 if (data.size < 2) return

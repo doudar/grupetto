@@ -43,12 +43,21 @@ needed.
 
 ## Validation
 
-- 106 JVM unit tests passed, with zero failures, errors, or skipped tests.
+- 121 JVM unit tests passed, with zero failures, errors, or skipped tests.
 - Coverage includes existing model/platform detection paths, Bike/Tread routing,
   BLE descriptor reads, both bike bindings, ANT+ packet bytes/counters/lifecycle,
   transport unit conversion, heart-rate disconnects, boot gating, and zone edges.
-- `assembleDebug` passed. `lintDebug` still reports the 16 pre-existing
-  `MissingPermission` errors in `HeartRateManager`; no new lint errors remain.
+- `assembleDebug` and `lintDebug` passed. All 16 former `MissingPermission`
+  errors are fixed; lint reports zero errors (49 warnings and 2 hints remain).
+- Heart-rate Bluetooth access checks the grants required by the Android version
+  before scanning, connecting, reading device names, discovering services, and
+  enabling notifications. Each protected operation also handles revocation
+  between the check and the call. Cleanup attempts disconnect and close
+  independently, clears local state, and ignores late callbacks from old GATT
+  connections. Tests cover denied/granted permissions, revocation during each
+  operation, scan cleanup, and stale heart-rate prevention without lint suppression
+  or relaxed Android test stubs. The existing manifest permissions are retained;
+  see Android's [Bluetooth permission guidance](https://developer.android.com/develop/connectivity/bluetooth/bt-permissions).
 - Used the locally available Gradle 8.14 distribution with offline dependencies;
   the local Gradle 9.0 wrapper cache is damaged.
 
