@@ -12,7 +12,16 @@
 You can use it to watch media from sources like Netflix and Youtube while viewing your current 
 *power output, cadence, resistance, and speed.*
 
-**Supported bikes:** Peloton Bike (Gen 1), Bike+ (Gen 2), and G700 CrossTrainer
+**Supported hardware:** Peloton Bike (Gen 1), Bike+ (Gen 2), G700 CrossTrainer, and Peloton Tread (broadcasts FTMS Treadmill Data `0x2ACD` &mdash; speed and incline)
+
+Tread mode is enabled only when Peloton's `peloton_platform` setting identifies a
+Tread (`prism` or a `prism-` variant). The tablet model alone is not sufficient.
+On a detected Tread, both overlay sizes show speed and incline, with speed selected
+for the graph by default. Bike power, cadence, resistance, and cycling calorie
+estimates remain on the bike display. Missing or unknown platform values retain
+the existing bike behavior. Tread+ is not included in this support.
+
+The Tread connection reads telemetry only; it does not control belt speed or incline.
 
 ***Note: This project is wholly unaffiliated with Peloton. Please do not approach them for support
 with this app. It relies on undocumented interfaces that are subject to change with any update.***

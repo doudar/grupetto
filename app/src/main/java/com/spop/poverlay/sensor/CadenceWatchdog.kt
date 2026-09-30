@@ -1,20 +1,21 @@
 package com.spop.poverlay.sensor
 
 import com.spop.poverlay.sensor.interfaces.SensorInterface
+import com.spop.poverlay.sensor.interfaces.DeviceType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import kotlin.coroutines.CoroutineContext
-import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
 
 /**
- * Monitors cadence and triggers a restart if no cadence is detected for a specified duration.
+ * Monitors bike cadence or Tread belt speed and restarts after prolonged inactivity.
  * This helps address BLE issues that occur after extended running time.
  */
 class CadenceWatchdog(
@@ -34,10 +35,6 @@ class CadenceWatchdog(
     private var monitoringJob: Job? = null
     private var cadenceCollectionJob: Job? = null
     
-    companion object {
-        private const val CADENCE_THRESHOLD = 20.0f // RPM threshold to consider as "active"
-    }
-
     fun start() {
         stop() // Ensure no duplicate jobs
         
@@ -45,10 +42,10 @@ class CadenceWatchdog(
         
         // Monitor cadence updates
         cadenceCollectionJob = launch(Dispatchers.IO) {
-            sensorInterface.cadence.collect { cadence ->
-                if (cadence >= CADENCE_THRESHOLD) {
+            watchdogActivity(sensorInterface).collect { active ->
+                if (active) {
                     lastCadenceTime = System.currentTimeMillis()
-                    Timber.d("Watchdog: Cadence detected: $cadence RPM")
+                    Timber.d("Watchdog: Movement detected")
                 }
             }
         }
@@ -84,3 +81,11 @@ class CadenceWatchdog(
         Timber.i("Cadence watchdog stopped")
     }
 }
+
+/** Keep the bike's existing 20 RPM threshold; a Tread has no cadence sensor. */
+internal fun watchdogActivity(sensor: SensorInterface) =
+    if (sensor.deviceType == DeviceType.Tread) {
+        sensor.speed.map { it >= 0.1f }
+    } else {
+        sensor.cadence.map { it >= 20f }
+    }

@@ -18,6 +18,7 @@ import com.spop.poverlay.dircon.DirConServer
 import com.spop.poverlay.dircon.toDirConService
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.sensor.interfaces.SensorInterface
+import com.spop.poverlay.sensor.interfaces.DeviceType
 import java.util.LinkedList
 import java.util.UUID
 import kotlinx.coroutines.*
@@ -39,7 +40,7 @@ class SystemTimeProvider : TimeProvider {
 // Base class for all BLE services
 abstract class BaseBleService(val server: BleServer) {
     abstract val service: BluetoothGattService
-    abstract fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float)
+    abstract fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float, incline: Float)
     protected val connectedDevices = mutableSetOf<BluetoothDevice>()
 
     fun hasConnectedDevices(): Boolean = connectedDevices.isNotEmpty()
@@ -209,16 +210,18 @@ class BleServer(
     }
 
     private fun baseServices(): List<BaseBleService> {
-        return listOf(
-            FitnessMachineService(this),
-            CyclingPowerService(this),
-            CyclingSpeedAndCadenceService(this),
-            DeviceInformationService(this),
+        return buildList {
+            add(FitnessMachineService(this@BleServer, sensorInterface.deviceType))
+            if (sensorInterface.deviceType != DeviceType.Tread) {
+                add(CyclingPowerService(this@BleServer))
+                add(CyclingSpeedAndCadenceService(this@BleServer))
+            }
+            add(DeviceInformationService(this@BleServer))
             // Keep the GATT database stable for the lifetime of the server. Rebuilding the
             // database when a heart-rate sensor connects can race Android's asynchronous
             // service deletion, particularly on Android 11 vendor Bluetooth stacks.
-            HeartRateService(this)
-        )
+            add(HeartRateService(this@BleServer))
+        }
     }
 
     private fun advertisedServices(): List<BaseBleService> =
@@ -1064,7 +1067,8 @@ class BleServer(
             val cadence: List<Float>,
             val power: List<Float>,
             val speed: List<Float>,
-            val resistance: List<Float>
+            val resistance: List<Float>,
+            val incline: List<Float>
     )
 
     private fun startSensorDataUpdates() {
@@ -1075,19 +1079,22 @@ class BleServer(
             val powerBuffer = mutableListOf<Float>()
             val speedBuffer = mutableListOf<Float>()
             val resistanceBuffer = mutableListOf<Float>()
+            val inclineBuffer = mutableListOf<Float>()
 
             launch {
                 combine(
                                 sensorInterface.cadence,
                                 sensorInterface.power,
                                 sensorInterface.speed,
-                                sensorInterface.resistance
-                        ) { cadence, power, speed, resistance ->
+                                sensorInterface.resistance,
+                                sensorInterface.incline
+                        ) { cadence, power, speed, resistance, incline ->
                             mutex.withLock {
                                 cadenceBuffer.add(cadence)
                                 powerBuffer.add(power)
                                 speedBuffer.add(speed)
                                 resistanceBuffer.add(resistance)
+                                inclineBuffer.add(incline)
                             }
                         }
                         .collect()
@@ -1107,13 +1114,15 @@ class BleServer(
                                                 cadenceBuffer.toList(),
                                                 powerBuffer.toList(),
                                                 speedBuffer.toList(),
-                                                resistanceBuffer.toList()
+                                                resistanceBuffer.toList(),
+                                                inclineBuffer.toList()
                                         )
                                                 .also {
                                                     cadenceBuffer.clear()
                                                     powerBuffer.clear()
                                                     speedBuffer.clear()
                                                     resistanceBuffer.clear()
+                                                    inclineBuffer.clear()
                                                 }
                             }
                     buffers?.let { data ->
@@ -1129,6 +1138,7 @@ class BleServer(
                         // sensor interface. Averaging/smoothing invents intermediate levels
                         // (e.g. 99.7 for a received 100) and delays both increases and decreases.
                         val resistance = data.resistance.lastOrNull { it.isFinite() } ?: 0f
+                        val incline = data.incline.lastOrNull { it.isFinite() } ?: 0f
 
                         // Convert mph -> km/h for wheel calculations
                         val sSpeedKmh = sSpeedMph * 1.60934f
@@ -1136,7 +1146,7 @@ class BleServer(
                         updateWheelAndCrankRev(sSpeedKmh, sCadence)
                         // Speed remains mph; resistance is the latest sensor setting.
                         registeredServices.forEach {
-                            it.onSensorDataUpdated(sCadence, sPower, sSpeedMph, resistance)
+                            it.onSensorDataUpdated(sCadence, sPower, sSpeedMph, resistance, incline)
                         }
                     }
                 }

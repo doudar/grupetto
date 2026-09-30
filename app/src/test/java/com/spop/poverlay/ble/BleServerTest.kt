@@ -41,6 +41,7 @@ class BleServerTest {
         every { sensorInterface.power } returns flowOf(0f)
         every { sensorInterface.cadence } returns flowOf(0f)
         every { sensorInterface.resistance } returns flowOf(0f)
+        every { sensorInterface.incline } returns flowOf(0f)
         timeProvider = FakeTimeProvider()
         // Initialize with default time 0
         timeProvider.currentTime = 0
@@ -209,7 +210,7 @@ class BleServerTest {
         every { sensorInterface.speed } returns flowOf(0f)
         val packets = Channel<ByteArray>(Channel.UNLIMITED)
         val service = mockk<BaseBleService>(relaxed = true)
-        every { service.onSensorDataUpdated(any(), any(), any(), any()) } answers {
+        every { service.onSensorDataUpdated(any(), any(), any(), any(), any()) } answers {
             packets.trySend(FitnessMachineData.encode(arg(0), arg(1), arg(2), arg(3)))
             Unit
         }

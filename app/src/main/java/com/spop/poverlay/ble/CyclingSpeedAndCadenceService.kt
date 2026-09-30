@@ -50,7 +50,7 @@ class CyclingSpeedAndCadenceService(server: BleServer) : BaseBleService(server) 
         addCharacteristic(featureCharacteristic)
     }
 
-    override fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float) {
+    override fun onSensorDataUpdated(cadence: Float, power: Float, speed: Float, resistance: Float, incline: Float) {
         // Build measurement from server's shared counters
         val hasWheel = server.cscLastWheelEvtTime != 0 || server.cscCumulativeWheelRev != 0L
         val hasCrank = server.cscLastCrankEvtTime != 0 || server.cscCumulativeCrankRev != 0
