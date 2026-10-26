@@ -366,4 +366,31 @@ class BikeControlTest {
         assertFalse(control.localSimulation(Float.POSITIVE_INFINITY))
         assertEquals(before, control.state.value)
     }
+
+    @Test fun largeErgStepJumpsToModeledLevelWithoutWindup() {
+        resistance = 44
+        sample(168f, 90f)
+        assertTrue(control.localErg(220))
+        // Reported power lags the motor; the controller must not keep climbing past the modeled level.
+        repeat(20) { sample(168f, 90f) }
+        assertEquals(49, resistance)
+        assertTrue(writes.all { it in 45..49 })
+        assertTrue(writes.zipWithNext().all { (a, b) -> b - a in 0..1 })
+    }
+    @Test fun smallErgStepKeepsProportionalTrim() {
+        resistance = 44
+        sample(168f, 90f)
+        assertTrue(control.localErg(175))
+        sample(168f, 90f)
+        assertTrue(resistance in 44..45)
+    }
+    @Test fun powerModelLearnsSteadyReadingsInAnyMode() {
+        resistance = 44
+        repeat(30) { sample(175f, 90f) }
+        assertEquals(175f, control.powerModel.wattsAt90(44), 1f)
+        assertEquals(44f, control.powerModel.levelFor(175f, 90f)!!, .2f)
+        // Neighbouring unlearned levels are scaled by the learned correction.
+        assertTrue(control.powerModel.wattsAt90(45) > PowerModel.seedWatts(45))
+        assertTrue(writes.isEmpty())
+    }
 }

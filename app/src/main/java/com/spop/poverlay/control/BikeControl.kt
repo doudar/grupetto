@@ -65,6 +65,14 @@ class BikeControl(
     private var pausedShift = 0
     private var pausedResistance = 0
     private var externalPower: com.spop.poverlay.sensor.power.ExternalPowerReading? = null
+    // Feed-forward: jump toward the level the power model predicts for a new ERG target,
+    // then hold off integral feedback until the motor and the reported power settle.
+    val powerModel = PowerModel()
+    private var feedForwardTarget: Int? = null
+    private var feedForwardUntil = 0L
+    private var feedForwardLevel = 0f
+    private var steadyResistance = -1
+    private var steadySince = 0L
 
     @Synchronized fun useExternalPower(reading: com.spop.poverlay.sensor.power.ExternalPowerReading?) {
         val next = reading?.takeIf { com.spop.poverlay.sensor.power.freshExternalPower(it, clock()) != null }
@@ -111,6 +119,8 @@ class BikeControl(
         pausedMode = null
         expectedResistance = null
         filteredPower = null
+        feedForwardTarget = null
+        feedForwardUntil = 0L
         mutableState.value = state.value.copy(mode = ControlMode.Manual, shiftOffset = 0, message = reason, externalControl = null,
             targetResistance = sample?.resistance ?: state.value.targetResistance,
             permissionLostCount = state.value.permissionLostCount + if (lostPermission) 1 else 0)
@@ -127,6 +137,8 @@ class BikeControl(
             previousTick = clock()
             filteredPower = null
             simBase = requestedResistance
+            feedForwardTarget = null
+            feedForwardUntil = 0L
             mutableState.value = state.value.copy(mode = mode, shiftOffset = 0)
         }
         mutableState.value = state.value.copy(message = "${mode.name} active")
@@ -181,8 +193,10 @@ class BikeControl(
             useExternalPower(null)
         if (!fresh()) { if (state.value.connected) unavailable("Bike+ data is stale"); return }
         val reading = sample ?: return
-        if (state.value.mode == ControlMode.Manual || reading.timestamp == lastSampleTime) return
+        if (reading.timestamp == lastSampleTime) return
         lastSampleTime = reading.timestamp
+        learnPowerModel(reading)
+        if (state.value.mode == ControlMode.Manual) return
         val dt = ((clock() - previousTick) / 1000f).coerceIn(0f, .4f)
         previousTick = clock()
         val expected = expectedResistance
@@ -200,23 +214,56 @@ class BikeControl(
         val target = when (state.value.mode) {
             ControlMode.Erg -> {
                 val measured = com.spop.poverlay.sensor.power.freshExternalPower(externalPower, clock()) ?: reading.power
-                val power = filteredPower?.let { it + dt / (2f + dt) * (measured - it) } ?: measured
-                filteredPower = power
-                val error = state.value.targetWatts - power
-                requestedResistance + if (abs(error) <= 3f) 0f else state.value.gain * error * dt / .1f
+                val targetWatts = state.value.targetWatts
+                if (feedForwardTarget != targetWatts) {
+                    feedForwardTarget = targetWatts
+                    // Only large requests jump; small ones keep the existing smooth trim.
+                    val level = if (abs(targetWatts - measured) >= FEED_FORWARD_MIN_WATTS)
+                        powerModel.levelFor(targetWatts.toFloat(), reading.cadence) else null
+                    if (level != null) {
+                        feedForwardLevel = level
+                        val travelMs = (abs(level - requestedResistance) / RESISTANCE_RATE * 1000f).toLong()
+                        feedForwardUntil = clock() + travelMs + FEED_FORWARD_SETTLE_MS
+                        filteredPower = null
+                    } else feedForwardUntil = 0L
+                }
+                if (clock() < feedForwardUntil) feedForwardLevel
+                else {
+                    val power = filteredPower?.let { it + dt / (2f + dt) * (measured - it) } ?: measured
+                    filteredPower = power
+                    val error = targetWatts - power
+                    requestedResistance + if (abs(error) <= 3f) 0f else state.value.gain * error * dt / .1f
+                }
             }
             ControlMode.Simulation -> simBase + simulation.resistanceOffset(state.value.inclineSensitivity) + state.value.shiftOffset
             ControlMode.Resistance -> state.value.targetResistance.toFloat()
             else -> return
         }
         // Limit every mode to 3 Peloton resistance points / second, including mode changes.
-        requestedResistance = target.coerceIn(requestedResistance - 3f * dt, requestedResistance + 3f * dt).coerceIn(0f, 100f)
+        requestedResistance = target.coerceIn(requestedResistance - RESISTANCE_RATE * dt, requestedResistance + RESISTANCE_RATE * dt).coerceIn(0f, 100f)
         val next = requestedResistance.roundToInt()
         if (next != reading.resistance) {
             if (!writeResistance(next)) { stop("Resistance command failed"); return }
             expectedResistance = next
             commandTime = clock()
         }
+    }
+
+    /** Learn watts per level from readings taken after the resistance has been still for a while. */
+    private fun learnPowerModel(reading: BikeSample) {
+        if (reading.resistance != steadyResistance) {
+            steadyResistance = reading.resistance
+            steadySince = clock()
+            return
+        }
+        if (clock() - steadySince >= LEARN_SETTLE_MS) powerModel.learn(reading.resistance, reading.power, reading.cadence)
+    }
+
+    companion object {
+        const val RESISTANCE_RATE = 3f
+        const val FEED_FORWARD_MIN_WATTS = 15
+        const val FEED_FORWARD_SETTLE_MS = 3000L
+        const val LEARN_SETTLE_MS = 2500L
     }
 
     /** FTMS v1.0.1 control point. Returns the protocol result and optional Machine Status. */
