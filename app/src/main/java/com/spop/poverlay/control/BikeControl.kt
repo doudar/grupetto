@@ -213,12 +213,14 @@ class BikeControl(
         }
         val target = when (state.value.mode) {
             ControlMode.Erg -> {
-                val measured = com.spop.poverlay.sensor.power.freshExternalPower(externalPower, clock()) ?: reading.power
+                val external = com.spop.poverlay.sensor.power.freshExternalPower(externalPower, clock())
+                val measured = external ?: reading.power
                 val targetWatts = state.value.targetWatts
                 if (feedForwardTarget != targetWatts) {
                     feedForwardTarget = targetWatts
                     // Only large requests jump; small ones keep the existing smooth trim.
-                    val level = if (abs(targetWatts - measured) >= FEED_FORWARD_MIN_WATTS)
+                    // The model predicts Bike+ native power, so an external meter keeps pure feedback.
+                    val level = if (external == null && abs(targetWatts - measured) >= FEED_FORWARD_MIN_WATTS)
                         powerModel.levelFor(targetWatts.toFloat(), reading.cadence) else null
                     if (level != null) {
                         feedForwardLevel = level
