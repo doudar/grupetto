@@ -78,6 +78,10 @@ class BikeControl(
     private var feedForwardDeadline = 0L
     private var steadyResistance = -1
     private var steadySince = 0L
+    // Cadence smoothed over a few seconds: the rider's cadence wobbles right at an interval
+    // change, and one rpm moves the modeled level by up to a whole step near 350 W.
+    private var cadenceAverage: Float? = null
+    private var cadenceAverageTime = 0L
 
     @Synchronized fun useExternalPower(reading: com.spop.poverlay.sensor.power.ExternalPowerReading?) {
         val next = reading?.takeIf { com.spop.poverlay.sensor.power.freshExternalPower(it, clock()) != null }
@@ -203,6 +207,7 @@ class BikeControl(
         if (reading.timestamp == lastSampleTime) return
         lastSampleTime = reading.timestamp
         learnPowerModel(reading)
+        averageCadence(reading)
         if (state.value.mode == ControlMode.Manual) return
         val dt = ((clock() - previousTick) / 1000f).coerceIn(0f, .4f)
         previousTick = clock()
@@ -230,7 +235,7 @@ class BikeControl(
                     // Beyond the fitted range the model is unreliable: jump no higher than
                     // FEED_FORWARD_MAX_LEVEL and let ordinary feedback climb the rest.
                     val level = if (external == null && abs(targetWatts - measured) >= FEED_FORWARD_MIN_WATTS)
-                        powerModel.nearestLevelFor(targetWatts.toFloat(), reading.cadence)?.coerceAtMost(FEED_FORWARD_MAX_LEVEL) else null
+                        powerModel.nearestLevelFor(targetWatts.toFloat(), cadenceAverage ?: reading.cadence)?.coerceAtMost(FEED_FORWARD_MAX_LEVEL) else null
                     if (level != null) {
                         feedForwardLevel = level.toFloat()
                         feedForwardUntil = clock() + FEED_FORWARD_SETTLE_MS
@@ -259,12 +264,13 @@ class BikeControl(
             else -> return
         }
         // Limit every mode to 3 Peloton resistance points / second, including mode changes.
-        // A modeled ERG jump is sent as one command, as Peloton's own classes do, and the
-        // mainboard slews the motor at its own pace; the acknowledgement window grows with
-        // the distance so a long jump is not mistaken for a knob override.
+        // A modeled ERG jump travels faster, but not instantly: a one-command jump made the
+        // load-cell power overshoot by 10-15 W while the rider's cadence caught up. The
+        // acknowledgement window grows with each write's distance so a long slew is not
+        // mistaken for a knob override.
         val jump = state.value.mode == ControlMode.Erg && feedForwardActive()
-        requestedResistance = (if (jump) target else
-            target.coerceIn(requestedResistance - RESISTANCE_RATE * dt, requestedResistance + RESISTANCE_RATE * dt)).coerceIn(0f, 100f)
+        val rate = if (jump) FEED_FORWARD_RATE else RESISTANCE_RATE
+        requestedResistance = target.coerceIn(requestedResistance - rate * dt, requestedResistance + rate * dt).coerceIn(0f, 100f)
         val next = requestedResistance.roundToInt()
         if (next != reading.resistance) {
             if (!writeResistance(next)) { stop("Resistance command failed"); return }
@@ -276,6 +282,17 @@ class BikeControl(
 
     private fun feedForwardActive(): Boolean =
         clock() < feedForwardUntil || (feedForwardArrivalPending && clock() < feedForwardDeadline)
+
+    private fun averageCadence(reading: BikeSample) {
+        val previous = cadenceAverage
+        val seconds = ((reading.timestamp - cadenceAverageTime) / 1000f).coerceIn(0f, 1f)
+        cadenceAverageTime = reading.timestamp
+        cadenceAverage = when {
+            reading.cadence < 50f -> null
+            previous == null -> reading.cadence
+            else -> previous + seconds / (CADENCE_AVERAGE_S + seconds) * (reading.cadence - previous)
+        }
+    }
 
     /** Learn watts per level from readings taken after the resistance has been still for a while. */
     private fun learnPowerModel(reading: BikeSample) {
@@ -291,10 +308,14 @@ class BikeControl(
         const val RESISTANCE_RATE = 3f
         // Highest level a modeled jump may target; the fit covers levels 18-63.
         const val FEED_FORWARD_MAX_LEVEL = 75
+        // Nominal modeled-jump rate; echo waits make the real slew roughly 10 points/s.
+        const val FEED_FORWARD_RATE = 16f
+        const val CADENCE_AVERAGE_S = 5f
         const val ACK_TIMEOUT_MS = 1500L
         const val ACK_MS_PER_LEVEL = 100L
         const val FEED_FORWARD_MIN_WATTS = 15
-        const val FEED_FORWARD_SETTLE_MS = 3000L
+        // Hold after arrival while the rider's cadence and the load-cell power settle.
+        const val FEED_FORWARD_SETTLE_MS = 4500L
         const val FEED_FORWARD_MAX_MS = 10_000L
         const val LEARN_SETTLE_MS = 2500L
     }

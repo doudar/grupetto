@@ -117,14 +117,14 @@ class BikeControlTest {
         sample()
         assertTrue(control.localErg(200))
         repeat(10) { sample(100f) }
-        // 200 W at 80 RPM models to level 51; a modeled jump is one command.
+        // 200 W at 80 RPM models to level 51; a modeled jump travels at up to 16 points/s.
         assertTrue(resistance in 41..52)
         control.localErg(25)
         repeat(30) { sample(200f) }
         assertTrue(resistance < 40)
         assertTrue(writes.all { it in 0..100 })
-        // Only the two modeled jumps move more than the ordinary 3 points/s (under 1 point per sample).
-        assertTrue(writes.zipWithNext().count { (a, b) -> kotlin.math.abs(a - b) > 1 } <= 2)
+        // Even modeled jumps move at most 16 points/s: about 3 points per 200 ms sample.
+        assertTrue(writes.zipWithNext().all { (a, b) -> kotlin.math.abs(a - b) <= 4 })
     }
     @Test fun noMotionBelowMinimumCadenceAndNoWindup() {
         sample(); control.localErg(1000)
@@ -133,8 +133,8 @@ class BikeControlTest {
         sample(0f, 24f)
         assertTrue(writes.isEmpty())
         sample(100f, 80f)
-        // No accumulated windup: one modeled jump, capped at the highest trusted level.
-        assertEquals(listOf(BikeControl.FEED_FORWARD_MAX_LEVEL), writes)
+        // No accumulated windup: one 200 ms step toward the capped modeled level.
+        assertTrue(resistance <= 44)
     }
     @Test fun powerDeadbandDoesNotHunt() {
         sample(150f); control.localErg(150)
@@ -375,14 +375,15 @@ class BikeControlTest {
         resistance = 44
         sample(168f, 90f)
         assertTrue(control.localErg(220))
-        // The modeled level is sent as one command, as a Peloton class does.
-        sample(168f, 90f)
-        assertEquals(listOf(49), writes)
-        // Held there through the 3 s settle even though the lagging power report still reads
-        // 52 W low: the controller must not keep climbing past the modeled level.
-        repeat(15) { sample(168f, 90f) }
+        // 16 points/s reaches the modeled level within two samples.
+        repeat(2) { sample(168f, 90f) }
         assertEquals(49, resistance)
-        assertEquals(listOf(49), writes)
+        // Held there through the 4.5 s settle even though the lagging power report still reads
+        // 52 W low: the controller must not keep climbing past the modeled level.
+        repeat(22) { sample(168f, 90f) }
+        assertEquals(49, resistance)
+        assertTrue(writes.all { it in 45..49 })
+        assertTrue(writes.zipWithNext().all { (a, b) -> b - a in 0..4 })
     }
     @Test fun longModeledJumpWaitsLongerForTheEcho() {
         resistance = 44
@@ -390,16 +391,16 @@ class BikeControlTest {
         assertTrue(control.localErg(345))
         holdEcho = true
         sample(168f, 90f)
-        val jumped = writes.single()
-        assertTrue(jumped >= 58)
-        // The motor is still travelling 2 s later; a 15-level jump allows 1.5 s + 1.5 s.
-        repeat(10) { sample(168f, 90f) }
+        val stepped = writes.single()
+        assertTrue(stepped > 44)
+        // The echo is still pending 1.6 s later; a multi-level write allows 1.5 s + 0.1 s per level.
+        repeat(8) { sample(168f, 90f) }
         assertEquals(ControlMode.Erg, control.state.value.mode)
         holdEcho = false
-        resistance = jumped
-        repeat(3) { sample(330f, 90f) }
+        resistance = stepped
+        repeat(3) { sample(250f, 90f) }
         assertEquals(ControlMode.Erg, control.state.value.mode)
-        assertEquals(listOf(jumped), writes)
+        assertTrue(resistance > stepped)
     }
     @Test fun smallErgStepKeepsProportionalTrim() {
         resistance = 44
