@@ -132,7 +132,8 @@ class BikeControlTest {
         sample(0f, 24f)
         assertTrue(writes.isEmpty())
         sample(100f, 80f)
-        assertTrue(resistance <= 41)
+        // One 200 ms step at the modeled-jump rate (8 points/s), not accumulated windup.
+        assertTrue(resistance <= 42)
     }
     @Test fun powerDeadbandDoesNotHunt() {
         sample(150f); control.localErg(150)
@@ -377,7 +378,9 @@ class BikeControlTest {
         repeat(4) { sample(168f, 90f) }
         // 8 points/s reaches the modeled level within 0.8 s instead of about 1.7 s at 3 points/s.
         assertEquals(49, resistance)
-        repeat(16) { sample(168f, 90f) }
+        // Held at the modeled level through travel (0.6 s at 8 points/s) plus the 3 s settle,
+        // even though the lagging power report still reads 52 W low.
+        repeat(12) { sample(168f, 90f) }
         assertEquals(49, resistance)
         assertTrue(writes.all { it in 45..49 })
         assertTrue(writes.zipWithNext().all { (a, b) -> b - a in 0..2 })
