@@ -116,12 +116,14 @@ class BikeControlTest {
         sample()
         assertTrue(control.localErg(200))
         repeat(10) { sample(100f) }
-        assertTrue(resistance in 41..46)
+        // 200 W at 80 RPM models to level 51; a modeled jump may travel up to 8 points/s.
+        assertTrue(resistance in 41..52)
         control.localErg(25)
         repeat(30) { sample(200f) }
         assertTrue(resistance < 40)
         assertTrue(writes.all { it in 0..100 })
-        assertTrue(writes.zipWithNext().all { (a, b) -> kotlin.math.abs(a - b) <= 1 })
+        // Modeled jumps may travel at FEED_FORWARD_RATE (8 points/s): at most 2 points per 200 ms sample.
+        assertTrue(writes.zipWithNext().all { (a, b) -> kotlin.math.abs(a - b) <= 2 })
     }
     @Test fun noMotionBelowMinimumCadenceAndNoWindup() {
         sample(); control.localErg(1000)
@@ -372,10 +374,13 @@ class BikeControlTest {
         sample(168f, 90f)
         assertTrue(control.localErg(220))
         // Reported power lags the motor; the controller must not keep climbing past the modeled level.
-        repeat(20) { sample(168f, 90f) }
+        repeat(4) { sample(168f, 90f) }
+        // 8 points/s reaches the modeled level within 0.8 s instead of about 1.7 s at 3 points/s.
+        assertEquals(49, resistance)
+        repeat(16) { sample(168f, 90f) }
         assertEquals(49, resistance)
         assertTrue(writes.all { it in 45..49 })
-        assertTrue(writes.zipWithNext().all { (a, b) -> b - a in 0..1 })
+        assertTrue(writes.zipWithNext().all { (a, b) -> b - a in 0..2 })
     }
     @Test fun smallErgStepKeepsProportionalTrim() {
         resistance = 44

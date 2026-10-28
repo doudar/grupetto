@@ -221,10 +221,10 @@ class BikeControl(
                     // Only large requests jump; small ones keep the existing smooth trim.
                     // The model predicts Bike+ native power, so an external meter keeps pure feedback.
                     val level = if (external == null && abs(targetWatts - measured) >= FEED_FORWARD_MIN_WATTS)
-                        powerModel.levelFor(targetWatts.toFloat(), reading.cadence) else null
+                        powerModel.nearestLevelFor(targetWatts.toFloat(), reading.cadence) else null
                     if (level != null) {
-                        feedForwardLevel = level
-                        val travelMs = (abs(level - requestedResistance) / RESISTANCE_RATE * 1000f).toLong()
+                        feedForwardLevel = level.toFloat()
+                        val travelMs = (abs(level - requestedResistance) / FEED_FORWARD_RATE * 1000f).toLong()
                         feedForwardUntil = clock() + travelMs + FEED_FORWARD_SETTLE_MS
                         filteredPower = null
                     } else feedForwardUntil = 0L
@@ -242,7 +242,10 @@ class BikeControl(
             else -> return
         }
         // Limit every mode to 3 Peloton resistance points / second, including mode changes.
-        requestedResistance = target.coerceIn(requestedResistance - RESISTANCE_RATE * dt, requestedResistance + RESISTANCE_RATE * dt).coerceIn(0f, 100f)
+        // A modeled ERG jump travels faster; each write still waits for the mainboard to
+        // echo the previous level, so the motor sets the real pace.
+        val rate = if (state.value.mode == ControlMode.Erg && clock() < feedForwardUntil) FEED_FORWARD_RATE else RESISTANCE_RATE
+        requestedResistance = target.coerceIn(requestedResistance - rate * dt, requestedResistance + rate * dt).coerceIn(0f, 100f)
         val next = requestedResistance.roundToInt()
         if (next != reading.resistance) {
             if (!writeResistance(next)) { stop("Resistance command failed"); return }
@@ -263,6 +266,7 @@ class BikeControl(
 
     companion object {
         const val RESISTANCE_RATE = 3f
+        const val FEED_FORWARD_RATE = 8f
         const val FEED_FORWARD_MIN_WATTS = 15
         const val FEED_FORWARD_SETTLE_MS = 3000L
         const val LEARN_SETTLE_MS = 2500L

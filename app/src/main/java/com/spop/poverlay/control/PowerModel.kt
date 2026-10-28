@@ -68,6 +68,20 @@ class PowerModel {
         return 100f
     }
 
+    /** Watts predicted at [level] and [cadence]. */
+    fun wattsAt(level: Int, cadence: Float) = wattsAt90(level) * (cadence / REFERENCE_CADENCE).pow(CADENCE_EXPONENT)
+
+    /**
+     * The whole resistance level predicted closest to [watts]. The Bike+ brake only holds
+     * whole levels, so rounding a fractional level can land a full step past target.
+     */
+    fun nearestLevelFor(watts: Float, cadence: Float): Int? {
+        val level = levelFor(watts, cadence) ?: return null
+        val below = kotlin.math.floor(level).toInt().coerceIn(0, 100)
+        val above = (below + 1).coerceAtMost(100)
+        return if (abs(wattsAt(below, cadence) - watts) <= abs(wattsAt(above, cadence) - watts)) below else above
+    }
+
     fun isLearned(level: Int) = level in 0..100 && !learned[level].isNaN()
     @Suppress("unused") fun error(level: Int, power: Float, cadence: Float) = abs(normalize(power, cadence) - wattsAt90(level))
 }
