@@ -133,8 +133,8 @@ class BikeControlTest {
         sample(0f, 24f)
         assertTrue(writes.isEmpty())
         sample(100f, 80f)
-        // 1000 W is beyond the modeled range, so one ordinary 200 ms step, not accumulated windup.
-        assertTrue(resistance <= 42)
+        // No accumulated windup: one modeled jump, capped at the highest trusted level.
+        assertEquals(listOf(BikeControl.FEED_FORWARD_MAX_LEVEL), writes)
     }
     @Test fun powerDeadbandDoesNotHunt() {
         sample(150f); control.localErg(150)

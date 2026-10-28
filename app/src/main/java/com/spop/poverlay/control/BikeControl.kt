@@ -227,9 +227,10 @@ class BikeControl(
                     feedForwardTarget = targetWatts
                     // Only large requests jump; small ones keep the existing smooth trim.
                     // The model predicts Bike+ native power, so an external meter keeps pure feedback.
-                    // Beyond the fitted range the model is unreliable; keep ordinary rate-limited feedback.
+                    // Beyond the fitted range the model is unreliable: jump no higher than
+                    // FEED_FORWARD_MAX_LEVEL and let ordinary feedback climb the rest.
                     val level = if (external == null && abs(targetWatts - measured) >= FEED_FORWARD_MIN_WATTS)
-                        powerModel.nearestLevelFor(targetWatts.toFloat(), reading.cadence)?.takeIf { it <= FEED_FORWARD_MAX_LEVEL } else null
+                        powerModel.nearestLevelFor(targetWatts.toFloat(), reading.cadence)?.coerceAtMost(FEED_FORWARD_MAX_LEVEL) else null
                     if (level != null) {
                         feedForwardLevel = level.toFloat()
                         feedForwardUntil = clock() + FEED_FORWARD_SETTLE_MS
@@ -288,7 +289,7 @@ class BikeControl(
 
     companion object {
         const val RESISTANCE_RATE = 3f
-        // Modeled jumps above this level fall back to feedback: the fit covers levels 18-63.
+        // Highest level a modeled jump may target; the fit covers levels 18-63.
         const val FEED_FORWARD_MAX_LEVEL = 75
         const val ACK_TIMEOUT_MS = 1500L
         const val ACK_MS_PER_LEVEL = 100L
