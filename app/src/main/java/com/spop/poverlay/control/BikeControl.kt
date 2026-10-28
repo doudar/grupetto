@@ -58,6 +58,7 @@ class BikeControl(
     private var requestedResistance = 0f
     private var expectedResistance: Int? = null
     private var commandTime = 0L
+    private var ackTimeoutMs = ACK_TIMEOUT_MS
     private var previousTick = 0L
     private var simBase = 0f
     private var simulation = Simulation(0f, 0f, .004f, .51f)
@@ -209,7 +210,7 @@ class BikeControl(
         if (expected != null && reading.resistance != expected) {
             // Allow the binder target echo to catch up. Do not keep moving the motor
             // against a knob override or a mainboard that ignored a write.
-            if (clock() - commandTime > 1500) stop("Resistance changed manually or command not acknowledged")
+            if (clock() - commandTime > ackTimeoutMs) stop("Resistance changed manually or command not acknowledged")
             return
         }
         if (reading.cadence < 25f) {
@@ -226,12 +227,12 @@ class BikeControl(
                     feedForwardTarget = targetWatts
                     // Only large requests jump; small ones keep the existing smooth trim.
                     // The model predicts Bike+ native power, so an external meter keeps pure feedback.
+                    // Beyond the fitted range the model is unreliable; keep ordinary rate-limited feedback.
                     val level = if (external == null && abs(targetWatts - measured) >= FEED_FORWARD_MIN_WATTS)
-                        powerModel.nearestLevelFor(targetWatts.toFloat(), reading.cadence) else null
+                        powerModel.nearestLevelFor(targetWatts.toFloat(), reading.cadence)?.takeIf { it <= FEED_FORWARD_MAX_LEVEL } else null
                     if (level != null) {
                         feedForwardLevel = level.toFloat()
-                        val travelMs = (abs(level - requestedResistance) / FEED_FORWARD_RATE * 1000f).toLong()
-                        feedForwardUntil = clock() + travelMs + FEED_FORWARD_SETTLE_MS
+                        feedForwardUntil = clock() + FEED_FORWARD_SETTLE_MS
                         feedForwardArrivalPending = true
                         feedForwardDeadline = clock() + FEED_FORWARD_MAX_MS
                         filteredPower = null
@@ -257,13 +258,16 @@ class BikeControl(
             else -> return
         }
         // Limit every mode to 3 Peloton resistance points / second, including mode changes.
-        // A modeled ERG jump travels faster; each write still waits for the mainboard to
-        // echo the previous level, so the motor sets the real pace.
-        val rate = if (state.value.mode == ControlMode.Erg && feedForwardActive()) FEED_FORWARD_RATE else RESISTANCE_RATE
-        requestedResistance = target.coerceIn(requestedResistance - rate * dt, requestedResistance + rate * dt).coerceIn(0f, 100f)
+        // A modeled ERG jump is sent as one command, as Peloton's own classes do, and the
+        // mainboard slews the motor at its own pace; the acknowledgement window grows with
+        // the distance so a long jump is not mistaken for a knob override.
+        val jump = state.value.mode == ControlMode.Erg && feedForwardActive()
+        requestedResistance = (if (jump) target else
+            target.coerceIn(requestedResistance - RESISTANCE_RATE * dt, requestedResistance + RESISTANCE_RATE * dt)).coerceIn(0f, 100f)
         val next = requestedResistance.roundToInt()
         if (next != reading.resistance) {
             if (!writeResistance(next)) { stop("Resistance command failed"); return }
+            ackTimeoutMs = ACK_TIMEOUT_MS + if (jump) abs(next - reading.resistance) * ACK_MS_PER_LEVEL else 0L
             expectedResistance = next
             commandTime = clock()
         }
@@ -284,7 +288,10 @@ class BikeControl(
 
     companion object {
         const val RESISTANCE_RATE = 3f
-        const val FEED_FORWARD_RATE = 8f
+        // Modeled jumps above this level fall back to feedback: the fit covers levels 18-63.
+        const val FEED_FORWARD_MAX_LEVEL = 75
+        const val ACK_TIMEOUT_MS = 1500L
+        const val ACK_MS_PER_LEVEL = 100L
         const val FEED_FORWARD_MIN_WATTS = 15
         const val FEED_FORWARD_SETTLE_MS = 3000L
         const val FEED_FORWARD_MAX_MS = 10_000L
