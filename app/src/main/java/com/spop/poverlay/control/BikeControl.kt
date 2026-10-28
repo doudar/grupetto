@@ -71,6 +71,10 @@ class BikeControl(
     private var feedForwardTarget: Int? = null
     private var feedForwardUntil = 0L
     private var feedForwardLevel = 0f
+    // The settle window starts when the bike reports the modeled level, not when it was
+    // commanded: on long jumps the motor runs slower than the command rate.
+    private var feedForwardArrivalPending = false
+    private var feedForwardDeadline = 0L
     private var steadyResistance = -1
     private var steadySince = 0L
 
@@ -121,6 +125,7 @@ class BikeControl(
         filteredPower = null
         feedForwardTarget = null
         feedForwardUntil = 0L
+        feedForwardArrivalPending = false
         mutableState.value = state.value.copy(mode = ControlMode.Manual, shiftOffset = 0, message = reason, externalControl = null,
             targetResistance = sample?.resistance ?: state.value.targetResistance,
             permissionLostCount = state.value.permissionLostCount + if (lostPermission) 1 else 0)
@@ -139,6 +144,7 @@ class BikeControl(
             simBase = requestedResistance
             feedForwardTarget = null
             feedForwardUntil = 0L
+            feedForwardArrivalPending = false
             mutableState.value = state.value.copy(mode = mode, shiftOffset = 0)
         }
         mutableState.value = state.value.copy(message = "${mode.name} active")
@@ -226,10 +232,19 @@ class BikeControl(
                         feedForwardLevel = level.toFloat()
                         val travelMs = (abs(level - requestedResistance) / FEED_FORWARD_RATE * 1000f).toLong()
                         feedForwardUntil = clock() + travelMs + FEED_FORWARD_SETTLE_MS
+                        feedForwardArrivalPending = true
+                        feedForwardDeadline = clock() + FEED_FORWARD_MAX_MS
                         filteredPower = null
-                    } else feedForwardUntil = 0L
+                    } else {
+                        feedForwardUntil = 0L
+                        feedForwardArrivalPending = false
+                    }
                 }
-                if (clock() < feedForwardUntil) feedForwardLevel
+                if (feedForwardArrivalPending && reading.resistance == feedForwardLevel.roundToInt()) {
+                    feedForwardArrivalPending = false
+                    feedForwardUntil = maxOf(feedForwardUntil, clock() + FEED_FORWARD_SETTLE_MS)
+                }
+                if (feedForwardActive()) feedForwardLevel
                 else {
                     val power = filteredPower?.let { it + dt / (2f + dt) * (measured - it) } ?: measured
                     filteredPower = power
@@ -244,7 +259,7 @@ class BikeControl(
         // Limit every mode to 3 Peloton resistance points / second, including mode changes.
         // A modeled ERG jump travels faster; each write still waits for the mainboard to
         // echo the previous level, so the motor sets the real pace.
-        val rate = if (state.value.mode == ControlMode.Erg && clock() < feedForwardUntil) FEED_FORWARD_RATE else RESISTANCE_RATE
+        val rate = if (state.value.mode == ControlMode.Erg && feedForwardActive()) FEED_FORWARD_RATE else RESISTANCE_RATE
         requestedResistance = target.coerceIn(requestedResistance - rate * dt, requestedResistance + rate * dt).coerceIn(0f, 100f)
         val next = requestedResistance.roundToInt()
         if (next != reading.resistance) {
@@ -253,6 +268,9 @@ class BikeControl(
             commandTime = clock()
         }
     }
+
+    private fun feedForwardActive(): Boolean =
+        clock() < feedForwardUntil || (feedForwardArrivalPending && clock() < feedForwardDeadline)
 
     /** Learn watts per level from readings taken after the resistance has been still for a while. */
     private fun learnPowerModel(reading: BikeSample) {
@@ -269,6 +287,7 @@ class BikeControl(
         const val FEED_FORWARD_RATE = 8f
         const val FEED_FORWARD_MIN_WATTS = 15
         const val FEED_FORWARD_SETTLE_MS = 3000L
+        const val FEED_FORWARD_MAX_MS = 10_000L
         const val LEARN_SETTLE_MS = 2500L
     }
 
