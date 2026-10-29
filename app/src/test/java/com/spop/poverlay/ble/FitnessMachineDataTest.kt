@@ -60,4 +60,21 @@ class FitnessMachineDataTest {
             FitnessMachineData.encode(90f, 250f, 20f, 100f)
         )
     }
+
+    @Test
+    fun `relayed heart rate is appended after power with its flag`() {
+        assertArrayEquals(
+            byteArrayOf(0x64, 0x02, 0x92.toByte(), 0x0C, 0xB4.toByte(), 0x00,
+                0x31, 0x00, 0xFA.toByte(), 0x00, 0x8C.toByte()),
+            FitnessMachineData.encode(90f, 250f, 20f, 49f, 140)
+        )
+    }
+
+    @Test
+    fun `missing or invalid heart rate leaves the packet unchanged`() {
+        val plain = FitnessMachineData.encode(90f, 250f, 20f, 49f)
+        for (hr in listOf(null, 0, -5, 256)) {
+            assertArrayEquals("hr=$hr", plain, FitnessMachineData.encode(90f, 250f, 20f, 49f, hr))
+        }
+    }
 }
