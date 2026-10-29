@@ -87,6 +87,8 @@ class BikeControl(
     // change, and one rpm moves the modeled level by up to a whole step near 350 W.
     private var cadenceAverage: Float? = null
     private var cadenceAverageTime = 0L
+    private val cadenceHistory = CadenceHistory()
+    private var targetChangedAt = 0L
 
     @Synchronized fun useExternalPower(reading: com.spop.poverlay.sensor.power.ExternalPowerReading?) {
         val next = reading?.takeIf { com.spop.poverlay.sensor.power.freshExternalPower(it, clock()) != null }
@@ -217,6 +219,7 @@ class BikeControl(
             lastSampleTime = reading.timestamp
             learnPowerModel(reading)
             averageCadence(reading)
+            cadenceHistory.record(reading.timestamp, reading.cadence)
         }
         if (state.value.mode == ControlMode.Manual) return
         if (rampLevel != null) { rampTick(reading); return }
@@ -240,13 +243,21 @@ class BikeControl(
                 val measured = external ?: reading.power
                 val targetWatts = state.value.targetWatts
                 if (feedForwardTarget != targetWatts) {
+                    val previousTarget = feedForwardTarget
                     feedForwardTarget = targetWatts
+                    targetChangedAt = clock()
+                    // Drops use the cadence held at about the new target (or the rider's typical
+                    // cadence): riders settle back from a hard effort's higher cadence within seconds.
+                    val cadence = if (previousTarget != null && targetWatts < previousTarget)
+                        cadenceHistory.cadenceAt(targetWatts, clock()) ?: cadenceHistory.typicalCadence(clock())
+                            ?: cadenceAverage ?: reading.cadence
+                    else cadenceAverage ?: reading.cadence
                     // Only large requests jump; small ones keep the existing smooth trim.
                     // The model predicts Bike+ native power, so an external meter keeps pure feedback.
                     // Beyond the fitted range the model is unreliable: jump no higher than
                     // FEED_FORWARD_MAX_LEVEL and let ordinary feedback climb the rest.
                     val level = if (external == null && abs(targetWatts - measured) >= FEED_FORWARD_MIN_WATTS)
-                        powerModel.nearestLevelFor(targetWatts.toFloat(), cadenceAverage ?: reading.cadence)?.coerceAtMost(FEED_FORWARD_MAX_LEVEL) else null
+                        powerModel.nearestLevelFor(targetWatts.toFloat(), cadence)?.coerceAtMost(FEED_FORWARD_MAX_LEVEL) else null
                     if (level != null) {
                         feedForwardLevel = level.toFloat()
                         feedForwardUntil = clock() + FEED_FORWARD_SETTLE_MS
@@ -267,6 +278,8 @@ class BikeControl(
                     feedForwardArrivalPending = false
                     feedForwardUntil = maxOf(feedForwardUntil, clock() + FEED_FORWARD_SETTLE_MS)
                 }
+                if (!feedForwardActive() && clock() - targetChangedAt >= STEADY_AFTER_CHANGE_MS && abs(measured - targetWatts) <= 7f)
+                    cadenceHistory.recordSteady(reading.timestamp, reading.cadence, targetWatts)
                 if (feedForwardActive()) feedForwardLevel
                 else {
                     val power = filteredPower?.let { it + dt / (2f + dt) * (measured - it) } ?: measured
@@ -384,6 +397,7 @@ class BikeControl(
         const val DEADBAND_LEVEL_FRACTION = .5f
         const val MIN_DEADBAND_WATTS = 3f
         const val CADENCE_AVERAGE_S = 5f
+        const val STEADY_AFTER_CHANGE_MS = 8000L
         const val ACK_TIMEOUT_MS = 1500L
         const val ACK_MS_PER_LEVEL = 100L
         const val FEED_FORWARD_MIN_WATTS = 15

@@ -411,6 +411,20 @@ class BikeControlTest {
         assertEquals(ControlMode.Manual, control.state.value.mode)
         assertTrue(writes.size <= written + 1)
     }
+    @Test fun dropUsesCadenceHeldAtTheLowerTarget() {
+        resistance = 43
+        sample(170f, 90f)
+        assertTrue(control.localErg(170))
+        repeat(150) { sample(170f, 90f) }           // 30 s settled at 170 W, 90 rpm
+        assertTrue(control.localErg(360))
+        repeat(150) { sample(360f, 97f) }           // a hard effort spun at 97 rpm
+        val expected = control.powerModel.nearestLevelFor(170f, 90f)!!
+        val atHighCadence = control.powerModel.nearestLevelFor(170f, 97f)!!
+        assertTrue(expected != atHighCadence)
+        assertTrue(control.localErg(170))
+        repeat(15) { sample(360f, 97f) }            // the ramp runs while cadence is still high
+        assertEquals(expected, resistance)
+    }
     @Test fun deadbandWidensWithResistanceLevelSize() {
         // Near 345 W one level is about 13 W, so a 5 W shortfall is held.
         resistance = 58
