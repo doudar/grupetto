@@ -1,0 +1,22 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <service android:name="com.spop.poverlay.sensor.discovery.InterfaceProbeFixtureService" android:exported="true">
+            <intent-filter>
+                <action android:name="vendor.cycle.V1" />
+                <action android:name="vendor.cycle.PLUS" />
+                <action android:name="vendor.cycle.UNKNOWN" />
+                <action android:name="vendor.cycle.MESSENGER" />
+                <action android:name="vendor.cycle.SILENT" />
+            </intent-filter>
+        </service>
+        <service android:name="com.spop.poverlay.sensor.discovery.DiscoveryFixtureService" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.peloton.SensorData" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="com.peloton.sensor.category.FAKE_DATA" />
+                <category android:name="com.peloton.sensor.category.BIKE" />
+                <category android:name="com.peloton.sensor.category.AURORA" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

@@ -555,7 +555,6 @@ class BleServer(
             
         // Reset smoothing and CSC state so a restart begins fresh
         smoothedCadence = null
-        smoothedPower = null
         smoothedSpeedMph = null
         cscCrankResidual = 0.0
         cscWheelResidual = 0.0
@@ -1388,11 +1387,11 @@ class BleServer(
                     buffers?.let { data ->
                         // Robust outlier filtering per metric, then light exponential smoothing
                         val rCadence = robustAverage(data.cadence)
-                        val rPower = robustAverage(data.power)
                         val rSpeedMph = robustAverage(data.speed) // mph
 
                         val sCadence = smoothCadence(rCadence)
-                        val sPower = smoothPower(rPower)
+                        // Power is already selected/averaged with the overlay. Never filter it a second time.
+                        val sPower = data.power.lastOrNull { it.isFinite() } ?: 0f
                         val sSpeedMph = smoothSpeed(rSpeedMph)
                         // Resistance is a discrete setting, already spike-filtered by the
                         // sensor interface. Averaging/smoothing invents intermediate levels
@@ -1455,7 +1454,6 @@ class BleServer(
 
     // Exponential smoothing states and helpers
     private var smoothedCadence: Float? = null
-    private var smoothedPower: Float? = null
     private var smoothedSpeedMph: Float? = null
 
     private fun smooth(prev: Float?, value: Float, alpha: Float): Float =
@@ -1466,11 +1464,6 @@ class BleServer(
     private fun smoothCadence(v: Float, alpha: Float = 0.7f): Float {
         smoothedCadence = smooth(smoothedCadence, v, alpha)
         return smoothedCadence!!
-    }
-
-    private fun smoothPower(v: Float, alpha: Float = 0.7f): Float {
-        smoothedPower = smooth(smoothedPower, v, alpha)
-        return smoothedPower!!
     }
 
     private fun smoothSpeed(vMph: Float, alpha: Float = 0.7f): Float {

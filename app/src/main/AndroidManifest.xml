@@ -3,6 +3,12 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="onepeloton.permission.ACCESS_SENSOR_SERVICE" />
+    <!-- Optional developer grants from OpenPelo/ADB; normal telemetry works without them. -->
+    <uses-permission android:name="android.permission.DUMP" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_LOGS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <!-- User-initiated service discovery must inventory packages with unknown names/actions. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -46,6 +52,17 @@
     </queries> -->
 
     <!-- Bluetooth permissions for BLE FTMS -->
+    <queries>
+        <package android:name="com.onepeloton.affernetservice" />
+        <package android:name="com.peloton.service.SensorData" />
+        <intent>
+            <action android:name="com.onepeloton.affernetservice.IV1Interface" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.peloton.SensorData" />
+        </intent>
+    </queries>
+
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -70,6 +87,14 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.PTONOverlay"
         tools:targetApi="30">
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.calibration-files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/calibration_share_paths" />
+        </provider>
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -93,6 +118,9 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Displays live workout statistics overlay" />
         </service>
+
+        <service android:name=".calibration.CalibrationCaptureService" android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
 
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>

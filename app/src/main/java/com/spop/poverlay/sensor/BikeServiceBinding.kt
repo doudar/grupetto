@@ -10,7 +10,11 @@ import timber.log.Timber
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resumeWithException
 
-class BoundBikeService(val binder: IBinder, private val release: () -> Unit) : AutoCloseable {
+class BoundBikeService(
+    val binder: IBinder,
+    private val release: () -> Unit,
+    val componentName: ComponentName? = null,
+) : AutoCloseable {
     override fun close() = release()
 }
 
@@ -36,7 +40,7 @@ internal suspend fun bindBikeService(context: Context, intentFactory: () -> Inte
                 if (binder == null) {
                     fail("Bike service returned a null binder")
                 } else if (completed.compareAndSet(false, true)) {
-                    continuation.resume(BoundBikeService(binder, ::release)) { release() }
+                    continuation.resume(BoundBikeService(binder, ::release, name)) { release() }
                 }
             }
             override fun onNullBinding(name: ComponentName?) = fail("Bike service returned a null binding")

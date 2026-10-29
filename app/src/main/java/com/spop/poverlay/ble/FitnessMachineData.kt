@@ -19,7 +19,7 @@ internal object FitnessMachineData {
             FitnessMachineConstants.IndoorBikeDataFlags.ResistanceLevelPresent
         val speedValue = (speed * 1.60934f * 100).toInt() // mph -> 0.01 km/h
         val cadenceValue = (cadence * 2).toInt()
-        val powerValue = power.toInt()
+        val powerValue = com.spop.poverlay.sensor.power.telemetryWatts(power)
         // Preserve the existing whole-level, 16-bit wire format. Round rather than
         // truncate: 99.99999 must encode as 100. Zero is also used for no sensor data.
         val resistanceValue = if (resistance.isFinite()) {

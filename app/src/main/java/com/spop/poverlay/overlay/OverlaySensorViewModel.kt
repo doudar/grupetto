@@ -11,6 +11,7 @@ import com.spop.poverlay.sensor.DeadSensorDetector
 import com.spop.poverlay.sensor.interfaces.DeviceType
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.sensor.interfaces.SensorInterface
+import com.spop.poverlay.sensor.power.PowerDisplay
 import com.spop.poverlay.util.alignedTickerFlow
 import com.spop.poverlay.util.smoothSensorValue
 import kotlinx.coroutines.CoroutineScope
@@ -26,6 +27,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
@@ -363,6 +365,13 @@ class OverlaySensorViewModel(
         mutableAvgHeartRate.value = if (totalHeartRateTime > 0f) sumHeartRate / totalHeartRateTime else 0f
     }
 
+    private val displayedPower = sensorInterface.displayPower
+        .shareIn(this, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), replay = 1)
+    private val displayWatts = displayedPower.map { it.watts }
+    @Volatile private var latestPowerDisplay = PowerDisplay(Float.NaN)
+    private val mutablePowerDisplay = MutableStateFlow(latestPowerDisplay)
+    val powerDisplay = mutablePowerDisplay.asStateFlow()
+
     /**
      * One sensor stream, written by its collector off the main thread and read by the shared UI
      * tick. The readout shows the mean of the samples that arrived since the previous tick, so it
@@ -405,7 +414,6 @@ class OverlaySensorViewModel(
     val inclineGraph = mutableStateListOf<Float>()
 
     private val powerMetric = TickedMetric(powerGraph)
-    private val nativePowerMetric = TickedMetric(null)
     private val cadenceMetric = TickedMetric(cadenceGraph)
     private val resistanceMetric = TickedMetric(resistanceGraph)
     private val speedMetric = TickedMetric(speedGraph)
@@ -414,13 +422,6 @@ class OverlaySensorViewModel(
     private val graphedMetrics = arrayOf(
         powerMetric, cadenceMetric, resistanceMetric, speedMetric, inclineMetric, heartRateMetric
     )
-    @Volatile private var usesExternalPower = false
-
-    private val mutablePowerValue = MutableStateFlow(SensorValuePlaceholderText)
-    val powerValue = mutablePowerValue.asStateFlow()
-
-    private val mutablePelotonPowerComparison = MutableStateFlow<String?>(null)
-    val pelotonPowerComparison = mutablePelotonPowerComparison.asStateFlow()
 
     private val mutableRpmValue = MutableStateFlow(SensorValuePlaceholderText)
     val rpmValue = mutableRpmValue.asStateFlow()
@@ -475,12 +476,12 @@ class OverlaySensorViewModel(
         }
     }
 
-    private fun collectInto(flow: Flow<Float>, metric: TickedMetric) {
+    private fun collectInto(flow: Flow<Float>, metric: TickedMetric, averageReadout: Boolean = true) {
         launch(Dispatchers.Default) {
             if (metric.graph == null) {
                 flow.collect { metric.add(it) }
             } else {
-                flow.onEach { metric.add(it) }
+                flow.onEach { if (averageReadout) metric.add(it) }
                     .smoothSensorValue()
                     .collect {
                         metric.smoothed = it
@@ -491,15 +492,16 @@ class OverlaySensorViewModel(
     }
 
     private fun setupSensorCollection() {
-        collectInto(sensorInterface.power, powerMetric)
-        collectInto(sensorInterface.nativePower, nativePowerMetric)
+        // Power already carries matching 900 ms bike buckets and source labels. Do not
+        // average it again on UI ticks, which could mix corrected and pedal values.
+        collectInto(displayWatts, powerMetric, averageReadout = false)
         collectInto(sensorInterface.cadence, cadenceMetric)
         collectInto(sensorInterface.resistance, resistanceMetric)
         collectInto(sensorInterface.speed, speedMetric)
         collectInto(sensorInterface.incline, inclineMetric)
         collectInto(HeartRateManager.heartRate.map { (it ?: 0).toFloat() }, heartRateMetric)
         launch(Dispatchers.Default) {
-            sensorInterface.usesExternalPower.collect { usesExternalPower = it }
+            displayedPower.collect { latestPowerDisplay = it }
         }
     }
 
@@ -520,20 +522,13 @@ class OverlaySensorViewModel(
             "%.0f".format(caloriesJoulesAcc / CaloriesPerJoule / CyclingEfficiency)
 
         // Readouts are StateFlows, so an unchanged string doesn't recompose anything.
-        powerMetric.takeMean()?.let { mutablePowerValue.value = "%.0f".format(it) }
+        mutablePowerDisplay.value = latestPowerDisplay
         cadenceMetric.takeMean()?.let { mutableRpmValue.value = "%.0f".format(it) }
         resistanceMetric.takeMean()?.let { mutableResistanceValue.value = "%.0f".format(it) }
         speedMetric.takeMean()?.let { mutableSpeedValue.value = formatSpeed(it) }
         inclineMetric.takeMean()?.let { mutableInclineValue.value = "%.1f".format(it) }
         // The heart rate readout comes from HeartRateManager; drain this chart-only accumulator.
         heartRateMetric.takeMean()
-        val nativePower = nativePowerMetric.takeMean()
-        mutablePelotonPowerComparison.value = when {
-            !usesExternalPower -> null
-            nativePower != null -> "Peloton %.0f W".format(nativePower)
-            else -> mutablePelotonPowerComparison.value
-        }
-
         if (!publishGraphs) return
         var anyGraphPoint = false
         for (metric in graphedMetrics) {
@@ -574,7 +569,7 @@ class OverlaySensorViewModel(
         // One sequential collector owns the accumulators, so no main-thread hop is needed.
         launch(statsDispatcher) {
             combine(
-                sensorInterface.power,
+                displayWatts,
                 sensorInterface.cadence,
                 sensorInterface.resistance,
                 sensorInterface.speed,

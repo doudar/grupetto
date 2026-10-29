@@ -76,8 +76,13 @@ fun Overlay(
     onTimerLayout: (IntSize) -> Unit,
     onDragFinished: () -> Unit
 ) {
-    val power by sensorViewModel.powerValue.collectAsState(initial = SensorValuePlaceholderText)
-    val pelotonPowerComparison by sensorViewModel.pelotonPowerComparison.collectAsState(initial = null)
+    val displayedPower by sensorViewModel.powerDisplay.collectAsState()
+    val power = remember(displayedPower.watts) {
+        if (displayedPower.watts.isFinite()) com.spop.poverlay.sensor.power.telemetryWatts(displayedPower.watts).toString()
+        else SensorValuePlaceholderText
+    }
+    val powerComparison = remember(displayedPower) { displayedPower.comparison }
+    val powerSource = displayedPower.source.label
 
     val defaultMetric by sensorViewModel.defaultMetric.collectAsState()
     val selectedMetric by sensorViewModel.selectedMetric.collectAsState(initial = defaultMetric)
@@ -155,7 +160,7 @@ fun Overlay(
     val size = remember { mutableStateOf(IntSize.Zero) }
 
 
-    val contentHeight = height + if (pelotonPowerComparison != null) 14.dp else 0.dp
+    val contentHeight = height + if (powerComparison != null) 14.dp else 0.dp
     val mainContentHeight = with(LocalDensity.current) {
         contentHeight.roundToPx()
     }
@@ -210,7 +215,8 @@ fun Overlay(
             location = location,
             isTread = isTread,
             powerLabel = power,
-            powerComparison = pelotonPowerComparison,
+            powerComparison = powerComparison,
+            powerSourceLabel = if (displayedPower.source == com.spop.poverlay.sensor.power.DisplayPowerSource.Corrected) powerSource else null,
             contentAlpha = timerAlpha,
             timerLabel = timerLabel,
             cadenceLabel = rpm,
@@ -293,7 +299,8 @@ fun Overlay(
                     rowAlignment = rowAlignment,
                     isTread = isTread,
                     power = power,
-                    powerComparison = pelotonPowerComparison,
+                    powerComparison = powerComparison,
+                    powerSourceLabel = powerSource,
                     rpm = rpm,
                     pauseChart = isCurrentlyAnimating,
                     currentGraph = currentGraph,

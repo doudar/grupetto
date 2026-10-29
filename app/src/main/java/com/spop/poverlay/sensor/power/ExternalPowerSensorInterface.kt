@@ -6,7 +6,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-/** One selected watt stream for overlay, FTMS, cycling power, and ANT+; bike motion is unchanged. */
+/** Display and transports share one power stream; ERG feedback still receives raw pedal readings. */
 class ExternalPowerSensorInterface(
     private val bike: SensorInterface,
     readings: StateFlow<ExternalPowerReading?>,
@@ -33,8 +33,8 @@ class ExternalPowerSensorInterface(
         .shareIn(scope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), replay = 1)
     override val nativePower = bike.nativePower
     override val usesExternalPower = externalPower.map { it != null }.distinctUntilChanged()
-    override val power = combine(bike.power, externalPower) { internal, external ->
-        external ?: internal
-    }.shareIn(scope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), replay = 1)
+    override val displayPower = combine(bike.displayPower.averagePowerBuckets(), externalPower, ::selectPowerDisplay)
+        .shareIn(scope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), replay = 1)
+    override val power = displayPower.map { it.watts }.distinctUntilChanged()
     init { scope.launch { readings.collect { bike.bikeControl?.useExternalPower(it) } } }
 }

@@ -60,7 +60,8 @@ fun OverlayMinimizedContent(
     onMinimizeToggle: () -> Unit,
     onLayout: (IntSize) -> Unit,
     emulationLabel: String? = null,
-    powerComparison: String? = null
+    powerComparison: String? = null,
+    powerSourceLabel: String? = null
 ) {
     val backgroundShape = if (isMinimized) {
         RoundedCornerShape(8.dp)
@@ -172,6 +173,7 @@ fun OverlayMinimizedContent(
                     modifier = Modifier.width(if (powerComparison == null) 58.dp else 90.dp),
                     timerLabel = powerLabel,
                     secondaryLabel = powerComparison,
+                    headerLabel = powerSourceLabel,
                     iconDrawable = R.drawable.ic_power
                 )
             }
@@ -236,6 +238,7 @@ private fun OverlayTimerField(
     iconDrawable: Int,
     textColor: Color = White,
     secondaryLabel: String? = null,
+    headerLabel: String? = null,
 ) {
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
     Row(
@@ -262,6 +265,7 @@ private fun OverlayTimerField(
                 .fillMaxWidth()
         )
     }
+    if (headerLabel != null) Text(headerLabel, color = Color.White, fontSize = 11.sp, maxLines = 1)
     if (secondaryLabel != null) Text(secondaryLabel, color = Color.LightGray, fontSize = 11.sp, maxLines = 1)
     }
 }

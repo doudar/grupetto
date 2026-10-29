@@ -69,7 +69,8 @@ fun OverlayMainContent(
         // Hoisted so the setting survives the content being dropped while minimized.
         shrinkChart: Boolean,
         onShrinkChartToggled: () -> Unit,
-        powerComparison: String? = null
+        powerComparison: String? = null,
+        powerSourceLabel: String = if (powerComparison != null) "External" else "Power"
 ) {
 
     val chartColor =
@@ -142,7 +143,7 @@ fun OverlayMainContent(
 
     val powerCard = @Composable {
         StatCard(
-                name = if (powerComparison != null) "External" else "Power",
+                name = powerSourceLabel,
                 value = power,
                 secondaryValue = powerComparison,
                 unit = "watts",
