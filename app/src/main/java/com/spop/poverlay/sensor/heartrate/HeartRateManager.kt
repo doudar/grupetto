@@ -42,6 +42,11 @@ object HeartRateManager {
     private const val ReconnectDelayMs = 3_000L
     private const val AutoReconnectScanMs = 10_000L
     private const val StaleHeartRateTimeoutMs = 12_000L
+    // Android abandons a direct connectGatt after about 30 s; do not restart a
+    // pending attempt to the same strap sooner. Straps already serving other
+    // receivers can take several seconds to accept, and every restart cancels
+    // the attempt in progress.
+    private const val PendingConnectTimeoutMs = 30_000L
 
     // Default zones based on 180 bpm max HR (typical 40-year-old), 10% bands
     private const val DefaultZone12 = 108
@@ -84,6 +89,12 @@ object HeartRateManager {
 
     @Volatile
     private var bluetoothGatt: BluetoothGatt? = null
+    private var pendingAddress: String? = null
+    private var pendingSinceMs = 0L
+
+    private fun connectionPending(address: String) =
+        bluetoothGatt != null && pendingAddress == address &&
+            System.currentTimeMillis() - pendingSinceMs < PendingConnectTimeoutMs
 
     @Volatile
     private var discoveryCallback: ScanCallback? = null
@@ -155,6 +166,7 @@ object HeartRateManager {
     private fun releaseCurrentGatt() {
         val gatt = bluetoothGatt
         bluetoothGatt = null
+        pendingAddress = null
         clearConnectionState()
         if (gatt != null) {
             bluetoothAccess?.disconnect(gatt)
@@ -292,6 +304,8 @@ object HeartRateManager {
         manualDisconnectRequested = false
         saveDevice(device)
         selectedAddress = device.address
+        // Further scan results would otherwise restart this connection attempt.
+        stopDiscovery()
         connectToAddress(device.address)
     }
 
@@ -356,6 +370,11 @@ object HeartRateManager {
         if (manualDisconnectRequested) return false
         if (_connectedDevice.value != null) return false
         val address = device.address
+        // A repeated advertisement must not cancel the connection already in progress.
+        if (connectionPending(address)) {
+            stopDiscovery()
+            return true
+        }
 
         // Exact MAC match
         if (_savedDevices.value.any { it.address == address }) {
@@ -409,6 +428,8 @@ object HeartRateManager {
         val access = bluetoothAccess ?: return
         releaseCurrentGatt()
         val device = access.remoteDevice(address) ?: return
+        pendingAddress = address
+        pendingSinceMs = System.currentTimeMillis()
         bluetoothGatt = access.connect(device, object : BluetoothGattCallback() {
             private var lowPowerRequested = false
 
