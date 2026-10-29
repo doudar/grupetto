@@ -117,13 +117,13 @@ class BikeControlTest {
         sample()
         assertTrue(control.localErg(200))
         repeat(10) { sample(100f) }
-        // 200 W at 80 RPM models to level 51; a modeled jump travels at up to 16 points/s.
+        // 200 W at 80 RPM models to level 51; a modeled jump ramps at 10 levels/s.
         assertTrue(resistance in 41..52)
         control.localErg(25)
         repeat(30) { sample(200f) }
         assertTrue(resistance < 40)
         assertTrue(writes.all { it in 0..100 })
-        // Even modeled jumps move at most 16 points/s: about 3 points per 200 ms sample.
+        // Even modeled jumps move at most 10 levels/s: 2 levels per 200 ms sample here.
         assertTrue(writes.zipWithNext().all { (a, b) -> kotlin.math.abs(a - b) <= 4 })
     }
     @Test fun noMotionBelowMinimumCadenceAndNoWindup() {
@@ -375,32 +375,57 @@ class BikeControlTest {
         resistance = 44
         sample(168f, 90f)
         assertTrue(control.localErg(220))
-        // 16 points/s reaches the modeled level within two samples.
-        repeat(2) { sample(168f, 90f) }
+        // The 10 levels/s ramp reaches the modeled level within three samples.
+        repeat(3) { sample(168f, 90f) }
         assertEquals(49, resistance)
         // Held there through the 4.5 s settle even though the lagging power report still reads
         // 52 W low: the controller must not keep climbing past the modeled level.
         repeat(22) { sample(168f, 90f) }
         assertEquals(49, resistance)
         assertTrue(writes.all { it in 45..49 })
-        assertTrue(writes.zipWithNext().all { (a, b) -> b - a in 0..4 })
+        assertTrue(writes.zipWithNext().all { (a, b) -> b - a in 1..2 })
     }
-    @Test fun longModeledJumpWaitsLongerForTheEcho() {
+    @Test fun rampMovesOneLevelPerTickBetweenSamples() {
+        resistance = 44
+        sample(168f, 90f)
+        assertTrue(control.localErg(220))
+        sample(168f, 90f)
+        assertEquals(listOf(45), writes)
+        // The 100 ms control loop keeps the ramp moving without waiting for new telemetry.
+        now += 100; control.tick()
+        assertEquals(listOf(45, 46), writes)
+        now += 100; control.tick()
+        assertEquals(listOf(45, 46, 47), writes)
+    }
+    @Test fun knobMovedDuringRampStopsWithoutFighting() {
         resistance = 44
         sample(168f, 90f)
         assertTrue(control.localErg(345))
         holdEcho = true
         sample(168f, 90f)
-        val stepped = writes.single()
-        assertTrue(stepped > 44)
-        // The echo is still pending 1.6 s later; a multi-level write allows 1.5 s + 0.1 s per level.
-        repeat(8) { sample(168f, 90f) }
-        assertEquals(ControlMode.Erg, control.state.value.mode)
-        holdEcho = false
-        resistance = stepped
-        repeat(3) { sample(250f, 90f) }
-        assertEquals(ControlMode.Erg, control.state.value.mode)
-        assertTrue(resistance > stepped)
+        // The echo may trail the ramp by up to 5 levels before the ramp pauses.
+        repeat(2) { sample(168f, 90f) }
+        val written = writes.size
+        resistance = 30
+        repeat(10) { sample(168f, 90f) }
+        assertEquals(ControlMode.Manual, control.state.value.mode)
+        assertTrue(writes.size <= written + 1)
+    }
+    @Test fun deadbandWidensWithResistanceLevelSize() {
+        // Near 345 W one level is about 13 W, so a 5 W shortfall is held.
+        resistance = 58
+        repeat(3) { sample(340f, 90f) }
+        assertTrue(control.localErg(345))
+        repeat(50) { sample(340f, 90f) }
+        assertTrue(writes.isEmpty())
+    }
+    @Test fun deadbandStaysNarrowAtModeratePower() {
+        // Near 170 W one level is about 10 W, so a 5 W shortfall is still trimmed.
+        resistance = 44
+        repeat(3) { sample(170f, 90f) }
+        assertTrue(control.localErg(175))
+        repeat(50) { sample(170f, 90f) }
+        assertTrue(writes.isNotEmpty())
     }
     @Test fun smallErgStepKeepsProportionalTrim() {
         resistance = 44
