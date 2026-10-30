@@ -67,7 +67,7 @@ class DeviceInformationService(server: BleServer) : BaseBleService(server) {
         service.getCharacteristic(DeviceInformationConstants.ManufacturerNameUUID)
                 ?.setValue("Grupetto".toByteArray(Charsets.UTF_8))
         service.getCharacteristic(DeviceInformationConstants.ModelNumberUUID)
-                ?.setValue("Grupetto FTMS".toByteArray(Charsets.UTF_8))
+                ?.setValue(server.modelNumber.toByteArray(Charsets.UTF_8))
         service.getCharacteristic(DeviceInformationConstants.SerialNumberUUID)
                 ?.setValue(server.serialNumber().toByteArray(Charsets.UTF_8))
         service.getCharacteristic(DeviceInformationConstants.HardwareRevisionUUID)

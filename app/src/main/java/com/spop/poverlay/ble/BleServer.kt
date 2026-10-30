@@ -1538,6 +1538,15 @@ class BleServer(
     }
 
 
+    /** Machine name for Device Information Model Number; see [com.spop.poverlay.util.machineModelNumber]. */
+    val modelNumber: String by lazy {
+        com.spop.poverlay.util.machineModelNumber(
+            com.spop.poverlay.util.IsRunningOnPeloton,
+            android.os.Build.MODEL ?: "",
+            com.spop.poverlay.util.readPelotonPlatform(context)
+        )
+    }
+
     //Function checks userprefs to see if serial number has been generated on previous ones, and if not, It creates one.
     fun serialNumber(): String {
         // Use the same shared preferences as ConfigurationRepository
