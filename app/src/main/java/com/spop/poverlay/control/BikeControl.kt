@@ -90,6 +90,19 @@ class BikeControl(
     private val cadenceHistory = CadenceHistory()
     private var targetChangedAt = 0L
 
+    /**
+     * Debug trace of what ERG control sees and decides: controller commands, target changes
+     * (with the cadence and modeled level used), ramp/settle progress, every resistance write
+     * with its reason, stops, and a 1 s snapshot while a mode is active. Null (the default)
+     * costs nothing: Kotlin skips building the message on a null safe call.
+     */
+    @Volatile var trace: ((String) -> Unit)? = null
+    private var lastSnapshot = 0L
+    // Last feedback (trim) values, for the trace; cleared while a modeled jump owns the level.
+    private var lastFiltered: Float? = null
+    private var lastError: Float? = null
+    private var lastBand: Float? = null
+
     @Synchronized fun useExternalPower(reading: com.spop.poverlay.sensor.power.ExternalPowerReading?) {
         val next = reading?.takeIf { com.spop.poverlay.sensor.power.freshExternalPower(it, clock()) != null }
         if (externalPower?.address != next?.address) {
@@ -130,6 +143,8 @@ class BikeControl(
         mutableState.value = state.value.copy(connected = false)
     }
     @Synchronized fun stop(reason: String = "Manual control", releaseControl: Boolean = true) {
+        if (state.value.mode != ControlMode.Manual || pausedMode != null)
+            trace?.invoke("stop reason=\"$reason\" mode=${state.value.mode} level=${sample?.resistance}")
         val lostPermission = releaseControl && owner != null
         if (releaseControl) owner = null
         pausedMode = null
@@ -149,6 +164,7 @@ class BikeControl(
     private fun setMode(mode: ControlMode) {
         pausedMode = null
         if (state.value.mode != mode) {
+            trace?.invoke("mode ${state.value.mode}->$mode level=${sample!!.resistance}")
             requestedResistance = sample!!.resistance.toFloat()
             expectedResistance = sample!!.resistance
             commandTime = clock()
@@ -222,6 +238,13 @@ class BikeControl(
             cadenceHistory.record(reading.timestamp, reading.cadence)
         }
         if (state.value.mode == ControlMode.Manual) return
+        if (newSample && clock() - lastSnapshot >= SNAPSHOT_MS) {
+            lastSnapshot = clock()
+            trace?.invoke("snap mode=${state.value.mode} target=${state.value.targetWatts} power=${f1(reading.power)}" +
+                " ext=${externalPower?.watts} filt=${lastFiltered?.let(::f1)} cad=${f1(reading.cadence)}" +
+                " cadAvg=${cadenceAverage?.let(::f1)} level=${reading.resistance} req=${f1(requestedResistance)}" +
+                " err=${lastError?.let(::f1)} band=${lastBand?.let(::f1)} ff=${feedForwardActive()} ramp=${rampLevel?.let(::f1)}")
+        }
         if (rampLevel != null) { rampTick(reading); return }
         val dt = ((clock() - previousTick) / 1000f).coerceIn(0f, .4f)
         previousTick = clock()
@@ -248,22 +271,39 @@ class BikeControl(
                     targetChangedAt = clock()
                     // Drops use the cadence held at about the new target (or the rider's typical
                     // cadence): riders settle back from a hard effort's higher cadence within seconds.
-                    val cadence = if (previousTarget != null && targetWatts < previousTarget)
-                        cadenceHistory.cadenceAt(targetWatts, clock()) ?: cadenceHistory.typicalCadence(clock())
-                            ?: cadenceAverage ?: reading.cadence
+                    val drop = previousTarget != null && targetWatts < previousTarget
+                    val held = if (drop) cadenceHistory.cadenceAt(targetWatts, clock()) else null
+                    val typical = if (drop && held == null) cadenceHistory.typicalCadence(clock()) else null
+                    val cadence = if (drop) held ?: typical ?: cadenceAverage ?: reading.cadence
                     else cadenceAverage ?: reading.cadence
+                    val cadenceSource = when {
+                        held != null -> "held"
+                        typical != null -> "median2m"
+                        cadenceAverage != null -> "avg5s"
+                        else -> "reading"
+                    }
                     // Only large requests jump; small ones keep the existing smooth trim.
                     // The model predicts Bike+ native power, so an external meter keeps pure feedback.
                     // Beyond the fitted range the model is unreliable: jump no higher than
                     // FEED_FORWARD_MAX_LEVEL and let ordinary feedback climb the rest.
                     val level = if (external == null && abs(targetWatts - measured) >= FEED_FORWARD_MIN_WATTS)
                         powerModel.nearestLevelFor(targetWatts.toFloat(), cadence)?.coerceAtMost(FEED_FORWARD_MAX_LEVEL) else null
+                    trace?.invoke("target from=$previousTarget to=$targetWatts measured=${f1(measured)}" +
+                        " ext=${external != null} level=${reading.resistance} cad=${f1(reading.cadence)}" +
+                        " cadAvg=${cadenceAverage?.let(::f1)} cadUsed=${f1(cadence)} cadSrc=$cadenceSource" +
+                        " action=" + when {
+                            level != null -> "jump to=$level"
+                            external != null -> "trim(external power)"
+                            abs(targetWatts - measured) < FEED_FORWARD_MIN_WATTS -> "trim(small change)"
+                            else -> "trim(no model)"
+                        })
                     if (level != null) {
                         feedForwardLevel = level.toFloat()
                         feedForwardUntil = clock() + FEED_FORWARD_SETTLE_MS
                         feedForwardArrivalPending = true
                         feedForwardDeadline = clock() + FEED_FORWARD_MAX_MS
                         filteredPower = null
+                        lastFiltered = null; lastError = null; lastBand = null
                         rampLevel = reading.resistance.toFloat()
                         rampTime = clock() - RAMP_TICK_MS
                         rampOffSince = 0L
@@ -275,6 +315,8 @@ class BikeControl(
                     }
                 }
                 if (feedForwardArrivalPending && reading.resistance == feedForwardLevel.roundToInt()) {
+                    trace?.invoke("arrive level=${reading.resistance} after=${clock() - targetChangedAt}ms power=${f1(measured)}" +
+                        " cad=${f1(reading.cadence)} settle=${FEED_FORWARD_SETTLE_MS}ms")
                     feedForwardArrivalPending = false
                     feedForwardUntil = maxOf(feedForwardUntil, clock() + FEED_FORWARD_SETTLE_MS)
                 }
@@ -291,6 +333,9 @@ class BikeControl(
                     val cadence = cadenceAverage ?: reading.cadence
                     val band = maxOf(MIN_DEADBAND_WATTS,
                         DEADBAND_LEVEL_FRACTION * (powerModel.wattsAt(level + 1, cadence) - powerModel.wattsAt(level, cadence)))
+                    lastFiltered = power
+                    lastError = error
+                    lastBand = band
                     requestedResistance + if (abs(error) <= band) 0f else state.value.gain * error * dt / .1f
                 }
             }
@@ -308,6 +353,11 @@ class BikeControl(
         requestedResistance = target.coerceIn(requestedResistance - rate * dt, requestedResistance + rate * dt).coerceIn(0f, 100f)
         val next = requestedResistance.roundToInt()
         if (next != reading.resistance) {
+            trace?.invoke("write level=$next from=${reading.resistance} why=" + when {
+                jump -> "settle"
+                state.value.mode == ControlMode.Erg -> "trim err=${lastError?.let(::f1)} band=${lastBand?.let(::f1)} filt=${lastFiltered?.let(::f1)}"
+                else -> state.value.mode.name.lowercase()
+            })
             if (!writeResistance(next)) { stop("Resistance command failed"); return }
             ackTimeoutMs = ACK_TIMEOUT_MS + if (jump) abs(next - reading.resistance) * ACK_MS_PER_LEVEL else 0L
             expectedResistance = next
@@ -324,6 +374,8 @@ class BikeControl(
         val ramp = rampLevel ?: return
         val goal = feedForwardLevel.roundToInt()
         if (state.value.mode != ControlMode.Erg || state.value.targetWatts != feedForwardTarget || reading.cadence < 25f) {
+            trace?.invoke("ramp cancelled at=${reading.resistance} goal=$goal mode=${state.value.mode}" +
+                " target=${state.value.targetWatts} cad=${f1(reading.cadence)}")
             rampLevel = null
             requestedResistance = reading.resistance.toFloat()
             expectedResistance = reading.resistance
@@ -347,6 +399,7 @@ class BikeControl(
         rampLevel = next
         val level = next.roundToInt()
         if (level != expectedResistance && level != reading.resistance) {
+            trace?.invoke("write level=$level from=${reading.resistance} why=ramp goal=$goal")
             if (!writeResistance(level)) { stop("Resistance command failed"); return }
             expectedResistance = level
             commandTime = clock()
@@ -354,6 +407,7 @@ class BikeControl(
         }
         requestedResistance = level.toFloat()
         if (level == goal) {
+            trace?.invoke("ramp done level=$level after=${clock() - targetChangedAt}ms")
             rampLevel = null
             previousTick = clock()
         }
@@ -405,11 +459,36 @@ class BikeControl(
         const val FEED_FORWARD_SETTLE_MS = 4500L
         const val FEED_FORWARD_MAX_MS = 10_000L
         const val LEARN_SETTLE_MS = 2500L
+        const val SNAPSHOT_MS = 1000L
+        private fun f1(value: Float) = (value * 10f).roundToInt() / 10f
     }
 
     /** FTMS v1.0.1 control point. Returns the protocol result and optional Machine Status. */
     data class Reply(val result: Int, val status: ByteArray? = null)
     @Synchronized fun procedure(client: String, bytes: ByteArray): Reply {
+        val reply = runProcedure(client, bytes)
+        trace?.invoke("cmd client=$client bytes=${bytes.joinToString(" ") { "%02X".format(it) }} " +
+            describeCommand(bytes) + " result=${reply.result} mode=${state.value.mode}")
+        return reply
+    }
+
+    private fun describeCommand(bytes: ByteArray): String {
+        fun signed(index: Int) = if (bytes.size < index + 2) null
+            else ((bytes[index].toInt() and 255) or (bytes[index + 1].toInt() shl 8)).toShort().toInt()
+        return when (bytes.firstOrNull()?.toInt()?.and(255)) {
+            0 -> "op=request-control"
+            1 -> "op=reset"
+            4 -> "op=set-resistance level=${signed(1)?.let { it / 10f }}"
+            5 -> "op=set-power watts=${signed(1)}"
+            7 -> "op=start-resume"
+            8 -> "op=stop-pause param=${bytes.getOrNull(1)}"
+            0x11 -> "op=sim grade=${signed(3)?.let { it / 100f }} wind=${signed(1)?.let { it / 1000f }}"
+            null -> "op=empty"
+            else -> "op=${"%02X".format(bytes[0])}"
+        }
+    }
+
+    private fun runProcedure(client: String, bytes: ByteArray): Reply {
         val op = bytes.firstOrNull()?.toInt()?.and(255) ?: return Reply(3)
         val size = when (op) { 0, 1, 7 -> 1; 8 -> 2; 4, 5 -> 3; 0x11 -> 7; else -> return Reply(2) }
         if (bytes.size != size) return Reply(3)
