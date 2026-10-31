@@ -21,7 +21,12 @@ data class GrupettoCalibrationTable(val baseline: List<Int>, val gains: List<Dou
     // Ephemeral: recomputed against the current active snapshot on every fit, never restored from disk.
     val activeComparison: ActiveCalibrationComparison? = null,
     // Display-only correction percentages, with observed coverage rebuilt on load.
-    val correctionPercent: List<Double?> = emptyList()) {
+    val correctionPercent: List<Double?> = emptyList(),
+    // Separate from ride observations: additive log-gain edits survive subsequent fits.
+    val manualOffsets: List<Double> = emptyList(),
+    val manualCoverage: Set<Int> = emptySet(),
+    // Display-only, rebuilt from real efforts, never treated as measured data by the fitter.
+    val recordedCoverage: Set<Int> = emptySet()) {
     fun corrected(watts: Double, ad: Double, rpm: Double): Double {
         if (!watts.isFinite() || watts <= 0 || !ad.isFinite() || rpm !in 45.0..120.0) return watts
         val x = calibrationCoordinate(baseline, ad) ?: return watts
@@ -134,6 +139,6 @@ object GrupettoCalibrationFitter {
             ActiveCalibrationComparison(sqrt(incumbentError / count), new, count, regressions, sqrt(appliedError / count))
         }
         val result = GrupettoCalibrationTable(baseline, gains, confidence, usable.size, n, old, new, ready, comparison)
-        return result.copy(correctionPercent = calibrationCorrectionPercent(result, usable))
+        return result.withCalibrationCoverage(usable)
     }
 }

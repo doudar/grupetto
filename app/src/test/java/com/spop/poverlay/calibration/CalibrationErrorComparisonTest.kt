@@ -34,7 +34,7 @@ class CalibrationErrorComparisonTest {
 
     @Test fun cannotCompareAgainstAnUnrelatedActiveTable() {
         val draft = profile(1.1)
-        listOf(draft.capture.copy(frameSerial = "other"), draft.capture.copy(meterAddress = "other"),
+        listOf(draft.capture.copy(frameSerial = "other"),
             draft.capture.copy(serviceVersion = 1), draft.capture.copy(baseline = baseline.map { it + 1 })).forEach {
             val errors = calibrationErrorComparison(draft, draft.copy(capture = it), null)!!
             assertEquals(20.0, errors.beforeWatts, .0001)

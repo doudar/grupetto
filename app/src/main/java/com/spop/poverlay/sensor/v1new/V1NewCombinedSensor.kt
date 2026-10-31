@@ -137,7 +137,8 @@ class V1NewCombinedSensor(
                             // Power is divided by 100.0f
                             val native = bikeData.power.toFloat() / 100.0f
                             mutableNativePower.tryEmit(native)
-                            val corrected = if (powerCalibration?.isActive == true) runCatching {
+                            // Also publish the raw table position while correction/recording is off.
+                            val corrected = if (powerCalibration != null) runCatching {
                                 data.setDataPosition(start)
                                 powerCalibration.correctedPower(com.spop.poverlay.calibration.readCalibrationFrame(data, android.os.SystemClock.elapsedRealtime()))
                             }.getOrElse { powerCalibration.clearVerification(); null } else null

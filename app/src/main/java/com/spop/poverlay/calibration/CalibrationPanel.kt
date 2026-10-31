@@ -168,14 +168,14 @@ fun CalibrationPanel(state: CalibrationUiState, onEnabled: (Boolean) -> Unit, on
                 CaptureChart(state.recent)
                 Button(onBackground, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Table view") }
             }
-            Text(if (localCalibration?.recording == true) "Recording Grupetto calibration · rest anytime" else "8-second efforts · rest anytime", color = CaptureMuted, fontSize = 12.sp)
+            Text(if (localCalibration?.recording == true) "Recording Grupetto calibration · rest anytime" else "${state.progress.totalSeconds}-second efforts · rest anytime", color = CaptureMuted, fontSize = 12.sp)
         }
     }
 }
 
 @Composable private fun CaptureRing(progress: CaptureProgress, active: Boolean) {
     val progressColor = if (active) captureProgressColor(progress) else CaptureMuted
-    Box(Modifier.size(72.dp).semantics { contentDescription = "Effort progress ${progress.seconds} of 8 seconds" }, contentAlignment = Alignment.Center) {
+    Box(Modifier.size(72.dp).semantics { contentDescription = "Effort progress ${progress.seconds} of ${progress.totalSeconds} seconds" }, contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize().padding(5.dp)) {
             drawArc(Color(0xFF304255), -90f, 360f, false, style = Stroke(7.dp.toPx()))
             drawArc(progressColor, -90f, if (active) 360 * progress.fraction else 0f, false, style = Stroke(7.dp.toPx(), cap = StrokeCap.Round))

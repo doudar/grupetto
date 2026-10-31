@@ -58,11 +58,14 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
     val speed by viewModel.liveSpeed.collectAsStateWithLifecycle(initialValue = Float.NaN)
     val incline by viewModel.liveIncline.collectAsStateWithLifecycle(initialValue = Float.NaN)
     val bpm by HeartRateManager.heartRate.collectAsStateWithLifecycle()
+    val heartStatus by HeartRateManager.status.collectAsStateWithLifecycle()
+    val powerStatus by viewModel.powerMeterStatus.collectAsStateWithLifecycle()
     val meter by viewModel.powerMeterDevice.collectAsStateWithLifecycle()
     val externalWatts by viewModel.powerMeterReading.collectAsStateWithLifecycle()
     val calibration by viewModel.calibrationState.collectAsStateWithLifecycle()
     val grupettoTable by viewModel.grupettoCalibrationState.collectAsStateWithLifecycle()
     val calibrationMeterReady by viewModel.calibrationMeterReady.collectAsStateWithLifecycle(initialValue = false)
+    val captureSettings by viewModel.calibrationCaptureSettings.collectAsStateWithLifecycle()
     var dialog by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     androidx.compose.runtime.LaunchedEffect(dialog) {
         if (dialog == "grupetto-calibration") viewModel.showCalibrationTable()
@@ -130,10 +133,10 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                 Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     SettingsTile("External Sensors", Modifier.weight(1f).fillMaxHeight(), Color(0xFFFB7185)) {
                         SensorSummary("Heart rate", hr?.let { it.name ?: it.address } ?: "Not connected",
-                            bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185))
+                            bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185), heartStatus)
                         SensorSummary("Power meter", com.spop.poverlay.sensor.power.calibrationSensorLabel(
                             grupettoTable.active, grupettoTable.recording, meter?.let { it.name ?: it.address }),
-                            externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", Color(0xFFFBBF24))
+                            externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", Color(0xFFFBBF24), powerStatus)
                         if (viewModel.calibrationSupported) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                             OutlinedButton({ viewModel.showCalibrationTable(); dialog = "grupetto-calibration" }) { Text("Calibration") }
                         }
@@ -211,12 +214,12 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
         }
         "sensors" -> SettingsDialog("External Sensors", { dialog = null }) {
             SensorSummary("Heart rate", hr?.let { it.name ?: it.address } ?: "Pair a heart-rate monitor",
-                bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185))
+                bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185), heartStatus)
             OutlinedButton({ dialog = "heart" }, Modifier.fillMaxWidth()) { Text("Heart-rate monitors & zones") }
             Divider(Modifier.padding(vertical = 12.dp))
             SensorSummary("Power meter", com.spop.poverlay.sensor.power.calibrationSensorLabel(
                 grupettoTable.active, grupettoTable.recording, meter?.let { it.name ?: it.address }),
-                externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", Color(0xFFFBBF24))
+                externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", Color(0xFFFBBF24), powerStatus)
             OutlinedButton({ dialog = "power" }, Modifier.fillMaxWidth()) { Text("Pair & manage power meters") }
             if (viewModel.calibrationSupported) {
                 OutlinedButton({ dialog = "grupetto-calibration" }, Modifier.fillMaxWidth()) { Text("Calibrate using power pedals") }
@@ -226,6 +229,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
         }
         "power" -> PowerMeterDialog(viewModel) { dialog = null }
         "grupetto-calibration" -> SettingsDialog("Calibrate using power pedals", { dialog = null }, compact = true) {
+            val livePosition by viewModel.liveCalibrationPosition.collectAsStateWithLifecycle(initialValue = null)
             Column(Modifier.heightIn(max = com.spop.poverlay.calibration.calibrationContentHeight()).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
                 com.spop.poverlay.calibration.GrupettoCalibrationPanel(grupettoTable,
                     viewModel::recordGrupettoCalibration, viewModel::activateGrupettoCalibration, viewModel::clearGrupettoCalibration,
@@ -239,7 +243,21 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                             hasData = grupettoTable.count > 0 || grupettoTable.savedCount > 0,
                             canLoad = !grupettoTable.recording && !calibration.enabled,
                             export = viewModel::exportCalibrationBackup, load = viewModel::loadCalibrationBackup)
-                    })
+                    }, onManualEdit = { dialog = "manual-calibration" }, livePosition = livePosition,
+                    captureSettings = captureSettings, onCaptureSettings = viewModel::setCalibrationCaptureSettings)
+            }
+        }
+        "manual-calibration" -> {
+            val session = viewModel.manualCalibrationSession ?: (grupettoTable.displayTable ?: grupettoTable.table)?.let {
+                com.spop.poverlay.calibration.CalibrationEditHistory(it).also { session -> viewModel.manualCalibrationSession = session }
+            }
+            if (session != null) com.spop.poverlay.calibration.CalibrationManualEditor(session.initial, grupettoTable.active,
+                viewModel::saveManualCalibration, {
+                    viewModel.manualCalibrationSession = null
+                    dialog = "grupetto-calibration"
+                }, session)
+            else SettingsDialog("Manual editor", { dialog = "grupetto-calibration" }) {
+                Text("Record at least one usable calibration effort to create an editable table.")
             }
         }
         "calibration" -> SettingsDialog("Calibrate using power pedals", { dialog = null }, compact = true) {
@@ -366,11 +384,12 @@ private fun ConnectionSummary(name: String, detail: String, enabled: Boolean) {
 }
 
 @Composable
-private fun SensorSummary(label: String, name: String, value: String, accent: Color) {
+private fun SensorSummary(label: String, name: String, value: String, accent: Color, status: String? = null) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(label, fontSize = 13.sp, lineHeight = 16.sp, color = Color(0xFFBAC6D3))
             Text(name, fontSize = 12.sp, lineHeight = 15.sp, color = Color(0xFF8796A8), maxLines = 3, overflow = TextOverflow.Ellipsis)
+            status?.let { Text(it, fontSize = 11.sp, lineHeight = 14.sp, color = accent, maxLines = 2, overflow = TextOverflow.Ellipsis) }
         }
         Text(value, color = accent, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
     }

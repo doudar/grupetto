@@ -25,7 +25,7 @@ without requiring a lower error score than the previous table or raw bike power.
 With recording off, the snapshot stays fixed; **Update active table** remains a
 manual option. Turning Activate off prevents automatic activation.
 Turning it off retains the last usable snapshot. If a later draft lacks coverage,
-Activate can reuse that saved snapshot for the same bike, meter and baseline; the
+Activate can reuse that saved snapshot for the same bike and baseline; the
 controls show which saved effort count will be used and why the draft is not ready.
 Record and Start capture require a connected meter with fresh readings. A dropout
 resets the collection window; an already running session waits for reconnection.
@@ -37,9 +37,10 @@ changing the actual correction. The grid follows the active table, or the
 activation preview when off. Areas without measurements within two baseline
 intervals and 10 rpm remain gray, not zero. Before/After average error stays in watts.
 The correction grid pulses a solid fill in the cell at the rider's actual resistance and cadence:
-orange while settling, yellow while holding, and green when saved. A segmented
-progress bar and seconds-left label show when the eight-second effort is complete.
-Pulsing stops during rest or missing readings. The table screen shows live raw bike
+cyan while viewing or paused, orange while settling, yellow while holding, and green when saved. A segmented
+progress bar and seconds-left label follow the configured effort duration.
+The live pulse does not require recording, activation, or an external meter. It disappears
+when raw bike data is stale, cadence is out of range, or the baseline differs. The table screen shows live raw bike
 watts, corrected watts, pedal watts, cadence and resistance even while recording
 is paused. Fit messages and validation details are available under **Fit details**.
 Both calibration dialogs use wider, compact layouts with a screen-height-aware
@@ -68,12 +69,69 @@ baseline verification still applies. Loading never writes the bike's own table.
 Draft and saved snapshot are stored together atomically; existing installations
 read their older separate files until the first write migrates them.
 
-The first Record imports existing saved ride efforts. After Clear, recording
-starts fresh. A different bike, meter or board baseline cannot be mixed into a
-draft. The private atomic snapshot is `grupetto-calibration.json`; earlier separate
+Resuming Record merges compatible pending ride efforts by timestamp without duplicates.
+After Clear, earlier efforts stay cleared. External meters may change between efforts:
+their address is descriptive metadata and never disables Record or blocks a table update.
+A meter switch restarts the current hold so one effort cannot mix two meters.
+A different bike, firmware or board baseline cannot be mixed into a
+draft. Empty capture files may adopt the current bike, meter and baseline because
+they contain no observations; this leaves the separate Grupetto power table intact.
+Captures containing efforts still require matching bike, firmware and baseline. A failure
+names the mismatched fields and logs the cause under `CalibrationCapture`.
+The private atomic snapshot is `grupetto-calibration.json`; earlier separate
 draft and activation files are migrated on the next write.
 
 ## Fit and scope
+
+### Manual power table editor
+
+Pause **Record**, then select **Manual editor** to open **Power table studio**.
+The editor needs at least one saved usable effort to establish the bike identity
+and resistance baseline; a pedal connection is not needed while editing.
+The fullscreen heatmap covers 31 baseline resistance points and 45–120 rpm.
+Tap a cell to inspect its raw resistance AD and enter a signed percentage of raw
+bike watts (−35% to +35%). **Set correction** assigns the desired correction;
+**−1% / +1%** nudge it by one percentage point. Choose a cell, cadence row,
+resistance column, or the whole table. **Zoom in** adds numeric cell labels and
+larger touch targets; the scrollable grid retains its axis labels.
+
+**Blend into neighbors** is on by default. It tapers the change in log-power space
+using the recorded fitter's Gaussian length scales (2.5 resistance points and
+15 rpm), while hitting the selected correction exactly. Turn blending off to
+change only selected cells. Manual input uses the same ride-time interpolation
+and correction bounds as recorded calibration, without creating synthetic pedal
+efforts or claiming measured confidence.
+
+Four one-touch tools are available:
+
+- **Fill all gaps:** fills every uncovered cell by inverse-distance interpolation
+  of the eight closest covered cells, with distance scaled by the blend widths.
+  It preserves existing covered values and extends nearby trends at the edges.
+  Filled cells are estimates, not new measurements.
+- **Smooth selection:** blends selected cells halfway toward their immediate
+  neighbors' average to reduce abrupt changes.
+- **Reduce corrections 20%:** scales selected percentage corrections toward zero.
+- **Restore recorded fit:** removes all manual edits, including edits saved in
+  earlier sessions, and restores the fit from the recorded efforts.
+
+**Undo / Redo** covers the last 100 changes, including tools and resets.
+**Compare original** shows the surface from when the editor opened.
+**Revert this editing session** restores that opening snapshot and is itself
+undoable. Closing with unsaved edits offers Keep editing or Discard edits.
+Changes affect riding only after **Save & apply** when already active, or after
+**Save draft** followed by **Activate** when correction is off. A changed table
+or resumed recording prevents a stale editor session from overwriting new data.
+
+Manual adjustments are stored as a separate additive log-gain layer in the
+atomic snapshot and JSON backups. Restarts and subsequent recorded fits retain
+that layer; a new fit may change the underlying recorded correction. Coverage
+from manual editing is displayed but never counted as measured ride coverage.
+Manual edits can make a sparse draft usable by explicit activation. Restoring
+an insufficient recorded fit disables correction until more coverage is collected.
+Before/After error uses the edited surface; held-out validation still describes
+the underlying recorded fit and is labeled accordingly.
+
+### Recorded fit
 
 The model fits log(pedal watts / native watts) as a function of raw AD, mapped to
 the 31-point baseline coordinate, and cadence. A zero-mean Gaussian kernel has
@@ -101,7 +159,7 @@ publishes the latest usable table. Equal or worse error scores do not block it.
 First activation stays explicit; Off is never silently enabled. Resuming Record
 also applies the latest usable draft immediately. Error comparisons and cadence
 regressions remain diagnostics, not acceptance rules or proof of accuracy.
-Bike identity, meter, service version and baseline must match. Each replacement is
+Bike identity, service version and baseline must match. Each replacement is
 saved atomically before publication; Off, Clear, or stopping recording during the
 save cancels publication and restores the previous disk snapshot. A failed save
 keeps the current active table. The controls show the active snapshot's effort count.
@@ -114,7 +172,7 @@ subscription, preventing corrected output from feeding its own training data.
 
 ## Rider guidance and background collection
 
-The guided screen shows knob direction/position, 75/85-rpm targets, an 8-second
+The guided screen shows knob direction/position, 75/85-rpm targets, a configurable
 countdown and three dots per setting. Completed targets offer untimed recovery
 with a large Resume button centered in the recovery panel.
 Three broad resistance bands at each cadence accept coarse SmartSpin2k shifts:
@@ -136,10 +194,14 @@ Both meters may read as low as 5 W, including easy spinning around 12–15 W.
 Zero/below-5 W readings reset the window with an explicit low-power cue. Capture,
 the Grupetto fit and saved-data loading share this power range.
 
-Eight distinct paired readings spanning seven elapsed seconds form an effort;
-the first three seconds settle, leaving at least five readings. Cadence spread
-may reach 8 rpm; AD spread is at most 10% of the local interval (minimum three
-units). Power can have one isolated outlier, but the remaining spread and the
+**Capture settings** on the calibration table edits settle time (0–15 seconds) and
+maximum resistance movement (1–100% of one local baseline interval, minimum three
+raw AD units). Defaults are three seconds and 10%. Settings persist across restarts;
+changing them restarts only the in-progress hold and keeps all saved efforts.
+With defaults, eight distinct paired readings spanning seven elapsed seconds form
+an effort; the first three seconds settle, leaving five readings. Every setting
+still requires at least five settled readings. Cadence spread may reach 8 rpm.
+Power can have one isolated outlier, but the remaining spread and the
 first-to-last settled medians must stay within max(20 W, 12%) at normal power.
 Below 40 W the absolute allowance scales down to half the median, with a 5 W floor,
 so low-power ramps are not mistaken for steady efforts. Stale packets,

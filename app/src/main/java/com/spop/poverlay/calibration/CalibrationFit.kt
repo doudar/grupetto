@@ -32,25 +32,28 @@ enum class CapturePhase(val cue: String) {
     ResistanceChanged("Keep the knob still"), PowerChanged("Let power settle"), Saved("Effort saved"),
 }
 
-data class CaptureProgress(val phase: CapturePhase = CapturePhase.Waiting, val seconds: Int = 0) {
-    val fraction get() = (seconds / 8f).coerceIn(0f, 1f)
-    val remaining get() = (8 - seconds).coerceAtLeast(0)
+data class CaptureProgress(val phase: CapturePhase = CapturePhase.Waiting, val seconds: Int = 0,
+    val totalSeconds: Int = 8, val settleSeconds: Int = 3) {
+    val fraction get() = (seconds / totalSeconds.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
+    val remaining get() = (totalSeconds - seconds).coerceAtLeast(0)
+    val settleRemaining get() = (settleSeconds - seconds).coerceAtLeast(0)
 }
 
-/** One independent 8-second effort; discard its first three seconds for meter lag.
+/** One independent effort; discard the configured settling period for meter lag.
  * Allow human cadence variation and one isolated power outlier, but reject ramps.
  * Never count a cached pedal packet twice or learn through a connection/clock discontinuity.
  */
-class CalibrationWindow(private val table: List<Int>) {
+class CalibrationWindow(private val table: List<Int>, val settings: CalibrationCaptureSettings = CalibrationCaptureSettings()) {
     private data class Pairing(val frame: CalibrationFrame, val pedal: Double)
     private val window = mutableListOf<Pairing>()
     private var lastPedalAt = Long.MIN_VALUE
     private var address: String? = null
-    var progress = CaptureProgress()
+    private fun progress(phase: CapturePhase, seconds: Int = 0) = CaptureProgress(phase, seconds, settings.totalSeconds, settings.settleSeconds)
+    var progress = progress(CapturePhase.Waiting)
         private set
     fun reset(phase: CapturePhase = CapturePhase.Waiting) {
         window.clear(); lastPedalAt = Long.MIN_VALUE; address = null
-        progress = CaptureProgress(phase)
+        progress = progress(phase)
     }
     fun add(frame: CalibrationFrame, pedalWatts: Int, pedalAt: Long, meter: String,
             now: Long, capturedAt: Long): CalibrationSample? {
@@ -66,25 +69,25 @@ class CalibrationWindow(private val table: List<Int>) {
         }
         if (address != null && address != meter) reset()
         address = meter
-        if (pedalAt == lastPedalAt) { progress = CaptureProgress(CapturePhase.Waiting); return null }
+        if (pedalAt == lastPedalAt) { progress = progress(CapturePhase.Waiting); return null }
         if (lastPedalAt != Long.MIN_VALUE && pedalAt - lastPedalAt !in 500..2000) window.clear()
         lastPedalAt = pedalAt
         if (window.lastOrNull()?.let { frame.timestamp - it.frame.timestamp !in 500..2000 } == true) window.clear()
         window += Pairing(frame, pedalWatts.toDouble())
         val i = table.indexOfLast { it <= frame.ad }.coerceIn(0, 29)
-        val adTolerance = max(3.0, (table[i + 1] - table[i]) * .10)
+        val adTolerance = settings.resistanceTolerance(table[i + 1] - table[i])
         fun spread(v: List<Double>) = v.maxOrNull()!! - v.minOrNull()!!
         val cadenceChanged = spread(window.map { it.frame.rpm }) > 8
         val resistanceChanged = spread(window.map { it.frame.ad.toDouble() }) > adTolerance
         if (cadenceChanged || resistanceChanged) {
-            progress = CaptureProgress(if (resistanceChanged) CapturePhase.ResistanceChanged else CapturePhase.CadenceChanged)
+            progress = progress(if (resistanceChanged) CapturePhase.ResistanceChanged else CapturePhase.CadenceChanged)
             window.clear(); window += Pairing(frame, pedalWatts.toDouble()); return null
         }
         val elapsed = frame.timestamp - window.first().frame.timestamp
-        progress = CaptureProgress(if (elapsed < 3000) CapturePhase.Settling else CapturePhase.Holding,
-            (elapsed / 1000).toInt().coerceAtMost(7))
-        if (elapsed < 7000 || window.size < 8) return null
-        val settled = window.filter { it.frame.timestamp - window.first().frame.timestamp >= 3000 }
+        progress = progress(if (elapsed < settings.settleSeconds * 1000L) CapturePhase.Settling else CapturePhase.Holding,
+            (elapsed / 1000).toInt().coerceAtMost(settings.totalSeconds - 1))
+        if (elapsed < (settings.totalSeconds - 1) * 1000L || window.size < settings.totalSeconds) return null
+        val settled = window.filter { it.frame.timestamp - window.first().frame.timestamp >= settings.settleSeconds * 1000L }
         window.clear()
         if (settled.size < 5) return null
         val native = settled.map { it.frame.nativeWatts }
@@ -99,9 +102,9 @@ class CalibrationWindow(private val table: List<Int>) {
                 abs(median(values.take(2)) - median(values.takeLast(2))) <= tolerance
         }
         if (!steady(native) || !steady(pedals)) {
-            progress = CaptureProgress(CapturePhase.PowerChanged); return null
+            progress = progress(CapturePhase.PowerChanged); return null
         }
-        progress = CaptureProgress(CapturePhase.Saved, 8)
+        progress = progress(CapturePhase.Saved, settings.totalSeconds)
         return CalibrationSample(median(settled.map { it.frame.ad.toDouble() }),
             median(settled.map { it.frame.rpm }), median(native), median(pedals), capturedAt)
     }

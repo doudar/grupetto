@@ -19,7 +19,8 @@ internal fun correctionColor(percent: Double?): Color {
 }
 
 /** The fitted gain supplies the exact correction percentage; nearby efforts mark observed coverage. */
-internal fun calibrationCorrectionPercent(table: GrupettoCalibrationTable, samples: List<CalibrationSample>): List<Double?> {
+internal fun calibrationCorrectionPercent(table: GrupettoCalibrationTable, samples: List<CalibrationSample>,
+    includeManual: Boolean = true): List<Double?> {
     data class Reference(val x: Double, val rpm: Double)
     val references = samples.filter { it.nativeWatts in CalibrationPowerRange && it.rpm in 45.0..120.0 }
         .mapNotNull { sample -> calibrationCoordinate(table.baseline, sample.ad)?.let { Reference(it, sample.rpm) } }
@@ -27,7 +28,13 @@ internal fun calibrationCorrectionPercent(table: GrupettoCalibrationTable, sampl
     return List(496) { index ->
         val x = (index / 16).toDouble()
         val rpm = 45.0 + index % 16 * 5
-        if (references.any { abs(it.x - x) <= 2 && abs(it.rpm - rpm) <= 10 })
+        if ((includeManual && index in table.manualCoverage) || references.any { abs(it.x - x) <= 2 && abs(it.rpm - rpm) <= 10 })
             100 * (exp(table.gains[index]) - 1) else null
     }
+}
+
+internal fun GrupettoCalibrationTable.withCalibrationCoverage(samples: List<CalibrationSample>): GrupettoCalibrationTable {
+    val measured = calibrationCorrectionPercent(this, samples, includeManual = false)
+    return copy(correctionPercent = calibrationCorrectionPercent(this, samples),
+        recordedCoverage = measured.indices.filterTo(mutableSetOf()) { measured[it] != null })
 }

@@ -25,6 +25,8 @@ class GrupettoCalibrationManager(private val context: Context) {
     private val store = CalibrationBackupStore(context.filesDir)
     private val mutableState = MutableStateFlow(GrupettoCalibrationUiState())
     val state = mutableState.asStateFlow()
+    private val mutablePosition = MutableStateFlow<CalibrationTablePosition?>(null)
+    val livePosition = mutablePosition.asStateFlow()
     private var draft: GrupettoCalibrationProfile? = null
     private var savedProfile: GrupettoCalibrationProfile? = null
     @Volatile private var activeProfile: GrupettoCalibrationProfile? = null
@@ -42,7 +44,7 @@ class GrupettoCalibrationManager(private val context: Context) {
             // Re-evaluate old drafts, including fits previously rejected by error comparisons.
             draft = loaded.draft?.let { profile -> profile.copy(table = withContext(Dispatchers.Default) {
                 GrupettoCalibrationFitter.fit(profile.capture.baseline, profile.capture.samples,
-                    activeProfile?.takeIf { it.matches(profile.capture) }?.table)
+                    activeProfile?.takeIf { it.matches(profile.capture) }?.table)?.let { CalibrationManualEdit.reapply(it, profile.table) }
             }) }
             mutableState.update { it.copy(count = draft?.capture?.samples?.size ?: 0, table = draft?.table,
                 active = activeProfile != null, activeCount = activeProfile?.capture?.samples?.size ?: 0,
@@ -61,7 +63,7 @@ class GrupettoCalibrationManager(private val context: Context) {
                 else "Recording paused") }
             if (enabled) {
                 val capture = draft?.capture ?: savedProfile?.capture ?: existing?.takeIf { preferences.getLong("clearedAt", 0) == 0L }
-                if (capture != null) fitAndSave(capture)
+                if (capture != null) fitAndSave(mergeCalibrationCaptures(capture, existing, preferences.getLong("clearedAt", 0)))
             }
         }
     }
@@ -72,13 +74,15 @@ class GrupettoCalibrationManager(private val context: Context) {
             val fresh = capture.samples.filter { it.capturedAt >= recordingSince }
             if (fresh.isEmpty()) return
             val previous = draft?.capture
-            if (previous != null && (previous.frameSerial != capture.frameSerial || previous.meterAddress != capture.meterAddress ||
+            if (previous != null && (previous.frameSerial != capture.frameSerial ||
                 previous.baseline != capture.baseline || previous.serviceVersion != capture.serviceVersion)) {
-                mutableState.update { it.copy(recording = false, message = "Bike, pedals or board changed. Clear the Grupetto draft before recording.") }
-                return
+                val message = "Bike or board baseline changed. Saved efforts kept; restore the original setup or clear the Grupetto draft."
+                mutableState.update { it.copy(recording = false, message = message) }
+                error(message)
             }
             val samples = ((previous?.samples ?: emptyList()) + fresh).distinctBy { it.capturedAt }.takeLast(3600)
             fitAndSave(capture.copy(samples = samples))
+            check(mutableState.value.recording) { mutableState.value.message }
         }
     }
     private suspend fun fitAndSave(capture: CalibrationCapture) {
@@ -86,7 +90,11 @@ class GrupettoCalibrationManager(private val context: Context) {
             val (generation, incumbent) = synchronized(activationLock) {
                 activationGeneration to activeProfile?.takeIf { it.matches(capture) }
             }
-            val table = withContext(Dispatchers.Default) { GrupettoCalibrationFitter.fit(capture.baseline, capture.samples, incumbent?.table) }
+            val table = withContext(Dispatchers.Default) {
+                GrupettoCalibrationFitter.fit(capture.baseline, capture.samples, incumbent?.table)?.let {
+                    CalibrationManualEdit.reapply(it, draft?.table ?: savedProfile?.table)
+                }
+            }
             val updated = GrupettoCalibrationProfile(capture, table)
             withContext(NonCancellable + Dispatchers.IO) { store.save(CalibrationBackup(updated, savedProfile)) }
             synchronized(activationLock) {
@@ -195,6 +203,44 @@ class GrupettoCalibrationManager(private val context: Context) {
             withContext(Dispatchers.Default) { backup.encode() }
         }
     }
+    /** Edit a frozen preview; reject stale sessions instead of overwriting a newer ride/load/clear. */
+    suspend fun saveManualEdit(expected: GrupettoCalibrationTable, edited: GrupettoCalibrationTable) {
+        initialized.await()
+        mutex.withLock {
+            check(!recordingRequested && !mutableState.value.recording) { "Pause recording before saving manual edits." }
+            check(displayedTable() == expected) { "The table changed. Close the editor and reopen the latest table." }
+            require(edited.baseline == expected.baseline && edited.gains.size == 496 &&
+                edited.gains.all { it.isFinite() && it in kotlin.math.ln(.65)..kotlin.math.ln(1.35) })
+            val source = (activeProfile ?: activationProfile(draft, savedProfile) ?: draft)
+                ?: error("Record a calibration effort before editing.")
+            check(verifiedBaseline?.first?.let { it == edited.baseline } != false) { "The bike baseline changed. Reopen calibration." }
+            // Preserve any newer real efforts even when the user edited the active snapshot.
+            val capture = draft?.takeIf { it.matches(source.capture) }?.capture ?: source.capture
+            val fit = withContext(Dispatchers.Default) { GrupettoCalibrationFitter.fit(capture.baseline, capture.samples) }
+                ?: error("No usable recorded calibration is available.")
+            val table = if (edited.manualOffsets.isEmpty()) fit else fit.copy(
+                gains = edited.gains, ready = true, manualCoverage = edited.manualCoverage,
+                manualOffsets = edited.gains.indices.map { edited.gains[it] - fit.gains[it] }
+            ).withCalibrationCoverage(capture.samples)
+            val updated = GrupettoCalibrationProfile(capture, table)
+            val generation = synchronized(activationLock) { activationGeneration }
+            val incumbent = activeProfile
+            // Restoring a sparse recorded fit must not fall back to the manual snapshot just removed.
+            val retainedSaved = savedProfile.takeUnless { edited.manualOffsets.isEmpty() && !fit.ready }
+            withContext(NonCancellable) {
+                withContext(Dispatchers.IO) { store.save(CalibrationBackup(updated, retainedSaved)) }
+                draft = updated
+                savedProfile = retainedSaved
+                mutableState.update { it.copy(table = table, count = capture.samples.size,
+                    savedCount = compatibleSavedCount(), errors = calibrationErrorComparison(draft, activeProfile, savedProfile),
+                    displayTable = displayedTable(), message = "Manual changes saved · activate when ready") }
+                if (incumbent != null && table.ready) {
+                    try { publishActive(updated, incumbent, generation, automatic = false) }
+                    catch (e: Exception) { throw IllegalStateException("Edits saved as a draft; active update failed. Close and activate the draft to retry.", e) }
+                } else if (incumbent != null) deactivate("Recorded fit needs more coverage · correction off")
+            }
+        }
+    }
     internal suspend fun importBackup(backup: CalibrationBackup): CalibrationLoadResult {
         require(backup.hasData) { "This file contains no calibration data." }
         initialized.await()
@@ -234,9 +280,14 @@ class GrupettoCalibrationManager(private val context: Context) {
             if (profile.capture.baseline != baseline) deactivate("Board table changed · Grupetto correction disabled")
         }
     }
-    fun clearVerification() { verifiedBaseline = null; mutableState.update { it.copy(verified = false) } }
+    fun clearVerification() { verifiedBaseline = null; mutablePosition.value = null; mutableState.update { it.copy(verified = false) } }
     /** Null means this frame was not calibrated; never label a fallback as corrected power. */
     fun correctedPower(frame: CalibrationFrame): Float? {
+        val baseline = verifiedBaseline
+        if (baseline != null && SystemClock.elapsedRealtime() - baseline.second in 0..6500 &&
+            (mutablePosition.value?.frame?.timestamp?.let { frame.timestamp - it >= 250 } != false)) {
+            mutablePosition.value = CalibrationTablePosition(frame, baseline.first)
+        }
         val profile = activeProfile ?: return null
         val verified = verifiedBaseline ?: return null
         if (frame.powerSource != 1 || profile.capture.frameSerial != frame.frameSerial) {

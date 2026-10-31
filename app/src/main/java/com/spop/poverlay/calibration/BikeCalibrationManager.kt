@@ -10,6 +10,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import timber.log.Timber
 
 data class CalibrationUiState(val enabled: Boolean = false, val sampleCount: Int = 0,
     val fit: CalibrationFit? = null, val status: String = "Enable to collect steady riding data.",
@@ -34,6 +35,17 @@ class BikeCalibrationManager(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val store = CalibrationStore(context.filesDir)
+    private val preferences = context.getSharedPreferences("calibration-capture-settings", Context.MODE_PRIVATE)
+    private val mutableSettings = MutableStateFlow(CalibrationCaptureSettings(
+        preferences.getInt("settleSeconds", 3).coerceIn(0, 15),
+        preferences.getInt("resistanceMovementPercent", 10).coerceIn(1, 100)))
+    val settings = mutableSettings.asStateFlow()
+    fun updateSettings(settings: CalibrationCaptureSettings) {
+        preferences.edit().putInt("settleSeconds", settings.settleSeconds)
+            .putInt("resistanceMovementPercent", settings.resistanceMovementPercent).apply()
+        mutableSettings.value = settings
+        resetWindow = true
+    }
     private val mutableState = MutableStateFlow(CalibrationUiState())
     val state = mutableState.asStateFlow()
     private var capture: CalibrationCapture? = null
@@ -88,6 +100,7 @@ class BikeCalibrationManager(
             var binding: BoundBikeService? = null
             var service: CalibrationService? = null
             try {
+                Timber.tag("CalibrationCapture").i("Starting capture; savedEfforts=%d", capture?.samples?.size ?: 0)
                 @Suppress("DEPRECATION")
                 val info = context.packageManager.getPackageInfo("com.onepeloton.affernetservice", 0)
                 @Suppress("DEPRECATION")
@@ -99,7 +112,8 @@ class BikeCalibrationManager(
                 service = connection
                 withContext(Dispatchers.IO) { connection.start() }
                 val baseline = withContext(Dispatchers.IO) { connection.readTable() }
-                val window = CalibrationWindow(baseline)
+                Timber.tag("CalibrationCapture").i("Subscribed to bike; read %d baseline points", baseline.size)
+                var window = CalibrationWindow(baseline, mutableSettings.value)
                 guide = null
                 var nextTableRead = 0L
                 while (isActive) {
@@ -113,6 +127,7 @@ class BikeCalibrationManager(
                     }
                     val frame = connection.frame
                     val pedal = readings.value
+                    if (window.settings != mutableSettings.value) window = CalibrationWindow(baseline, mutableSettings.value)
                     if (resetWindow) { window.reset(); resetWindow = false }
                     if (frame == null || now - frame.timestamp !in 0..1000 ||
                         pedal == null || now - pedal.timestamp !in 0..1500) {
@@ -121,11 +136,17 @@ class BikeCalibrationManager(
                             frame = null, pedalWatts = null, progress = window.progress)
                     } else {
                         check(frame.powerSource == 1) { "Bike is not using sensor-board power. No tablet override will be changed." }
-                        val current = capture ?: CalibrationCapture(frame.frameSerial, pedal.address, version, baseline, emptyList())
-                        check(current.frameSerial == frame.frameSerial && current.meterAddress == pedal.address &&
-                            current.serviceVersion == version && current.baseline == baseline) {
-                            "Bike, power meter or calibration changed. Clear the saved capture to start a new one."
+                        val identity = CalibrationCapture(frame.frameSerial, pedal.address, version, baseline, emptyList())
+                        val previousCapture = capture
+                        val mismatches = previousCapture?.let { calibrationCaptureMismatches(it, identity) }.orEmpty()
+                        if (mismatches.isNotEmpty()) {
+                            val changedPoints = baseline.indices.filter { previousCapture?.baseline?.getOrNull(it) != baseline[it] }
+                            Timber.tag("CalibrationCapture").w("Capture identity mismatch: %s; savedEfforts=%d; changedBaselinePoints=%s",
+                                mismatches.joinToString(), previousCapture?.samples?.size ?: 0, changedPoints.joinToString())
                         }
+                        val current = resolveCalibrationCapture(previousCapture, identity)
+                        if (mismatches.isNotEmpty()) Timber.tag("CalibrationCapture").i(
+                            "Rebound empty capture to current metadata; no recorded efforts replaced")
                         mutableState.value = mutableState.value.captureIdentityVerified()
                         capture = current
                         if (guide == null) guide = CalibrationGuide(baseline, frame.ad)
@@ -149,6 +170,7 @@ class BikeCalibrationManager(
                                 withContext(Dispatchers.IO) { store.save(updated, fit) }
                                 capture = updated
                                 grupettoCalibration?.accept(updated)
+                                Timber.tag("CalibrationCapture").i("Saved calibration effort; captureEfforts=%d", updated.samples.size)
                                 val newCells = guide!!.cells(updated.samples)
                                 val finishedTarget = oldTarget != null && !oldTarget.complete &&
                                     newCells.any { it.point == oldTarget.point && it.rpm == oldTarget.rpm && it.complete }
@@ -165,6 +187,7 @@ class BikeCalibrationManager(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                Timber.tag("CalibrationCapture").e(e, "Capture stopped: %s", e.message)
                 if (generation == token) mutableState.value = mutableState.value.captureFailed(
                     e.message ?: "Calibration capture stopped.")
             } finally {

@@ -20,6 +20,7 @@ import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 import timber.log.Timber
 
@@ -135,6 +136,17 @@ class ConfigurationViewModel(
     val boardCalibrationState = boardCalibration.state
     private val grupettoCalibration = (application as GrupettoApplication).grupettoCalibration
     val grupettoCalibrationState = grupettoCalibration.state
+    val calibrationCaptureSettings = calibration.settings
+    fun setCalibrationCaptureSettings(settings: com.spop.poverlay.calibration.CalibrationCaptureSettings) = calibration.updateSettings(settings)
+    val liveCalibrationPosition = grupettoCalibration.livePosition.flatMapLatest { position ->
+        kotlinx.coroutines.flow.flow {
+            val age = position?.let { android.os.SystemClock.elapsedRealtime() - it.frame.timestamp }
+            emit(position.takeIf { age != null && age in 0..2000 })
+            if (age != null && age in 0..2000) { kotlinx.coroutines.delay(2001 - age); emit(null) }
+        }
+    }
+    // Keep an unsaved editing session and its undo stack across Activity recreation.
+    internal var manualCalibrationSession: com.spop.poverlay.calibration.CalibrationEditHistory? = null
     private fun boardSetupRunning() = boardCalibration.state.value.active || boardCalibration.state.value.busy
     val calibrationMeterReady = kotlinx.coroutines.flow.combine(powerMeters.connectedDevice, powerMeters.reading) { device, reading ->
         device != null && device.address == reading?.address &&
@@ -154,13 +166,15 @@ class ConfigurationViewModel(
             val saved = calibration.savedCapture()
             if (boardSetupRunning() || enabled && !hasCalibrationMeter()) return@launch
             grupettoCalibration.record(enabled, saved)
-            if (enabled && !calibration.state.value.enabled) setCalibrationEnabled(true)
+            if (enabled && grupettoCalibration.state.value.recording && !calibration.state.value.enabled) setCalibrationEnabled(true)
             else if (!enabled) setCalibrationEnabled(false)
         }
     }
     fun activateGrupettoCalibration(enabled: Boolean) { if (!enabled || !boardSetupRunning()) grupettoCalibration.activate(enabled) }
     fun clearGrupettoCalibration() { if (!boardSetupRunning()) grupettoCalibration.clear() }
     suspend fun exportCalibrationBackup() = grupettoCalibration.exportBackup()
+    suspend fun saveManualCalibration(expected: com.spop.poverlay.calibration.GrupettoCalibrationTable,
+        edited: com.spop.poverlay.calibration.GrupettoCalibrationTable) = grupettoCalibration.saveManualEdit(expected, edited)
     internal suspend fun loadCalibrationBackup(backup: com.spop.poverlay.calibration.CalibrationBackup): com.spop.poverlay.calibration.CalibrationLoadResult {
         check(!calibration.state.value.enabled && !boardSetupRunning()) {
             "Pause calibration capture before loading a table."
@@ -177,7 +191,7 @@ class ConfigurationViewModel(
             val saved = calibration.savedCapture()
             if (boardSetupRunning() || !hasCalibrationMeter()) return@launch
             grupettoCalibration.record(true, saved)
-            if (!calibration.state.value.enabled) setCalibrationEnabled(true)
+            if (grupettoCalibration.state.value.recording && !calibration.state.value.enabled) setCalibrationEnabled(true)
         }
     }
     fun prepareBoardCalibration() { grupettoCalibration.deactivate("Board setup · Grupetto correction off"); boardCalibration.begin() }

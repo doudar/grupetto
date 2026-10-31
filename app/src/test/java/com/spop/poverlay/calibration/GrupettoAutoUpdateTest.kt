@@ -23,10 +23,10 @@ class GrupettoAutoUpdateTest {
         assertSame(readyDraft, activationProfile(readyDraft, saved))
     }
 
-    @Test fun savedActivationCannotCrossBikeMeterOrBaselineChanges() {
+    @Test fun savedActivationCannotCrossBikeOrBaselineChanges() {
         val capture = CalibrationCapture("bike", "pedals", 2040490, baseline, samples)
         val saved = GrupettoCalibrationProfile(capture, constant(1.1))
-        listOf(capture.copy(frameSerial = "other"), capture.copy(meterAddress = "other"),
+        listOf(capture.copy(frameSerial = "other"),
             capture.copy(serviceVersion = 1), capture.copy(baseline = baseline.map { it + 1 })).forEach {
             assertNull(activationProfile(GrupettoCalibrationProfile(it, saved.table!!.copy(ready = false)), saved))
         }
@@ -93,21 +93,29 @@ class GrupettoAutoUpdateTest {
         val profile = GrupettoCalibrationProfile(capture, constant(1.1))
         assertNull(automaticCalibrationProfile(profile, null))
         assertNull(automaticCalibrationProfile(profile.copy(table = profile.table!!.copy(ready = false)), profile))
-        listOf(capture.copy(frameSerial = "other"), capture.copy(meterAddress = "other"),
+        listOf(capture.copy(frameSerial = "other"),
             capture.copy(serviceVersion = 1), capture.copy(baseline = baseline.map { it + 1 })).forEach {
             assertNull(automaticCalibrationProfile(profile.copy(capture = it), profile))
         }
     }
 
-    @Test fun differentBikeMeterOrBaselineCannotSupplyAnIncumbentForAutoUpdate() {
+    @Test fun differentBikeOrBaselineCannotSupplyAnIncumbentForAutoUpdate() {
         val capture = CalibrationCapture("bike", "pedals", 2040490, baseline, samples)
         val profile = GrupettoCalibrationProfile(capture, constant(1.0))
         assertTrue(profile.matches(capture.copy(samples = samples.take(6))))
         assertFalse(profile.matches(capture.copy(frameSerial = "different")))
-        assertFalse(profile.matches(capture.copy(meterAddress = "different")))
+        assertTrue(profile.matches(capture.copy(meterAddress = "different")))
         assertFalse(profile.matches(capture.copy(serviceVersion = 1)))
         val other = baseline.map { it + 1 }
         assertFalse(profile.matches(capture.copy(baseline = other)))
         assertNull(GrupettoCalibrationFitter.fit(baseline, samples, constant(1.0).copy(baseline = other))!!.activeComparison)
+    }
+
+    @Test fun anotherMeterCanUpdateAndActivateExistingCalibration() {
+        val capture = CalibrationCapture("bike", "pedals", 2040490, baseline, samples)
+        val saved = GrupettoCalibrationProfile(capture, constant(1.1))
+        val latest = saved.copy(capture = capture.copy(meterAddress = "new-meter"))
+        assertSame(latest, automaticCalibrationProfile(latest, saved))
+        assertSame(saved, activationProfile(latest.copy(table = latest.table!!.copy(ready = false)), saved))
     }
 }

@@ -25,9 +25,14 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
     onActivate: (Boolean) -> Unit, onClear: () -> Unit, onGuide: () -> Unit,
     meterReady: Boolean = false, capture: CalibrationUiState = CalibrationUiState(),
     metrics: CalibrationLiveMetrics = CalibrationLiveMetrics(),
-    fileControls: @Composable () -> Unit = {}) {
+    fileControls: @Composable () -> Unit = {}, onManualEdit: (() -> Unit)? = null,
+    livePosition: CalibrationTablePosition? = null,
+    captureSettings: CalibrationCaptureSettings = CalibrationCaptureSettings(),
+    onCaptureSettings: ((CalibrationCaptureSettings) -> Unit)? = null) {
     var confirmClear by remember { mutableStateOf(false) }
     var details by remember { mutableStateOf(false) }
+    var settingsOpen by remember { mutableStateOf(false) }
+    if (settingsOpen && onCaptureSettings != null) CalibrationSettingsDialog(captureSettings, onCaptureSettings) { settingsOpen = false }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -43,14 +48,18 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
         CaptureErrorNotice(capture)
         if (!meterReady) Text("Connect a power meter to record", fontSize = 14.sp, lineHeight = 18.sp, color = Color(0xFFFBBF24))
         CalibrationMetrics(metrics, showCorrected = true)
-        GrupettoCoverageChart(state.displayTable ?: state.table, capture, state.recording && meterReady)
+        GrupettoCoverageChart(state.displayTable ?: state.table, capture, state.recording && meterReady, livePosition)
         CaptureHoldFeedback(capture, state.recording)
         CalibrationCorrectionLegend()
         CalibrationErrorSummary(state.errors)
         fileControls()
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onGuide, Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Guided capture") }
+            if (onManualEdit != null) OutlinedButton(onManualEdit, Modifier.weight(1f).heightIn(min = 48.dp),
+                enabled = !state.recording && (state.displayTable ?: state.table) != null) { Text("Manual editor") }
+            if (onCaptureSettings != null) OutlinedButton({ settingsOpen = true }, Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Capture settings") }
         }
+        if (state.recording) Text("Pause recording to edit the power table manually.", fontSize = 12.sp, color = Color(0xFF9EAEC0))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(when {
                 state.active && !state.verified -> "Active · waiting for bike"
@@ -73,11 +82,13 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
                     fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFF9EAEC0))
             }
             state.table?.let { table ->
+                if (table.manualOffsets.isNotEmpty()) Text("Manual edits included · validation below describes the recorded fit before manual edits.",
+                    fontSize = 12.sp, color = Color(0xFFFBBF24))
                 Text(String.format(Locale.US, "Draft validation RMSE %.2f to %.2f W", table.beforeRmse, table.afterRmse), fontSize = 14.sp)
                 if (!table.ready) Text("Draft needs more resistances and cadences", fontSize = 12.sp, color = Color(0xFFFBBF24))
                 if (state.active && !state.recording && table.ready) TextButton({ onActivate(true) }) { Text("Update active table from latest fit") }
             }
-            Text("Record + Activate: every saved effort updates the table. Error scores are informational. Pulse: orange settles, yellow holds, green saves.",
+            Text("Record + Activate: every saved effort updates the table. Error scores are informational. Pulse: cyan shows your current cell, orange settles, yellow holds, green saves.",
                 fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFF9EAEC0))
         }
         if (confirmClear) {
@@ -89,7 +100,7 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
 }
 
 @Composable
-private fun CalibrationCorrectionLegend() {
+internal fun CalibrationCorrectionLegend() {
     Column {
         Canvas(Modifier.fillMaxWidth().height(7.dp)) {
             drawRect(Brush.horizontalGradient(listOf(CorrectionOverColor, CorrectionZeroColor, CorrectionUnderColor)))
@@ -130,18 +141,20 @@ private fun CalibrationErrorSummary(errors: CalibrationErrorComparison?) {
 }
 
 @Composable
-private fun GrupettoCoverageChart(table: GrupettoCalibrationTable?, capture: CalibrationUiState, recording: Boolean) {
-    val cell = recordingCell(capture, recording)
+private fun GrupettoCoverageChart(table: GrupettoCalibrationTable?, capture: CalibrationUiState, recording: Boolean,
+    livePosition: CalibrationTablePosition?) {
+    val recordingCell = recordingCell(capture, recording)
+    val cell = liveTableCell(livePosition, table?.baseline, android.os.SystemClock.elapsedRealtime()) ?: recordingCell
     val pulse = if (cell != null) {
         val transition = rememberInfiniteTransition(label = "Recording cell")
         transition.animateFloat(.25f, 1f, infiniteRepeatable(tween(650), RepeatMode.Reverse), label = "Recording pulse").value
     } else 0f
-    val progressColor = captureProgressColor(capture.progress)
+    val progressColor = if (cell != null && cell == recordingCell) captureProgressColor(capture.progress) else Color(0xFF22D3EE)
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("120\nrpm\n\n45", fontSize = 11.sp, lineHeight = 18.sp, modifier = Modifier.width(32.dp))
         Canvas(Modifier.weight(1f).height(80.dp).semantics {
             contentDescription = "Correction percentage: red -10% for bike overestimation, neutral 0%, blue +10% for bike underestimation; gray unknown. Resistance left to right, cadence bottom to top" +
-                (cell?.let { "; recording resistance cell ${it.first}, ${45 + it.second * 5} rpm" } ?: "")
+                (cell?.let { "; ${if (it == recordingCell) "recording" else "current"} resistance cell ${it.first}, ${45 + it.second * 5} rpm" } ?: "")
         }) {
             val w = size.width / 31
             val h = size.height / 16

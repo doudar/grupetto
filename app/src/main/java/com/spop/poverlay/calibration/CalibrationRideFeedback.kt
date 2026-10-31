@@ -84,7 +84,7 @@ internal fun CaptureHoldFeedback(capture: CalibrationUiState, recording: Boolean
         capture.resting -> "Rest · resume in ride view"
         capture.frame == null || capture.pedalWatts == null -> "Waiting for bike + pedals"
         progress.phase == CapturePhase.Saved -> "Saved"
-        progress.phase == CapturePhase.Settling -> "Settle · ${progress.remaining}s"
+        progress.phase == CapturePhase.Settling -> "Settle · ${progress.settleRemaining}s"
         progress.phase == CapturePhase.Holding -> "Hold · ${progress.remaining}s"
         else -> progress.phase.cue
     }
@@ -92,8 +92,8 @@ internal fun CaptureHoldFeedback(capture: CalibrationUiState, recording: Boolean
         horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(label, fontSize = 16.sp, lineHeight = 22.sp, color = color, fontWeight = FontWeight.Bold)
         Canvas(Modifier.weight(1f).height(10.dp).semantics { contentDescription = label }) {
-            val step = size.width / 8
-            repeat(8) { i ->
+            val step = size.width / progress.totalSeconds.coerceAtLeast(1)
+            repeat(progress.totalSeconds.coerceAtLeast(1)) { i ->
                 drawRect(if (collecting && i < progress.seconds) color else Color(0xFF304255),
                     Offset(i * step, 0f), Size((step - 3.dp.toPx()).coerceAtLeast(1f), size.height))
             }

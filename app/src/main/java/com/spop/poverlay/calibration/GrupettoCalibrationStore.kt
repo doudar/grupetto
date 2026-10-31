@@ -8,7 +8,7 @@ import java.io.FileNotFoundException
 
 internal data class GrupettoCalibrationProfile(val capture: CalibrationCapture, val table: GrupettoCalibrationTable?) {
     fun matches(other: CalibrationCapture) = capture.frameSerial == other.frameSerial &&
-        capture.meterAddress == other.meterAddress && capture.serviceVersion == other.serviceVersion &&
+        capture.serviceVersion == other.serviceVersion &&
         capture.baseline == other.baseline
 }
 
@@ -56,14 +56,26 @@ internal class GrupettoCalibrationStore(directory: File, name: String) {
             val table = (if (json.has("table")) json.getJSONObject("table") else null)?.let { t ->
                 fun values(key: String) = t.getJSONArray(key).let { a -> List(a.length()) { a.getDouble(it) } }
                 GrupettoCalibrationTable(baseline, values("gains"), values("confidence"), samples.size, t.getInt("cells"),
-                    t.getDouble("beforeRmse"), t.getDouble("afterRmse"), t.getBoolean("ready")).also {
+                    t.getDouble("beforeRmse"), t.getDouble("afterRmse"), t.getBoolean("ready"),
+                    manualOffsets = if (t.has("manualOffsets")) values("manualOffsets") else emptyList(),
+                    manualCoverage = if (t.has("manualCoverage")) t.getJSONArray("manualCoverage").let { a ->
+                        check(a.length() <= 496)
+                        List(a.length()) { a.getInt(it) }.toSet()
+                    } else emptySet()).also {
                     check(it.gains.size == 496 && it.confidence.size == 496 &&
                         it.gains.all { value -> value.isFinite() && value in kotlin.math.ln(.65)..kotlin.math.ln(1.35) } &&
                         it.confidence.all { value -> value in 0.0..1.0 } && it.beforeRmse.isFinite() && it.afterRmse.isFinite() &&
                         it.beforeRmse >= 0 && it.afterRmse >= 0 && it.cells in 0..128)
+                    check(it.manualOffsets.isEmpty() || (it.manualOffsets.size == 496 &&
+                        it.manualOffsets.indices.all { i ->
+                            it.manualOffsets[i].isFinite() &&
+                                it.gains[i] - it.manualOffsets[i] in (kotlin.math.ln(.65) - 1e-9)..(kotlin.math.ln(1.35) + 1e-9)
+                        }))
+                    check(it.manualCoverage.all { cell -> cell in 0 until 496 } &&
+                        (it.manualCoverage.isEmpty() || it.manualOffsets.isNotEmpty()))
                 }
             }
-            return GrupettoCalibrationProfile(capture, table?.copy(correctionPercent = calibrationCorrectionPercent(table, samples)))
+            return GrupettoCalibrationProfile(capture, table?.withCalibrationCoverage(samples))
         }
         internal fun encode(profile: GrupettoCalibrationProfile): JSONObject {
             val capture = profile.capture
@@ -76,7 +88,8 @@ internal class GrupettoCalibrationStore(directory: File, name: String) {
                 } })
             profile.table?.let {
                 json.put("table", JSONObject().put("gains", JSONArray(it.gains)).put("confidence", JSONArray(it.confidence))
-                    .put("cells", it.cells).put("beforeRmse", it.beforeRmse).put("afterRmse", it.afterRmse).put("ready", it.ready))
+                    .put("cells", it.cells).put("beforeRmse", it.beforeRmse).put("afterRmse", it.afterRmse).put("ready", it.ready)
+                    .put("manualOffsets", JSONArray(it.manualOffsets)).put("manualCoverage", JSONArray(it.manualCoverage.toList())))
             }
             return json
         }
