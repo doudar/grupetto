@@ -21,7 +21,9 @@ class BikeControlTest {
     }
     private fun command(vararg bytes: Int, client: String = "ble:a") =
         control.procedure(client, bytes.map { it.toByte() }.toByteArray())
-    private fun acquire() { sample(); assertEquals(1, command(0).result) }
+    private fun acquire() { pedal(100f, 80f); assertEquals(1, command(0).result) }
+    /** Steady pedaling past the spin-up window, so modeled jumps are allowed. */
+    private fun pedal(power: Float = 168f, cadence: Float = 90f) = repeat(80) { sample(power, cadence) }
 
     @Test fun requiresFreshConnectedHardware() {
         assertEquals(4, command(0).result)
@@ -114,7 +116,7 @@ class BikeControlTest {
         assertEquals(ControlMode.Manual, control.state.value.mode)
     }
     @Test fun ergIncreasesAndDecreasesWithRateLimit() {
-        sample()
+        pedal(100f, 80f)
         assertTrue(control.localErg(200))
         repeat(10) { sample(100f) }
         // 200 W at 80 RPM models to level 51; a modeled jump ramps at 10 levels/s.
@@ -127,7 +129,7 @@ class BikeControlTest {
         assertTrue(writes.zipWithNext().all { (a, b) -> kotlin.math.abs(a - b) <= 4 })
     }
     @Test fun noMotionBelowMinimumCadenceAndNoWindup() {
-        sample(); control.localErg(1000)
+        pedal(100f, 80f); control.localErg(1000)
         repeat(100) { sample(0f, 0f) }
         assertTrue(writes.isEmpty())
         sample(0f, 24f)
@@ -142,7 +144,7 @@ class BikeControlTest {
         assertTrue(writes.isEmpty())
     }
     @Test fun staleTelemetryStopsAndCannotResumeAutomatically() {
-        sample(); control.localErg(250)
+        pedal(100f, 80f); control.localErg(250)
         now += 1501
         control.tick()
         assertFalse(control.state.value.connected)
@@ -152,19 +154,19 @@ class BikeControlTest {
         assertTrue(writes.isEmpty())
     }
     @Test fun repeatedTelemetryCannotDriveMotor() {
-        sample(); control.localErg(250)
+        pedal(100f, 80f); control.localErg(250)
         repeat(10) { now += 100; control.tick() }
         assertTrue(writes.isEmpty())
     }
     @Test fun invalidSampleDisarms() {
-        sample(); control.localErg(250)
+        pedal(100f, 80f); control.localErg(250)
         control.acceptSample(BikeSample(Float.NaN, 80f, 40, now))
         assertFalse(control.state.value.connected)
         assertEquals(ControlMode.Manual, control.state.value.mode)
         assertTrue(writes.isEmpty())
     }
     @Test fun binderFailureStopsControl() {
-        sample(); control.localErg(250)
+        pedal(100f, 80f); control.localErg(250)
         writeSucceeds = false
         repeat(10) { sample() }
         assertEquals(1, writes.size)
@@ -172,7 +174,7 @@ class BikeControlTest {
         assertEquals("Resistance command failed", control.state.value.message)
     }
     @Test fun knobOverrideIsNotFought() {
-        sample(); control.localErg(250)
+        pedal(100f, 80f); control.localErg(250)
         resistance = 20
         repeat(10) { sample() }
         assertTrue(writes.isEmpty())
@@ -228,7 +230,7 @@ class BikeControlTest {
         assertEquals(-40, control.state.value.shiftOffset)
     }
     @Test fun disconnectedSampleStopsImmediately() {
-        sample(); control.localErg(200)
+        pedal(100f, 80f); control.localErg(200)
         control.acceptSample(null)
         assertEquals(ControlMode.Manual, control.state.value.mode)
         assertFalse(control.state.value.connected)
@@ -373,7 +375,7 @@ class BikeControlTest {
 
     @Test fun largeErgStepJumpsToModeledLevelWithoutWindup() {
         resistance = 44
-        sample(168f, 90f)
+        pedal()
         assertTrue(control.localErg(220))
         // The 10 levels/s ramp reaches the modeled level within three samples.
         repeat(3) { sample(168f, 90f) }
@@ -387,7 +389,7 @@ class BikeControlTest {
     }
     @Test fun rampMovesOneLevelPerTickBetweenSamples() {
         resistance = 44
-        sample(168f, 90f)
+        pedal()
         assertTrue(control.localErg(220))
         sample(168f, 90f)
         assertEquals(listOf(45), writes)
@@ -399,7 +401,7 @@ class BikeControlTest {
     }
     @Test fun knobMovedDuringRampStopsWithoutFighting() {
         resistance = 44
-        sample(168f, 90f)
+        pedal()
         assertTrue(control.localErg(345))
         holdEcho = true
         sample(168f, 90f)
@@ -440,6 +442,47 @@ class BikeControlTest {
         assertTrue(control.localErg(175))
         repeat(50) { sample(170f, 90f) }
         assertTrue(writes.isNotEmpty())
+    }
+    @Test fun moreResistanceWaitsUntilSpinUpIsOver() {
+        // Oct 31: ERG 165 W arrived 5 s after the rider started pedaling; a jump sized for the
+        // 55 rpm average put out ~285 W at 75 rpm. Now the level holds while the rider spins up,
+        // then jumps once, sized for the cadence they actually settled at.
+        resistance = 30
+        repeat(10) { sample(0f, 0f) }
+        repeat(20) { sample(40f, 60f) }   // 4 s of pedaling
+        assertTrue(control.localErg(165))
+        repeat(50) { sample(70f, 80f) }   // to 14 s: still spinning up
+        assertTrue("held while spinning up, got $writes", writes.isEmpty())
+        repeat(20) { sample(70f, 80f) }   // past 15 s, ramp done
+        // One jump, to about the level 165 W needs at the 80 rpm the rider settled at.
+        val expected = control.powerModel.nearestLevelFor(165f, 80f)!!
+        assertTrue("expected about $expected, got $resistance", resistance in expected - 1..expected + 1)
+        assertTrue(writes.zipWithNext().all { (x, y) -> y - x in 1..2 })
+    }
+    @Test fun jumpsNormallyAfterSpinUp() {
+        resistance = 30
+        repeat(10) { sample(0f, 0f) }
+        repeat(80) { sample(60f, 80f) }   // 16 s of pedaling
+        assertTrue(control.localErg(165))
+        repeat(5) { sample(60f, 80f) }    // 1 s
+        assertTrue("expected a modeled jump, got $writes", resistance >= 38)
+    }
+    @Test fun stoppingRestartsTheSpinUpWindow() {
+        resistance = 30
+        pedal(60f, 80f)
+        repeat(10) { sample(0f, 0f) }     // stopped
+        repeat(10) { sample(40f, 60f) }   // pedaling again for 2 s
+        assertTrue(control.localErg(165))
+        repeat(5) { sample(60f, 75f) }
+        assertTrue("held while spinning up, got $writes", writes.isEmpty())
+    }
+    @Test fun spinUpNeverAddsResistanceForALowerTarget() {
+        resistance = 60
+        repeat(10) { sample(0f, 0f) }
+        repeat(10) { sample(200f, 60f) }  // 2 s of heavy pedaling at a low cadence
+        assertTrue(control.localErg(150))
+        repeat(10) { sample(190f, 60f) }
+        assertTrue("got $writes", writes.all { it <= 60 } && resistance <= 60)
     }
     @Test fun smallErgStepKeepsProportionalTrim() {
         resistance = 44

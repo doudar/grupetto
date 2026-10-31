@@ -88,6 +88,11 @@ class BikeControl(
     private var cadenceAverage: Float? = null
     private var cadenceAverageTime = 0L
     private val cadenceHistory = CadenceHistory()
+    // When the rider (re)started pedaling. While they spin up the cadence average is still low:
+    // on Oct 31 a jump sized for a 55 rpm average put out ~285 W at 75 rpm. So a request for more
+    // power waits at the current level until SPIN_UP_MS of pedaling, then jumps for the real cadence.
+    private var pedalingSince = 0L
+    private var waitingTarget: Int? = null
     private var targetChangedAt = 0L
 
     /**
@@ -265,6 +270,19 @@ class BikeControl(
                 val external = com.spop.poverlay.sensor.power.freshExternalPower(externalPower, clock())
                 val measured = external ?: reading.power
                 val targetWatts = state.value.targetWatts
+                if (feedForwardTarget != targetWatts && external == null && spinningUp() &&
+                    targetWatts - measured >= FEED_FORWARD_MIN_WATTS) {
+                    if (waitingTarget != targetWatts) {
+                        waitingTarget = targetWatts
+                        trace?.invoke("wait spin-up target=$targetWatts measured=${f1(measured)} level=${reading.resistance}" +
+                            " cad=${f1(reading.cadence)} cadAvg=${cadenceAverage?.let(::f1)}" +
+                            " pedaling=${if (cadenceAverage == null) "no" else "${clock() - pedalingSince}ms"}")
+                    }
+                    filteredPower = null
+                    requestedResistance = reading.resistance.toFloat()
+                    return
+                }
+                waitingTarget = null
                 if (feedForwardTarget != targetWatts) {
                     val previousTarget = feedForwardTarget
                     feedForwardTarget = targetWatts
@@ -286,8 +304,10 @@ class BikeControl(
                     // The model predicts Bike+ native power, so an external meter keeps pure feedback.
                     // Beyond the fitted range the model is unreliable: jump no higher than
                     // FEED_FORWARD_MAX_LEVEL and let ordinary feedback climb the rest.
+                    // While spinning up, only easing off can get here: never add resistance then.
                     val level = if (external == null && abs(targetWatts - measured) >= FEED_FORWARD_MIN_WATTS)
-                        powerModel.nearestLevelFor(targetWatts.toFloat(), cadence)?.coerceAtMost(FEED_FORWARD_MAX_LEVEL) else null
+                        powerModel.nearestLevelFor(targetWatts.toFloat(), cadence)?.coerceAtMost(FEED_FORWARD_MAX_LEVEL)
+                            ?.let { if (spinningUp()) minOf(it, reading.resistance) else it } else null
                     trace?.invoke("target from=$previousTarget to=$targetWatts measured=${f1(measured)}" +
                         " ext=${external != null} level=${reading.resistance} cad=${f1(reading.cadence)}" +
                         " cadAvg=${cadenceAverage?.let(::f1)} cadUsed=${f1(cadence)} cadSrc=$cadenceSource" +
@@ -413,6 +433,8 @@ class BikeControl(
         }
     }
 
+    private fun spinningUp(): Boolean = cadenceAverage == null || clock() - pedalingSince < SPIN_UP_MS
+
     private fun feedForwardActive(): Boolean =
         clock() < feedForwardUntil || (feedForwardArrivalPending && clock() < feedForwardDeadline)
 
@@ -425,6 +447,7 @@ class BikeControl(
             previous == null -> reading.cadence
             else -> previous + seconds / (CADENCE_AVERAGE_S + seconds) * (reading.cadence - previous)
         }
+        if (previous == null && cadenceAverage != null) pedalingSince = clock()
     }
 
     /** Learn watts per level from readings taken after the resistance has been still for a while. */
@@ -460,6 +483,8 @@ class BikeControl(
         const val FEED_FORWARD_MAX_MS = 10_000L
         const val LEARN_SETTLE_MS = 2500L
         const val SNAPSHOT_MS = 1000L
+        // No modeled jump until the rider has pedaled (50+ rpm) this long: their cadence is still rising.
+        const val SPIN_UP_MS = 15_000L
         private fun f1(value: Float) = (value * 10f).roundToInt() / 10f
     }
 

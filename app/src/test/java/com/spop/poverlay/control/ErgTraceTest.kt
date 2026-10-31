@@ -55,6 +55,8 @@ class ErgTraceTest {
         has("op=request-control")
         has("op=stop-pause param=1")
         has("mode Manual->Erg")
+        // ERG starts 2 s after pedaling begins: the first target waits out the spin-up.
+        has("wait spin-up target=165")
         has("target from=165 to=362")
         has("action=jump to=")
         has("why=ramp goal=")
