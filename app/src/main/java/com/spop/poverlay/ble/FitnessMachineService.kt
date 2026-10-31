@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
+import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import com.spop.poverlay.sensor.interfaces.DeviceType
 
 @Suppress("DEPRECATION")
@@ -68,7 +69,9 @@ class FitnessMachineService(
         } else {
             FitnessMachineConstants.FeatureFlags.CadenceSupported or
             FitnessMachineConstants.FeatureFlags.PowerMeasurementSupported or
-            FitnessMachineConstants.FeatureFlags.ResistanceLevelSupported
+            FitnessMachineConstants.FeatureFlags.ResistanceLevelSupported or
+            // Relayed from a paired strap when one is connected.
+            FitnessMachineConstants.FeatureFlags.HeartRateMeasurementSupported
         }
 
     // No control supported -> all target flags 0
@@ -214,7 +217,7 @@ class FitnessMachineService(
             return
         }
         indoorBikeDataCharacteristic.setValue(
-            FitnessMachineData.encode(cadence, power, speed, resistance)
+            FitnessMachineData.encode(cadence, power, speed, resistance, HeartRateManager.heartRate.value)
         )
         server.notifyDirConCharacteristicChanged(indoorBikeDataCharacteristic)
 
