@@ -28,6 +28,8 @@ data class ControlState(
     val shiftOffset: Int = 0,
     val shiftSize: Int = 2,
     val gain: Float = .007f,
+    /** Modeled-jump ramp speed in resistance levels per second (rider preference). */
+    val rampRate: Int = BikeControl.RAMP_RATE_DEFAULT,
     val permissionLostCount: Int = 0,
     val message: String = "Waiting for Bike+"
 )
@@ -120,8 +122,10 @@ class BikeControl(
 
     @Synchronized fun tune(shiftSize: Int, gain: Float,
         wattsPerShift: Int = state.value.wattsPerShift,
-        inclineSensitivity: Float = state.value.inclineSensitivity) {
+        inclineSensitivity: Float = state.value.inclineSensitivity,
+        rampRate: Int = state.value.rampRate) {
         mutableState.value = state.value.copy(shiftSize = shiftSize.coerceIn(1, 10),
+            rampRate = rampRate.coerceIn(RAMP_RATE_MIN, RAMP_RATE_MAX),
             wattsPerShift = wattsPerShift.coerceIn(1, 50),
             inclineSensitivity = if (inclineSensitivity.isFinite()) inclineSensitivity.coerceIn(0f, 5f) else 2f,
             gain = if (gain.isFinite()) gain.coerceIn(.001f, .03f) else .007f)
@@ -312,7 +316,7 @@ class BikeControl(
                         " ext=${external != null} level=${reading.resistance} cad=${f1(reading.cadence)}" +
                         " cadAvg=${cadenceAverage?.let(::f1)} cadUsed=${f1(cadence)} cadSrc=$cadenceSource" +
                         " action=" + when {
-                            level != null -> "jump to=$level"
+                            level != null -> "jump to=$level rate=${state.value.rampRate}/s"
                             external != null -> "trim(external power)"
                             abs(targetWatts - measured) < FEED_FORWARD_MIN_WATTS -> "trim(small change)"
                             else -> "trim(no model)"
@@ -414,7 +418,7 @@ class BikeControl(
         rampOffSince = 0L
         val seconds = ((clock() - rampTime) / 1000f).coerceIn(0f, .2f)
         rampTime = clock()
-        val step = RAMP_RATE * seconds
+        val step = state.value.rampRate * seconds
         val next = if (goal > ramp) minOf(ramp + step, goal.toFloat()) else maxOf(ramp - step, goal.toFloat())
         rampLevel = next
         val level = next.roundToInt()
@@ -466,8 +470,11 @@ class BikeControl(
         const val FEED_FORWARD_MAX_LEVEL = 75
         // Nominal modeled-jump rate; echo waits make the real slew roughly 10 points/s.
         const val FEED_FORWARD_RATE = 16f
-        // Modeled jumps ramp at 10 levels/s, one level per 100 ms tick (43% -> 58% in 1.5 s).
-        const val RAMP_RATE = 10f
+        // Modeled jumps ramp at 10 levels/s by default, one level per 100 ms tick (43% -> 58% in 1.5 s).
+        // How abrupt a jump should feel is a rider preference, so the rate is adjustable (3-20 levels/s).
+        const val RAMP_RATE_DEFAULT = 10
+        const val RAMP_RATE_MIN = 3
+        const val RAMP_RATE_MAX = 20
         const val RAMP_TICK_MS = 100L
         const val RAMP_ECHO_LAG_LEVELS = 5
         // ERG holds within half a resistance level's watts, never less than 3 W.

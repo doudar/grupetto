@@ -399,6 +399,38 @@ class BikeControlTest {
         now += 100; control.tick()
         assertEquals(listOf(45, 46, 47), writes)
     }
+    @Test fun rampSpeedIsAdjustableAndClamped() {
+        assertEquals(BikeControl.RAMP_RATE_DEFAULT, control.state.value.rampRate)
+        control.tune(2, .007f, rampRate = 15)
+        assertEquals(15, control.state.value.rampRate)
+        control.tune(2, .007f, rampRate = 100)
+        assertEquals(BikeControl.RAMP_RATE_MAX, control.state.value.rampRate)
+        control.tune(2, .007f, rampRate = 0)
+        assertEquals(BikeControl.RAMP_RATE_MIN, control.state.value.rampRate)
+        // Other tuning keeps the chosen ramp speed.
+        control.tune(2, .007f, rampRate = 12); control.tune(3, .01f)
+        assertEquals(12, control.state.value.rampRate)
+    }
+    @Test fun slowerRampMovesHalfALevelPerTick() {
+        resistance = 44
+        control.tune(2, .007f, rampRate = 5)
+        pedal()
+        assertTrue(control.localErg(220))
+        sample(168f, 90f)
+        assertEquals(listOf(45), writes)
+        repeat(4) { now += 100; control.tick() }
+        // 5 levels/s: two more levels in 400 ms (10 levels/s would have written four).
+        assertEquals(listOf(45, 46, 47), writes)
+    }
+    @Test fun fasterRampReachesTheModeledLevelSooner() {
+        resistance = 44
+        control.tune(2, .007f, rampRate = 20)
+        pedal()
+        assertTrue(control.localErg(220))
+        sample(168f, 90f)
+        now += 100; control.tick()
+        assertTrue("20 levels/s moves two levels per tick, got $writes", writes.last() >= 47)
+    }
     @Test fun knobMovedDuringRampStopsWithoutFighting() {
         resistance = 44
         pedal()

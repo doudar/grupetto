@@ -10,6 +10,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.spop.poverlay.control.BikeControl
 import com.spop.poverlay.control.ControlMode
 import com.spop.poverlay.control.ControlState
 import java.util.Locale
@@ -23,7 +24,7 @@ internal fun TrainerControls(
     onSimulation: (Float) -> Unit,
     onManual: () -> Unit,
     onResistance: (Int) -> Unit,
-    onTuning: (Int, Float, Int, Float) -> Unit
+    onTuning: (Int, Float, Int, Float, Int) -> Unit
 ) {
     val mode = if (state.mode == ControlMode.Resistance) ControlMode.Manual else state.mode
     Column {
@@ -46,10 +47,16 @@ internal fun TrainerControls(
             ControlMode.Erg -> {
                 TrainerSlider("ERG target", "${state.targetWatts} W", state.targetWatts.toFloat(), 25f..1000f) { onErg(it.roundToInt()) }
                 TrainerSlider("Gain control", String.format(Locale.US, "%.3f", state.gain), state.gain, .001f..0.030f, 28) {
-                    onTuning(state.shiftSize, it, state.wattsPerShift, state.inclineSensitivity)
+                    onTuning(state.shiftSize, it, state.wattsPerShift, state.inclineSensitivity, state.rampRate)
                 }
                 TrainerSlider("Watts per shift", "${state.wattsPerShift} W", state.wattsPerShift.toFloat(), 1f..50f, 48) {
-                    onTuning(state.shiftSize, state.gain, it.roundToInt(), state.inclineSensitivity)
+                    onTuning(state.shiftSize, state.gain, it.roundToInt(), state.inclineSensitivity, state.rampRate)
+                }
+                // How quickly a large target change ramps the resistance: lower is gentler, higher arrives sooner.
+                TrainerSlider("Ramp speed", "${state.rampRate} levels/s", state.rampRate.toFloat(),
+                    BikeControl.RAMP_RATE_MIN.toFloat()..BikeControl.RAMP_RATE_MAX.toFloat(),
+                    BikeControl.RAMP_RATE_MAX - BikeControl.RAMP_RATE_MIN - 1) {
+                    onTuning(state.shiftSize, state.gain, state.wattsPerShift, state.inclineSensitivity, it.roundToInt())
                 }
             }
             ControlMode.Simulation -> {
@@ -57,7 +64,7 @@ internal fun TrainerControls(
                     minOf(-20f, state.targetIncline)..maxOf(20f, state.targetIncline)) { onSimulation((it * 10).roundToInt() / 10f) }
                 TrainerSlider("Incline sensitivity", String.format(Locale.US, "%.1f points / 1%%", state.inclineSensitivity),
                     state.inclineSensitivity, 0f..5f, 49) {
-                    onTuning(state.shiftSize, state.gain, state.wattsPerShift, it)
+                    onTuning(state.shiftSize, state.gain, state.wattsPerShift, it, state.rampRate)
                 }
             }
             else -> TrainerSlider("Resistance", "${state.targetResistance} points", state.targetResistance.toFloat(), 0f..100f, 99) {
@@ -65,7 +72,7 @@ internal fun TrainerControls(
             }
         }
         if (mode != ControlMode.Erg) TrainerSlider("Resistance per shift", "${state.shiftSize} points", state.shiftSize.toFloat(), 1f..10f, 8) {
-            onTuning(it.roundToInt(), state.gain, state.wattsPerShift, state.inclineSensitivity)
+            onTuning(it.roundToInt(), state.gain, state.wattsPerShift, state.inclineSensitivity, state.rampRate)
         }
         Text("${state.message} · Pedal to apply resistance", fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFFB7F7DF))
         Text("Connected training apps automatically set the mode and target.", fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFF9EAEC0))
