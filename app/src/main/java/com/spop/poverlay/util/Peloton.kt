@@ -80,6 +80,36 @@ internal fun isBikePlusModel(model: String): Boolean = model.contains("PLTN-T")
 
 val IsBikePlus by lazy { isBikePlusModel(Build.MODEL) }
 
+/** Device Information Model Number when the machine cannot be identified. */
+const val GenericModelNumber = "Grupetto FTMS"
+
+/**
+ * The Device Information Model Number (0x2A24) Grupetto advertises, naming the machine so
+ * BLE clients (e.g. SmartSpin2k) can apply machine-specific behaviour without any setting.
+ * The Manufacturer Name stays "Grupetto", which is how clients recognise Grupetto itself.
+ *
+ * Only machines we can identify for certain get a name; anything else keeps
+ * [GenericModelNumber], so clients fall back to their generic behaviour:
+ * - G700 is recognised by its model string.
+ * - Otherwise `peloton_platform` decides, because Bike+, Tread and Row share one tablet.
+ * - With no platform, a non-Topaz Peloton tablet is the Gen 1 Bike (the same rule
+ *   [com.spop.poverlay.sensor.selectSensor] uses); a Topaz tablet stays unknown.
+ */
+fun machineModelNumber(isRunningOnPeloton: Boolean, model: String, platform: String?): String {
+    if (!isRunningOnPeloton) return GenericModelNumber
+    if (isG700CrossTrainerModel(model)) return "Peloton Cross Trainer"
+    val machine = platform?.trim()?.lowercase()
+    return when {
+        machine == "titan" -> "Peloton Bike+"
+        machine == "v1" -> "Peloton Bike"
+        machine == "caesar" -> "Peloton Row"
+        machine == "aurora" -> "Peloton Tread+"
+        isTreadPlatform(machine) -> "Peloton Tread"
+        machine.isNullOrEmpty() && !isBikePlusModel(model) -> "Peloton Bike"
+        else -> GenericModelNumber
+    }
+}
+
 
 fun calculateSpeedFromPelotonV1Power(power: Float) =
         if (power < 0.1f) {
