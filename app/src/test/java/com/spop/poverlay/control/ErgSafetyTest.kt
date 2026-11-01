@@ -4,6 +4,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import kotlin.math.exp
 import kotlin.math.pow
+import kotlin.math.roundToInt
 
 /**
  * Regression tests for the Oct 31 independent review: spin-up at low cadence, drops that must
@@ -132,9 +133,10 @@ class ErgSafetyTest {
         ride(20_000, 90f)
         assertTrue(control.localErg(320))
         ride(400, 90f)
-        // The rider turns the knob down 2 levels and the bike reports it before the next write.
+        // The rider turns the knob down 3 levels and the bike reports it before the next write:
+        // 2+ levels back from the furthest reading stops at once.
         // (A move the ramp's next write overrides before any report cannot be seen.)
-        resistance -= 2
+        resistance -= 3
         now += 100
         control.acceptSample(BikeSample(watts(90f), 90f, resistance, now)); control.tick()
         assertEquals(ControlMode.Manual, control.state.value.mode)
@@ -166,5 +168,132 @@ class ErgSafetyTest {
         assertTrue(control.localErg(250))
         ride(1_000, 85f)
         assertTrue(lines.any { "wait spin-up target=250" in it })
+    }
+
+    /** A bike that reports late: the echo follows the last write by up to [lag] levels per sample. */
+    private fun laggingBike(): BikeControl = BikeControl(true, { now }) { writes.add(it); true }.apply {
+        trace = { lines.add("[$now] $it") }
+    }
+    private fun settle(bike: BikeControl, level: Int) =
+        repeat(150) { bike.acceptSample(BikeSample(170f, 90f, level, now)); now += 100; bike.tick() }
+
+    @Test fun singleOneLevelBlipDuringRampIsNotAKnobMove() {
+        val bike = laggingBike(); settle(bike, 44)
+        assertTrue(bike.localErg(320))
+        var reported = 44; var t = 0
+        repeat(40) {
+            now += 100; t += 100
+            if (t % 200 == 0) {
+                // the echo trails the writes by ~2 levels and once reports the previous level again
+                val target = writes.lastOrNull() ?: reported
+                reported = if (t == 1200) reported - 1 else minOf(target, reported + 2)
+                bike.acceptSample(BikeSample(170f, 90f, reported, now))
+            }
+            bike.tick()
+        }
+        assertEquals(lines.joinToString("\n"), ControlMode.Erg, bike.state.value.mode)
+    }
+
+    @Test fun oneLevelBackOnTwoSamplesIsAKnobMove() {
+        val bike = laggingBike(); settle(bike, 44)
+        assertTrue(bike.localErg(320))
+        var reported = 44; var t = 0; var turned = false
+        repeat(30) {
+            now += 100; t += 100
+            if (t % 200 == 0) {
+                val target = writes.lastOrNull() ?: reported
+                // at 1.0 s the rider turns the knob one level down and holds it there
+                if (t == 1000) { reported -= 1; turned = true } else if (!turned) reported = minOf(target, reported + 2)
+                bike.acceptSample(BikeSample(170f, 90f, reported, now))
+            }
+            bike.tick()
+        }
+        assertEquals(ControlMode.Manual, bike.state.value.mode)
+        assertTrue(lines.any { "ramp knob override" in it })
+    }
+
+    @Test fun twoLevelKnobTurnStopsAtOnce() {
+        val bike = laggingBike(); settle(bike, 44)
+        assertTrue(bike.localErg(320))
+        var reported = 44; var t = 0
+        repeat(10) {
+            now += 100; t += 100
+            if (t % 200 == 0) { reported = minOf(writes.lastOrNull() ?: reported, reported + 2); bike.acceptSample(BikeSample(170f, 90f, reported, now)) }
+            bike.tick()
+        }
+        val writesBefore = writes.size
+        reported -= 2
+        now += 100; bike.acceptSample(BikeSample(170f, 90f, reported, now)); bike.tick()
+        assertEquals(ControlMode.Manual, bike.state.value.mode)
+        assertEquals(writesBefore, writes.size)
+    }
+
+    @Test fun targetChangeMidRampKeepsControl() {
+        // The echo trails the ramp; TrainerRoad lowers the target slightly mid-ramp. The last write is
+        // ahead of the echo, so the arriving echo must not be mistaken for a knob override.
+        val bike = laggingBike(); settle(bike, 44)
+        assertTrue(bike.localErg(320))
+        var reported = 44; var t = 0
+        repeat(80) {
+            now += 100; t += 100
+            if (t == 600) assertTrue(bike.localErg(300))
+            if (t % 200 == 0) {
+                val target = writes.lastOrNull() ?: reported
+                reported = if (target > reported) minOf(target, reported + 2) else maxOf(target, reported - 2)
+                bike.acceptSample(BikeSample(170f, 90f, reported, now))
+            }
+            bike.tick()
+        }
+        assertEquals(lines.joinToString("\n"), ControlMode.Erg, bike.state.value.mode)
+        assertTrue(lines.any { "target from=320 to=300" in it && "jump to=" in it })
+    }
+
+    @Test fun smallDownwardAdjustmentDuringARiseStillJumps() {
+        ride(30_000, 90f)
+        assertTrue(control.localErg(150)); ride(20_000, 90f)
+        val base = resistance
+        assertTrue(control.localErg(320)); ride(400, 90f)
+        assertTrue(control.localErg(300)); ride(12_000, 90f)
+        val expected = control.powerModel.nearestLevelFor(300f, 90f)!!
+        assertTrue("expected about level $expected from $base, got $resistance\n" + lines.joinToString("\n"),
+            resistance in expected - 2..expected + 2)
+        assertFalse(lines.any { "target from=320 to=300" in it && "jump to=$base " in it })
+    }
+
+    @Test fun aStopDuringTheWaitRestartsTheWait() {
+        ride(30_000, 85f)
+        ride(2_000, 0f)
+        ride(1_000, 70f)
+        assertTrue(control.localErg(220))
+        ride(2_000, 80f)
+        assertTrue(lines.any { "wait spin-up target=220" in it })
+        ride(20_000, 0f)                       // stopped long enough for the old window to lapse
+        val n = lines.size
+        ride(3_000, 80f)
+        assertTrue("a second wait expected", lines.drop(n).any { "wait spin-up" in it })
+    }
+
+    @Test fun longLowCadenceStretchForgetsTheOldAverage() {
+        ride(30_000, 90f)
+        assertTrue(control.localErg(150)); ride(20_000, 90f)
+        ride(60_000, 35f)                      // a minute at 35 rpm (still pedaling)
+        assertTrue(control.localErg(300))
+        ride(2_000, 35f)
+        val target = lines.last { "target from=150 to=300" in it }
+        assertTrue(target, "trim(low cadence)" in target)
+    }
+
+    @Test fun aJumpToTheCurrentLevelIsATrim() {
+        resistance = 44
+        ride(20_000, 90f)                      // steady at level 44, 90 rpm
+        ride(200, 80f)                         // cadence dips: power reads ~25 W low, the 5 s average barely moves
+        val avg = 90f + .2f / 5.2f * (80f - 90f)
+        val target = control.powerModel.wattsAt(44, avg).roundToInt()
+        assertEquals(44, control.powerModel.nearestLevelFor(target.toFloat(), avg))
+        assertTrue(control.localErg(target))   // the model says the current level already gives this
+        ride(200, 80f)
+        val line = lines.last { "target from=null to=$target" in it }
+        assertTrue(line, "trim(at level)" in line)
+        assertFalse(lines.any { "arrive" in it || "why=ramp" in it })
     }
 }

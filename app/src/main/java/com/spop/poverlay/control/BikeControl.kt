@@ -83,6 +83,9 @@ class BikeControl(
     private var rampLevel: Float? = null
     private var rampUp = true
     private var rampExtreme: Int? = null
+    // Readings one level against the ramp, counted per new sample: a single boundary blip is not a knob move.
+    private var againstSamples = 0
+    private var againstSampleTime = Long.MIN_VALUE
     private var rampTime = 0L
     private var rampOffSince = 0L
     private var steadyResistance = -1
@@ -91,6 +94,9 @@ class BikeControl(
     // change, and one rpm moves the modeled level by up to a whole step near 350 W.
     private var cadenceAverage: Float? = null
     private var cadenceAverageTime = 0L
+    // Since when the rider has been continuously below the model's range (but still pedaling):
+    // after LOW_CADENCE_FORGET_MS the old average no longer describes them.
+    private var belowModelSince: Long? = null
     private val cadenceHistory = CadenceHistory()
     // When the rider (re)started pedaling. While they spin up the cadence average is still low:
     // on Oct 31 a jump sized for a 55 rpm average put out ~285 W at 75 rpm. So a request for more
@@ -275,7 +281,7 @@ class BikeControl(
             requestedResistance = reading.resistance.toFloat()
             // A stop ends any jump or settle hold: on restart the target is judged afresh,
             // with spin-up protection, rather than resuming the old jump.
-            if (feedForwardTarget != null || feedForwardActive()) clearFeedForward()
+            if (feedForwardTarget != null || feedForwardActive() || waitingTarget != null) clearFeedForward()
             return
         }
         val target = when (state.value.mode) {
@@ -309,7 +315,9 @@ class BikeControl(
                     // The remembered cadence is floored at the current average minus DROP_CADENCE_ALLOWANCE:
                     // that covers the post-effort settle (97 -> 89 rpm) but a remembered slow cadence
                     // (a 60 rpm warm-up) cannot size a heavy "drop" for a rider now at 95 rpm.
-                    val drop = previousTarget != null && targetWatts < previousTarget
+                    // Only a real easing-off is a drop: a lower target that is still above the measured power
+                    // (320 -> 300 W while the 150 -> 320 W ramp is in flight) is still a rise.
+                    val drop = previousTarget != null && targetWatts < previousTarget && measured > targetWatts
                     val held = if (drop) cadenceHistory.cadenceAt(targetWatts, clock()) else null
                     val typical = if (drop && held == null) cadenceHistory.typicalCadence(clock()) else null
                     val remembered = held ?: typical
@@ -330,14 +338,17 @@ class BikeControl(
                     // Beyond the fitted range the model is unreliable: jump no higher than
                     // FEED_FORWARD_MAX_LEVEL and let ordinary feedback climb the rest.
                     // A drop, or any request while spinning up (only easing off gets here then), never adds resistance.
-                    val level = if (external == null && !lowCadence && abs(targetWatts - measured) >= FEED_FORWARD_MIN_WATTS)
+                    val modeled = if (external == null && !lowCadence && abs(targetWatts - measured) >= FEED_FORWARD_MIN_WATTS)
                         powerModel.nearestLevelFor(targetWatts.toFloat(), cadence)?.coerceAtMost(FEED_FORWARD_MAX_LEVEL)
                             ?.let { if (drop || spinningUp()) minOf(it, reading.resistance) else it } else null
+                    // A "jump" to the current level is no jump: no settle hold, ordinary feedback takes it.
+                    val level = modeled?.takeIf { it != reading.resistance }
                     trace?.invoke("target from=$previousTarget to=$targetWatts measured=${f1(measured)}" +
                         " ext=${external != null} level=${reading.resistance} cad=${f1(reading.cadence)}" +
                         " cadAvg=${cadenceAverage?.let(::f1)} cadUsed=${f1(cadence)} cadSrc=$cadenceSource" +
                         " action=" + when {
                             level != null -> "jump to=$level rate=${state.value.rampRate}/s"
+                            modeled != null -> "trim(at level)"
                             external != null -> "trim(external power)"
                             lowCadence -> "trim(low cadence)"
                             abs(targetWatts - measured) < FEED_FORWARD_MIN_WATTS -> "trim(small change)"
@@ -353,6 +364,7 @@ class BikeControl(
                         rampLevel = reading.resistance.toFloat()
                         rampUp = level >= reading.resistance
                         rampExtreme = null
+                        againstSamples = 0
                         rampTime = clock() - RAMP_TICK_MS
                         rampOffSince = 0L
                         rampTick(reading)
@@ -428,8 +440,13 @@ class BikeControl(
             val keep = feedForwardTarget
             clearFeedForward()
             if (targetChanged) feedForwardTarget = keep
-            requestedResistance = reading.resistance.toFloat()
-            expectedResistance = reading.resistance
+            // The last ramp write is usually ahead of the echo: keep expecting it (with time to arrive)
+            // rather than the lagging reading, or the arriving echo would look like a knob override.
+            // A real knob move never reaches the written level, so it still times out and stops.
+            val written = expectedResistance ?: reading.resistance
+            requestedResistance = written.toFloat()
+            expectedResistance = written
+            ackTimeoutMs = ACK_TIMEOUT_MS + abs(written - reading.resistance) * ACK_MS_PER_LEVEL
             commandTime = clock()
             previousTick = clock()
             return
@@ -438,8 +455,12 @@ class BikeControl(
         // furthest level reached (or rises, on a downward ramp) is the knob, so stop, whatever the size.
         rampExtreme = rampExtreme?.let { if (rampUp) maxOf(it, reading.resistance) else minOf(it, reading.resistance) }
             ?: reading.resistance
-        if (if (rampUp) reading.resistance <= rampExtreme!! - KNOB_AGAINST_RAMP_LEVELS
-            else reading.resistance >= rampExtreme!! + KNOB_AGAINST_RAMP_LEVELS) {
+        val against = if (rampUp) rampExtreme!! - reading.resistance else reading.resistance - rampExtreme!!
+        if (against <= 0) againstSamples = 0
+        else if (reading.timestamp != againstSampleTime) { againstSamples++; againstSampleTime = reading.timestamp }
+        // Two levels back at once, or one level back on two samples in a row (~400 ms): a single
+        // one-level blip at a level boundary is not treated as a knob move.
+        if (against >= KNOB_AGAINST_RAMP_LEVELS || (against >= 1 && againstSamples >= KNOB_AGAINST_RAMP_SAMPLES)) {
             trace?.invoke("ramp knob override level=${reading.resistance} extreme=$rampExtreme goal=$goal")
             stop("Resistance changed manually")
             return
@@ -487,6 +508,10 @@ class BikeControl(
         feedForwardDeadline = 0L
         rampLevel = null
         rampExtreme = null
+        againstSamples = 0
+        // A stop (or anything else that drops the jump) also ends a spin-up wait: the next restart waits afresh.
+        waitingTarget = null
+        waitSince = 0L
     }
 
     private fun feedForwardActive(): Boolean =
@@ -498,8 +523,12 @@ class BikeControl(
         val previous = cadenceAverage
         val seconds = ((reading.timestamp - cadenceAverageTime) / 1000f).coerceIn(0f, 1f)
         cadenceAverageTime = reading.timestamp
+        belowModelSince = if (reading.cadence >= MODEL_MIN_CADENCE || reading.cadence < PEDALING_STOP_RPM) null
+            else belowModelSince ?: clock()
+        val forgotten = belowModelSince?.let { clock() - it >= LOW_CADENCE_FORGET_MS } == true
         cadenceAverage = when {
             reading.cadence < PEDALING_STOP_RPM -> null
+            forgotten -> null
             // The power model is only valid from 50 rpm: slower samples neither feed nor reset the average.
             reading.cadence < MODEL_MIN_CADENCE -> previous
             previous == null -> reading.cadence
@@ -541,7 +570,7 @@ class BikeControl(
         const val FEED_FORWARD_MAX_MS = 10_000L
         const val LEARN_SETTLE_MS = 2500L
         const val SNAPSHOT_MS = 1000L
-        // No modeled jump until the rider has pedaled (50+ rpm) this long: their cadence is still rising.
+        // No modeled jump until the rider has pedaled (40+ rpm) this long: their cadence is still rising.
         const val SPIN_UP_MS = 15_000L
         const val PEDALING_START_RPM = 40f
         const val PEDALING_STOP_RPM = 25f
@@ -549,8 +578,12 @@ class BikeControl(
         // A drop's remembered cadence may sit at most this far below the current average.
         const val DROP_CADENCE_ALLOWANCE = 8f
         // A reading this far back against the ramp direction is a knob move, not echo lag: the echo
-        // trails but never reverses (0 reversals in 26 ramps on the Oct 31 rides).
-        const val KNOB_AGAINST_RAMP_LEVELS = 1
+        // trails but never reverses (0 reversals in 26 ramps on the Oct 31 rides). One level back
+        // counts only when it persists for KNOB_AGAINST_RAMP_SAMPLES samples (a boundary blip does not).
+        const val KNOB_AGAINST_RAMP_LEVELS = 2
+        const val KNOB_AGAINST_RAMP_SAMPLES = 2
+        // Continuously below 50 rpm (still pedaling) this long: forget the old cadence average.
+        const val LOW_CADENCE_FORGET_MS = 30_000L
         // After a ramp ends, wait this long for the bike to report the goal before falling back to feedback.
         const val ARRIVAL_AFTER_RAMP_MS = 8_500L
         private fun f1(value: Float) = (value * 10f).roundToInt() / 10f
