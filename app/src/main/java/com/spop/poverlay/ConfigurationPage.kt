@@ -169,6 +169,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                     TextButton({ dialog = "about" }, Modifier.height(32.dp), contentPadding = PaddingValues(0.dp)) {
                         Text(if (release?.isCurrentlyInstalled == false) "New Version Available" else "About & updates", fontSize = 12.sp)
                     }
+                    CoffeeLink(Modifier.padding(start = 8.dp))
                 }
             }
         }
