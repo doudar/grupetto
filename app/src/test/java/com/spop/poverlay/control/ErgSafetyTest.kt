@@ -133,12 +133,16 @@ class ErgSafetyTest {
         ride(20_000, 90f)
         assertTrue(control.localErg(320))
         ride(400, 90f)
-        // The rider turns the knob down 3 levels and the bike reports it before the next write:
-        // 2+ levels back from the furthest reading stops at once.
-        // (A move the ramp's next write overrides before any report cannot be seen.)
-        resistance -= 3
+        // The rider turns the knob down 2 levels. The ramp had written one level past the last
+        // reading, so the bike reports only one level back: the ramp pauses (no write that could
+        // hide the turn) and the next reading confirms it.
+        // (A turn the next write overrides before any report cannot be seen, on the bike either.)
+        resistance -= 2
+        val atTurn = writes.size
         now += 100
         control.acceptSample(BikeSample(watts(90f), 90f, resistance, now)); control.tick()
+        ride(400, 90f)
+        assertEquals("no ramp write between the turn and the stop", atTurn, writes.size)
         assertEquals(ControlMode.Manual, control.state.value.mode)
         assertTrue(lines.any { "ramp knob override" in it })
         val atStop = writes.size
@@ -295,5 +299,75 @@ class ErgSafetyTest {
         val line = lines.last { "target from=null to=$target" in it }
         assertTrue(line, "trim(at level)" in line)
         assertFalse(lines.any { "arrive" in it || "why=ramp" in it })
+    }
+
+    // ---- Third review round (Fable, ccb81d9) ----
+
+    /** After a long low-cadence stretch the average is forgotten; the rise back must wait, not jump for 55 rpm. */
+    @Test fun spinUpAfterForgottenLowCadenceStretchWaits() {
+        ride(30_000, 90f)                          // warm-up at 90 rpm (manual)
+        ride(60_000, 35f)                          // a minute of slow grinding, still pedaling
+        ride(1_000, 55f)                           // spinning up as the interval begins
+        assertTrue(control.localErg(300))
+        ride(1_000, 60f); ride(1_000, 70f); ride(1_000, 80f)
+        var peak = 0f
+        repeat(100) { ride(200, 90f); peak = maxOf(peak, watts(90f)) }
+        assertTrue(lines.joinToString("\n"), lines.any { "wait spin-up target=300" in it })
+        val ideal = control.powerModel.nearestLevelFor(300f, 90f)!!
+        val jump = lines.last { "target from=null to=300" in it }
+        val level = Regex("jump to=(\\d+)").find(jump)?.groupValues?.get(1)?.toInt()
+        assertTrue(jump, level == null || level in ideal - 3..ideal + 3)
+        assertTrue("peak $peak W at 90 rpm for a 300 W target", peak < 340f)
+    }
+
+    /** A one-notch knob turn the bike reports once, after which the motor would follow later writes. */
+    @Test fun oneNotchKnobTurnDuringRampStopsControl() {
+        val bike = laggingBike(); settle(bike, 44)
+        assertTrue(bike.localErg(320))
+        var reported = 44; var t = 0; var writesAtTurn = -1
+        repeat(40) {
+            now += 100; t += 100
+            if (t % 200 == 0) {
+                // The echo trails the writes by ~1 level. At 1.0 s the rider turns the knob one notch down;
+                // from then on the bike only moves if a new write arrives after the turn.
+                if (t == 1000) { reported -= 1; writesAtTurn = writes.size }
+                else if (writesAtTurn < 0) reported = minOf(writes.lastOrNull() ?: reported, reported + 1)
+                else if (writes.size > writesAtTurn) reported = writes.last()
+                bike.acceptSample(BikeSample(170f, 90f, reported, now))
+            }
+            bike.tick()
+        }
+        assertEquals(lines.joinToString("\n"), ControlMode.Manual, bike.state.value.mode)
+        assertTrue(lines.any { "knob override" in it })
+    }
+
+    /** Stopping mid-ramp when the bike never completes the last write must not switch ERG off. */
+    @Test fun stopPedalingMidRampWithoutTheLastEchoKeepsErg() {
+        val bike = laggingBike(); settle(bike, 44)
+        assertTrue(bike.localErg(320))
+        var reported = 44; var t = 0
+        repeat(60) {
+            now += 100; t += 100
+            if (t % 200 == 0) {
+                val target = writes.lastOrNull() ?: reported
+                val cad = if (t >= 1000) 0f else 90f
+                if (t < 1000) reported = minOf(target, reported + 2)   // after the stop the bike holds where it is
+                bike.acceptSample(BikeSample(if (cad == 0f) 0f else 170f, cad, reported, now))
+            }
+            bike.tick()
+        }
+        assertEquals(bike.state.value.message, ControlMode.Erg, bike.state.value.mode)
+    }
+
+    /** A brief power wobble below a new lower target is still a drop: it never adds resistance. */
+    @Test fun lowerTargetDuringPowerWobbleNeverAddsResistance() {
+        ride(30_000, 90f)
+        assertTrue(control.localErg(300)); ride(30_000, 90f)
+        val before = resistance
+        ride(200, 90f, power = 200f)
+        assertTrue(control.localErg(220))
+        ride(200, 90f, power = 200f)
+        ride(6_000, 90f)
+        assertTrue("before=$before after=$resistance", resistance <= before)
     }
 }

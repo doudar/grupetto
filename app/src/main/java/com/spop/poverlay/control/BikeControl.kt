@@ -97,6 +97,8 @@ class BikeControl(
     // Since when the rider has been continuously below the model's range (but still pedaling):
     // after LOW_CADENCE_FORGET_MS the old average no longer describes them.
     private var belowModelSince: Long? = null
+    // Set when that average was forgotten: the next rise into the model's range is a fresh spin-up.
+    private var cadenceForgotten = false
     private val cadenceHistory = CadenceHistory()
     // When the rider (re)started pedaling. While they spin up the cadence average is still low:
     // on Oct 31 a jump sized for a 55 rpm average put out ~285 W at 75 rpm. So a request for more
@@ -443,6 +445,15 @@ class BikeControl(
             // The last ramp write is usually ahead of the echo: keep expecting it (with time to arrive)
             // rather than the lagging reading, or the arriving echo would look like a knob override.
             // A real knob move never reaches the written level, so it still times out and stops.
+            if (reading.cadence < PEDALING_STOP_RPM) {
+                // Stopped mid-ramp: the bike may not finish the last write while nobody pedals, so
+                // expect nothing; the next write after the rider restarts sets a fresh expectation.
+                requestedResistance = reading.resistance.toFloat()
+                expectedResistance = null
+                commandTime = clock()
+                previousTick = clock()
+                return
+            }
             val written = expectedResistance ?: reading.resistance
             requestedResistance = written.toFloat()
             expectedResistance = written
@@ -463,6 +474,12 @@ class BikeControl(
         if (against >= KNOB_AGAINST_RAMP_LEVELS || (against >= 1 && againstSamples >= KNOB_AGAINST_RAMP_SAMPLES)) {
             trace?.invoke("ramp knob override level=${reading.resistance} extreme=$rampExtreme goal=$goal")
             stop("Resistance changed manually")
+            return
+        }
+        if (against >= 1) {
+            // Hold the ramp until the next reading: with no write in between, a knob turn stays
+            // visible and is confirmed, while a boundary blip clears by itself.
+            rampTime = clock()
             return
         }
         val expected = expectedResistance
@@ -526,6 +543,14 @@ class BikeControl(
         belowModelSince = if (reading.cadence >= MODEL_MIN_CADENCE || reading.cadence < PEDALING_STOP_RPM) null
             else belowModelSince ?: clock()
         val forgotten = belowModelSince?.let { clock() - it >= LOW_CADENCE_FORGET_MS } == true
+        if (forgotten) cadenceForgotten = true
+        // After a long low-cadence stretch the rider is spinning up again: restart the spin-up window
+        // so a jump is not sized from the first sample above 50 rpm (Fable review: 55 rpm -> level 75).
+        if (cadenceForgotten && pedaling && reading.cadence >= MODEL_MIN_CADENCE) {
+            cadenceForgotten = false
+            pedalingSince = clock()
+        }
+        if (reading.cadence < PEDALING_STOP_RPM) cadenceForgotten = false
         cadenceAverage = when {
             reading.cadence < PEDALING_STOP_RPM -> null
             forgotten -> null
