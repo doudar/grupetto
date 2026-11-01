@@ -125,8 +125,9 @@ class BikeControlTest {
         repeat(30) { sample(200f) }
         assertTrue(resistance < 40)
         assertTrue(writes.all { it in 0..100 })
-        // Even modeled jumps move at most 10 levels/s: 2 levels per 200 ms sample here.
-        assertTrue(writes.zipWithNext().all { (a, b) -> kotlin.math.abs(a - b) <= 4 })
+        // Modeled jumps move at the 10 levels/s ramp speed and trims at 3 levels/s: with one
+        // tick per 200 ms sample here, no write is more than 2 levels from the previous one.
+        assertTrue(writes.zipWithNext().all { (a, b) -> kotlin.math.abs(a - b) <= 2 })
     }
     @Test fun noMotionBelowMinimumCadenceAndNoWindup() {
         pedal(100f, 80f); control.localErg(1000)
@@ -135,8 +136,12 @@ class BikeControlTest {
         sample(0f, 24f)
         assertTrue(writes.isEmpty())
         sample(100f, 80f)
-        // No accumulated windup: one 200 ms step toward the capped modeled level.
-        assertTrue(resistance <= 44)
+        // No accumulated windup: restarting after a stop adds nothing while the rider spins up.
+        assertTrue("held during spin-up, got $writes", writes.isEmpty())
+        repeat(80) { sample(100f, 80f) }
+        // Then one ramp to the modeled level, capped at FEED_FORWARD_MAX_LEVEL, at the ramp speed.
+        assertTrue(writes.isNotEmpty() && writes.all { it <= BikeControl.FEED_FORWARD_MAX_LEVEL })
+        assertTrue(writes.zipWithNext().all { (a, b) -> b - a in 0..2 })
     }
     @Test fun powerDeadbandDoesNotHunt() {
         sample(150f); control.localErg(150)
