@@ -52,12 +52,6 @@ internal fun TrainerControls(
                 TrainerSlider("Watts per shift", "${state.wattsPerShift} W", state.wattsPerShift.toFloat(), 1f..50f, 48) {
                     onTuning(state.shiftSize, state.gain, it.roundToInt(), state.inclineSensitivity, state.rampRate)
                 }
-                // How quickly a large target change ramps the resistance: lower is gentler, higher arrives sooner.
-                TrainerSlider("Ramp speed", "${state.rampRate} levels/s", state.rampRate.toFloat(),
-                    BikeControl.RAMP_RATE_MIN.toFloat()..BikeControl.RAMP_RATE_MAX.toFloat(),
-                    BikeControl.RAMP_RATE_MAX - BikeControl.RAMP_RATE_MIN - 1) {
-                    onTuning(state.shiftSize, state.gain, state.wattsPerShift, state.inclineSensitivity, it.roundToInt())
-                }
             }
             ControlMode.Simulation -> {
                 TrainerSlider("Incline", String.format(Locale.US, "%.1f%%", state.targetIncline), state.targetIncline,
@@ -73,6 +67,14 @@ internal fun TrainerControls(
         }
         if (mode != ControlMode.Erg) TrainerSlider("Resistance per shift", "${state.shiftSize} points", state.shiftSize.toFloat(), 1f..10f, 8) {
             onTuning(it.roundToInt(), state.gain, state.wattsPerShift, state.inclineSensitivity, state.rampRate)
+        }
+        // Shown in every mode, so it can be set before a ride while Grupetto is still in Manual; it
+        // applies whenever ERG runs, including ERG driven by a training app. How quickly a large
+        // target change ramps the resistance: lower is gentler, higher arrives sooner.
+        TrainerSlider("Ramp speed (ERG)", "${state.rampRate} levels/s", state.rampRate.toFloat(),
+            BikeControl.RAMP_RATE_MIN.toFloat()..BikeControl.RAMP_RATE_MAX.toFloat(),
+            BikeControl.RAMP_RATE_MAX - BikeControl.RAMP_RATE_MIN - 1) {
+            onTuning(state.shiftSize, state.gain, state.wattsPerShift, state.inclineSensitivity, it.roundToInt())
         }
         Text("${state.message} · Pedal to apply resistance", fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFFB7F7DF))
         Text("Connected training apps automatically set the mode and target.", fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFF9EAEC0))
