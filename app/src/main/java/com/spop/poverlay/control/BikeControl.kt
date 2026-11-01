@@ -281,6 +281,14 @@ class BikeControl(
         if (reading.cadence < PEDALING_STOP_RPM) {
             filteredPower = null
             requestedResistance = reading.resistance.toFloat()
+            // A stop mid-ramp drops the expectation (the stopped bike may never finish the last
+            // write). Once the reading has been still for the acknowledgement window, expect it
+            // again, so a knob turned while stopped is still caught as a manual override.
+            if (expectedResistance == null && clock() - steadySince >= ACK_TIMEOUT_MS) {
+                expectedResistance = reading.resistance
+                commandTime = clock()
+                ackTimeoutMs = ACK_TIMEOUT_MS
+            }
             // A stop ends any jump or settle hold: on restart the target is judged afresh,
             // with spin-up protection, rather than resuming the old jump.
             if (feedForwardTarget != null || feedForwardActive() || waitingTarget != null) clearFeedForward()
