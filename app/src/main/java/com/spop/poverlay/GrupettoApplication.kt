@@ -25,6 +25,7 @@ class GrupettoApplication : Application() {
         if (emulatedModel == null) ConfigurationRepository.SharedPrefsName else "developer-preview-configuration"
 
     fun setEmulatedModel(model: com.spop.poverlay.sensor.interfaces.EmulatedModel?) {
+        bikeCalibration.setEnabled(false)
         // The activity restarts the process so services and overlay share one immutable device selection.
         sensorInterface.bikeControl?.stop()
         bleServer.stop()
@@ -35,6 +36,7 @@ class GrupettoApplication : Application() {
     }
     // Use one detection result for both Bluetooth and every overlay instance.
     val sensorSelection by lazy { selectSensorForCurrentDevice(this) }
+    val bikeServiceDiscovery by lazy { com.spop.poverlay.sensor.discovery.BikeServiceDiscovery(this) }
     lateinit var sensorInterface: SensorInterface
         private set
 
@@ -45,6 +47,10 @@ class GrupettoApplication : Application() {
         private set
     lateinit var powerMeterManager: com.spop.poverlay.sensor.power.PowerMeterManager
         private set
+    lateinit var bikeCalibration: com.spop.poverlay.calibration.BikeCalibrationManager
+        private set
+    val boardCalibration by lazy { com.spop.poverlay.calibration.BoardWriteController(this, bikeCalibration) }
+    val grupettoCalibration by lazy { com.spop.poverlay.calibration.GrupettoCalibrationManager(this) }
     private val sensorScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
 
     override fun onCreate() {
@@ -55,6 +61,9 @@ class GrupettoApplication : Application() {
 
         val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         powerMeterManager = com.spop.poverlay.sensor.power.PowerMeterManager(this)
+        bikeCalibration = com.spop.poverlay.calibration.BikeCalibrationManager(this, powerMeterManager.reading,
+            emulatedModel == null && bikeServiceDiscovery.selectedProfile() == null &&
+                sensorSelection == SensorSelection.BikeV1 && readPelotonPlatform(this) == "v1", grupettoCalibration)
         val bike = createSensorInterface()
         sensorInterface = if (emulatedModel == null) com.spop.poverlay.sensor.power.ExternalPowerSensorInterface(
             bike, powerMeterManager.reading, sensorScope, android.os.SystemClock::elapsedRealtime
@@ -65,6 +74,10 @@ class GrupettoApplication : Application() {
 
     private fun createSensorInterface(): SensorInterface {
         emulatedModel?.let { return com.spop.poverlay.sensor.interfaces.EmulatedSensorInterface(it) }
+        bikeServiceDiscovery.selectedProfile()?.let { profile ->
+            return com.spop.poverlay.sensor.discovery.DiscoveredBikeSensorInterface(this, profile,
+                bikeServiceDiscovery::connectionStatus)
+        }
         // Detection is synchronous and reads Settings.Global["peloton_platform"], the
         // value affernetservice writes from the mainboard USB VID/PID ("prism" = Tread,
         // "titan" = Bike+, "caesar" = Row). The tablet model string is NOT usable: Bike+,

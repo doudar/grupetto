@@ -50,6 +50,29 @@ class PowerMeterManagerTest {
         manager = PowerMeterManager(context, access, scope, log = {}) { now }
     }
     @After fun cleanup() { manager.stop() }
+    @Test fun configuredMeterConnectsAutomaticallyWithoutDiscoveryOrDuplicateAttempts() {
+        every { prefs.getString("selected", null) } returns info.address
+        every { prefs.getString("name_${info.address}", null) } returns info.name
+        manager = PowerMeterManager(context, access, CoroutineScope(Job().apply { cancel() }), log = {}) { now }
+        manager.start()
+        manager.checkConnection()
+        assertEquals("Connecting to Pedals", manager.status.value)
+        now += 13000
+        manager.checkConnection()
+        manager.connect(info)
+        verify(exactly = 1) { access.connect(device, any()) }
+        verify(exactly = 0) { access.startScan(any(), any(), any()); access.disconnect(any()) }
+        now += 18000
+        manager.checkConnection()
+        verify(exactly = 1) { access.disconnect(gatt) }
+        now += 3001
+        manager.checkConnection()
+        verify(exactly = 2) { access.connect(device, any()) }
+        manager.disconnect()
+        now += 40000
+        manager.checkConnection()
+        verify(exactly = 2) { access.connect(device, any()) }
+    }
     private fun connected() {
         manager.connect(info)
         callback.captured.onConnectionStateChange(gatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_CONNECTED)

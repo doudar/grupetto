@@ -54,7 +54,11 @@ class PowerMeterManager internal constructor(
     private val mutableScanning = MutableStateFlow(false)
     val scanning = mutableScanning.asStateFlow()
 
-    init { loadSaved() }
+    init {
+        loadSaved()
+        selected?.let { mutableStatus.value = "Waiting to connect to ${savedName(it)}" }
+    }
+    private fun savedName(address: String) = preferences.getString("name_$address", null) ?: address
     @Synchronized fun start() {
         if (started) return
         started = true
@@ -87,12 +91,15 @@ class PowerMeterManager internal constructor(
             mutableReading.value = null
             mutableStatus.value = "Power data lost · using bike meter"
         }
-        if (gatt != null && now - (lastMeasurementAt ?: connectionAt) > 12000) {
+        val timeout = if (mutableConnected.value == null) 30000 else 12000
+        if (gatt != null && now - (lastMeasurementAt ?: connectionAt) > timeout) {
             log("Data timeout: connected=${mutableConnected.value != null}, receivedPacket=$loggedPacket, lastValidAge=${lastMeasurementAt?.let { now - it }}")
             release(); nextReconnectAt = now + 3000
-            mutableStatus.value = "Reconnecting to power meter"
+            mutableStatus.value = "Reconnecting to ${selected?.let(::savedName) ?: "power meter"}"
         }
-        if (gatt == null && !manuallyDisconnected && selected != null && now >= nextReconnectAt && scan == null) startScan()
+        if (gatt == null && !manuallyDisconnected && now >= nextReconnectAt) selected?.let {
+            beginConnection(HeartRateDevice(it, preferences.getString("name_$it", null)))
+        }
         // Bound scan sessions; allow Android's scan throttling to settle between retries.
         if (scan != null && now - scanStartedAt > 15000) {
             stopScan(); nextReconnectAt = now + 5000
@@ -141,15 +148,19 @@ class PowerMeterManager internal constructor(
     }
     @Synchronized fun connect(device: HeartRateDevice) {
         start()
+        if (gatt != null && connecting?.address == device.address) return
         manuallyDisconnected = false
         selected = device.address
         val addresses = preferences.getStringSet("saved", emptySet()).orEmpty() + device.address
         preferences.edit().putStringSet("saved", addresses).putString("selected", device.address)
             .putString("name_${device.address}", device.name).apply()
         loadSaved()
+        beginConnection(device)
+    }
+    private fun beginConnection(device: HeartRateDevice) {
         stopScan(); release()
         val remote = access.remoteDevice(device.address)
-        if (remote == null) { mutableStatus.value = "Power meter unavailable"; return }
+        if (remote == null) { fail("${device.name ?: device.address} unavailable · retrying"); return }
         connecting = device
         connectionAt = clock()
         mutableStatus.value = "Connecting to ${device.name ?: device.address}"
@@ -220,7 +231,7 @@ class PowerMeterManager internal constructor(
                     log("Low-power connection request accepted=${access.requestLowPowerConnection(link)}")
                 }
                 mutableConnected.value = connecting
-                mutableStatus.value = "Connected · waiting for watts"
+                mutableStatus.value = "Connected to ${connecting?.name ?: connecting?.address} · waiting for watts"
             }
         }
         @Deprecated("Android legacy callback")

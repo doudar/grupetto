@@ -57,7 +57,7 @@ class CyclingPowerService(server: BleServer) : BaseBleService(server) {
         val flags = CyclingPowerConstants.MeasurementFlags.WheelRevolutionDataPresent or
                 CyclingPowerConstants.MeasurementFlags.CrankRevolutionDataPresent
 
-        val powerValue = power.toInt()
+        val powerValue = com.spop.poverlay.sensor.power.telemetryWatts(power)
 
         // Use shared CSC counters from server (1/1024s timers, LE wrapping)
         val wheelRevs = server.cscCumulativeWheelRev

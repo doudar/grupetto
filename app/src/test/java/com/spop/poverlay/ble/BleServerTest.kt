@@ -318,6 +318,31 @@ class BleServerTest {
             packets.close()
         }
     }
+    @Test
+    fun `shared BLE and DirCon telemetry forwards overlay watts without another average`() = runBlocking {
+        val power = MutableStateFlow(195.5f)
+        every { sensorInterface.power } returns power
+        every { sensorInterface.speed } returns flowOf(0f)
+        val packets = Channel<ByteArray>(Channel.UNLIMITED)
+        val service = mockk<BaseBleService>(relaxed = true)
+        every { service.onSensorDataUpdated(any(), any(), any(), any(), any()) } answers {
+            packets.trySend(FitnessMachineData.encode(arg(0), arg(1), arg(2), arg(3))); Unit
+        }
+        BleServer::class.java.getDeclaredField("registeredServices").apply {
+            isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            (get(bleServer) as MutableList<BaseBleService>).add(service)
+        }
+        try {
+            BleServer::class.java.getDeclaredMethod("startSensorDataUpdates").apply { isAccessible = true; invoke(bleServer) }
+            for (watts in listOf(195.5f, 300f, 50f, 0f)) {
+                power.value = watts
+                val packet = withTimeout(5000) { packets.receive() }
+                val transmitted = (packet[8].toInt() and 255) or ((packet[9].toInt() and 255) shl 8)
+                assertEquals(com.spop.poverlay.sensor.power.telemetryWatts(watts), transmitted)
+            }
+        } finally { bleServer.coroutineContext.cancel(); packets.close() }
+    }
 }
 
 class FakeTimeProvider : TimeProvider {

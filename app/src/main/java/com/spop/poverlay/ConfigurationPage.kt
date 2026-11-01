@@ -20,6 +20,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.spop.poverlay.sensor.heartrate.HeartRateDevice
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
+import com.spop.poverlay.sensor.power.PowerDisplay
+import com.spop.poverlay.sensor.power.DisplayPowerSource
 import kotlin.math.max
 
 private data class UiScale(
@@ -48,15 +50,31 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
     val bike by viewModel.bikeControlState.collectAsStateWithLifecycle()
     val showShifters by viewModel.showShifters.collectAsStateWithLifecycle()
     val shifterInset by viewModel.shifterInset.collectAsStateWithLifecycle()
-    val watts by viewModel.livePower.collectAsStateWithLifecycle(initialValue = Float.NaN)
+    val displayedPower by viewModel.livePowerDisplay.collectAsStateWithLifecycle(initialValue = PowerDisplay(Float.NaN))
+    val watts = displayedPower.watts
     val cadence by viewModel.liveCadence.collectAsStateWithLifecycle(initialValue = Float.NaN)
     val resistance by viewModel.liveResistance.collectAsStateWithLifecycle(initialValue = Float.NaN)
     val speed by viewModel.liveSpeed.collectAsStateWithLifecycle(initialValue = Float.NaN)
     val incline by viewModel.liveIncline.collectAsStateWithLifecycle(initialValue = Float.NaN)
     val bpm by HeartRateManager.heartRate.collectAsStateWithLifecycle()
+    val heartStatus by HeartRateManager.status.collectAsStateWithLifecycle()
+    val powerStatus by viewModel.powerMeterStatus.collectAsStateWithLifecycle()
     val meter by viewModel.powerMeterDevice.collectAsStateWithLifecycle()
     val externalWatts by viewModel.powerMeterReading.collectAsStateWithLifecycle()
-    var dialog by remember { mutableStateOf<String?>(null) }
+    val calibration by viewModel.calibrationState.collectAsStateWithLifecycle()
+    val grupettoTable by viewModel.grupettoCalibrationState.collectAsStateWithLifecycle()
+    val calibrationMeterReady by viewModel.calibrationMeterReady.collectAsStateWithLifecycle(initialValue = false)
+    val captureSettings by viewModel.calibrationCaptureSettings.collectAsStateWithLifecycle()
+    var dialog by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(dialog) {
+        if (dialog == "grupetto-calibration") viewModel.showCalibrationTable()
+    }
+    androidx.compose.runtime.LaunchedEffect(viewModel.showCalibration.value) {
+        if (viewModel.showCalibration.value) { viewModel.showCalibrationTable(); dialog = "grupetto-calibration"; viewModel.showCalibration.value = false }
+    }
+    androidx.compose.runtime.LaunchedEffect(viewModel.showGuidedCalibration.value) {
+        if (viewModel.showGuidedCalibration.value) { dialog = "calibration"; viewModel.showGuidedCalibration.value = false }
+    }
     var previewShifters by remember { mutableStateOf(false) }
     var developerTaps by remember { mutableStateOf(0) }
     var lastDeveloperTap by remember { mutableStateOf(0L) }
@@ -91,7 +109,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         LiveMetric("SPEED", displayMetric(speed, 1), "mph", Color(0xFF60A5FA), Modifier.weight(1f))
                         LiveMetric("INCLINE", displayMetric(incline, 1), "%", Color(0xFF34D399), Modifier.weight(1f))
                     } else {
-                        LiveMetric("POWER", displayMetric(watts), "W", Color(0xFFFBBF24), Modifier.weight(1f))
+                        LiveMetric(if (displayedPower.source == DisplayPowerSource.Corrected) "CORRECTED" else "POWER",
+                            displayMetric(watts), "W", Color(0xFFFBBF24), Modifier.weight(1f))
                         LiveMetric("CADENCE", displayMetric(cadence), "rpm", Color(0xFF34D399), Modifier.weight(1f))
                         LiveMetric("RESISTANCE", displayMetric(resistance), "%", Color(0xFF60A5FA), Modifier.weight(1f))
                     }
@@ -113,9 +132,13 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                 Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     SettingsTile("External Sensors", Modifier.weight(1f).fillMaxHeight(), Color(0xFFFB7185)) {
                         SensorSummary("Heart rate", hr?.let { it.name ?: it.address } ?: "Not connected",
-                            bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185))
-                        SensorSummary("Power meter", meter?.let { it.name ?: it.address } ?: "Using built-in power",
-                            externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", Color(0xFFFBBF24))
+                            bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185), heartStatus)
+                        SensorSummary("Power meter", com.spop.poverlay.sensor.power.calibrationSensorLabel(
+                            grupettoTable.active, grupettoTable.recording, meter?.let { it.name ?: it.address }),
+                            externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", Color(0xFFFBBF24), powerStatus)
+                        if (viewModel.calibrationSupported) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            OutlinedButton({ viewModel.showCalibrationTable(); dialog = "grupetto-calibration" }) { Text("Calibration") }
+                        }
                         Spacer(Modifier.weight(1f))
                         TileActionButton("Pair & manage sensors", { dialog = "sensors" })
                     }
@@ -152,7 +175,11 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         SettingsTile("Device & app", Modifier.weight(1f).fillMaxHeight(), Color(0xFFA78BFA)) {
                             Text(if (viewModel.isTread) "Tread · Speed & incline" else "Bike · Live telemetry", fontSize = 18.sp, lineHeight = 22.sp)
                             Text("Model ${Build.MODEL}   ·   Android ${Build.VERSION.RELEASE}", fontSize = 13.sp, lineHeight = 17.sp, color = Color(0xFF9EAEC0))
-                            Text(if (externalWatts != null) "Power source: external meter" else "Power source: built-in sensors", fontSize = 13.sp, lineHeight = 17.sp)
+                            Text(when (displayedPower.source) {
+                                DisplayPowerSource.Corrected -> "Displayed power: Grupetto calibration"
+                                DisplayPowerSource.Pedals -> "Displayed power: external meter"
+                                DisplayPowerSource.Bike -> "Displayed power: built-in sensors"
+                            }, fontSize = 13.sp, lineHeight = 17.sp)
                             Spacer(Modifier.weight(1f))
                             TileActionButton("Version & updates", { dialog = "about" })
                         }
@@ -166,6 +193,9 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                             lastDeveloperTap = now
                             if (developerTaps >= 5) { developerTaps = 0; dialog = "developer" }
                         }.padding(vertical = 8.dp))
+                    TextButton({ dialog = "discovery" }, Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 12.dp)) {
+                        Text("Bike service discovery", fontSize = 12.sp)
+                    }
                     TextButton({ dialog = "about" }, Modifier.height(32.dp), contentPadding = PaddingValues(0.dp)) {
                         Text(if (release?.isCurrentlyInstalled == false) "New Version Available" else "About & updates", fontSize = 12.sp)
                     }
@@ -175,18 +205,72 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
         }
     }
     when (dialog) {
+        "discovery" -> SettingsDialog("Bike service discovery", { dialog = null }) {
+            val discovery by viewModel.discoveryState.collectAsStateWithLifecycle()
+            val connection by viewModel.discoveryConnection.collectAsStateWithLifecycle()
+            com.spop.poverlay.sensor.discovery.BikeDiscoveryPanel(discovery, connection, viewModel.isPreview,
+                viewModel::discoverBikeServices, viewModel::cancelBikeDiscovery, viewModel::useDiscoveredBikeService,
+                viewModel::restoreAutomaticBikeService, viewModel::requestBikeDiscoveryReport)
+        }
         "sensors" -> SettingsDialog("External Sensors", { dialog = null }) {
             SensorSummary("Heart rate", hr?.let { it.name ?: it.address } ?: "Pair a heart-rate monitor",
-                bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185))
+                bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185), heartStatus)
             OutlinedButton({ dialog = "heart" }, Modifier.fillMaxWidth()) { Text("Heart-rate monitors & zones") }
             Divider(Modifier.padding(vertical = 12.dp))
-            SensorSummary("Power meter", meter?.let { it.name ?: it.address } ?: "Use an external Cycling Power sensor",
-                externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", Color(0xFFFBBF24))
+            SensorSummary("Power meter", com.spop.poverlay.sensor.power.calibrationSensorLabel(
+                grupettoTable.active, grupettoTable.recording, meter?.let { it.name ?: it.address }),
+                externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", Color(0xFFFBBF24), powerStatus)
             OutlinedButton({ dialog = "power" }, Modifier.fillMaxWidth()) { Text("Pair & manage power meters") }
-            Text("External watts are used for display, broadcasting, and ERG. Changing or losing the source stops ERG until restarted.",
+            if (viewModel.calibrationSupported) {
+                OutlinedButton({ dialog = "grupetto-calibration" }, Modifier.fillMaxWidth()) { Text("Calibrate using power pedals") }
+            }
+            Text("Broadcast power matches the large overlay number. Pedals supply ERG feedback. Changing or losing the ERG power source stops ERG until restarted.",
                 fontSize = 13.sp, color = Color(0xFF9EAEC0))
         }
         "power" -> PowerMeterDialog(viewModel) { dialog = null }
+        "grupetto-calibration" -> SettingsDialog("Calibrate using power pedals", { dialog = null }, compact = true) {
+            val livePosition by viewModel.liveCalibrationPosition.collectAsStateWithLifecycle(initialValue = null)
+            Column {
+                com.spop.poverlay.calibration.GrupettoCalibrationPanel(grupettoTable,
+                    viewModel::recordGrupettoCalibration, viewModel::activateGrupettoCalibration, viewModel::clearGrupettoCalibration,
+                    viewModel::startGuidedCalibration,
+                    meterReady = calibrationMeterReady, capture = calibration,
+                    metrics = com.spop.poverlay.calibration.CalibrationLiveMetrics(
+                        displayedPower.nativeWatts.toDouble(), externalWatts?.watts?.toDouble(), cadence.toDouble(), resistance.toDouble(),
+                        displayedPower.watts.toDouble().takeIf { displayedPower.source == DisplayPowerSource.Corrected }),
+                    fileControls = {
+                        com.spop.poverlay.calibration.CalibrationFileControls(
+                            hasData = grupettoTable.count > 0 || grupettoTable.savedCount > 0,
+                            canLoad = !grupettoTable.recording && !calibration.enabled,
+                            export = viewModel::exportCalibrationBackup, load = viewModel::loadCalibrationBackup)
+                    }, onManualEdit = { dialog = "manual-calibration" }, livePosition = livePosition,
+                    captureSettings = captureSettings, onCaptureSettings = viewModel::setCalibrationCaptureSettings)
+            }
+        }
+        "manual-calibration" -> {
+            val session = viewModel.manualCalibrationSession ?: (grupettoTable.displayTable ?: grupettoTable.table)?.let {
+                com.spop.poverlay.calibration.CalibrationEditHistory(it).also { session -> viewModel.manualCalibrationSession = session }
+            }
+            if (session != null) com.spop.poverlay.calibration.CalibrationManualEditor(session.initial, grupettoTable.active,
+                viewModel::saveManualCalibration, {
+                    viewModel.manualCalibrationSession = null
+                    dialog = "grupetto-calibration"
+                }, session)
+            else SettingsDialog("Manual editor", { dialog = "grupetto-calibration" }) {
+                Text("Record at least one usable calibration effort to create an editable table.")
+            }
+        }
+        "calibration" -> SettingsDialog("Calibrate using power pedals", { dialog = null }, compact = true) {
+            com.spop.poverlay.calibration.CalibrationPanel(calibration,
+                { if (it) viewModel.startGuidedCalibration() else viewModel.setCalibrationEnabled(false) }, viewModel::clearCalibrationCapture,
+                viewModel::restCalibration, viewModel::easierCalibration,
+                viewModel::skipCalibrationTarget, viewModel::selectCalibrationTarget,
+                viewModel::harderCalibration, { viewModel.showCalibrationTable(); dialog = "grupetto-calibration" },
+                localCalibration = grupettoTable, onLocalReview = { dialog = "grupetto-calibration" }, meterReady = calibrationMeterReady,
+                liveMetrics = com.spop.poverlay.calibration.CalibrationLiveMetrics(
+                    displayedPower.nativeWatts.toDouble(), externalWatts?.watts?.toDouble(), cadence.toDouble(), resistance.toDouble(),
+                    displayedPower.watts.toDouble().takeIf { displayedPower.source == DisplayPowerSource.Corrected }))
+        }
         "developer" -> SettingsDialog("Developer · Model emulation", { dialog = null }) {
             Text("Emulation uses simulated sensors and motor control. Broadcasts are disabled. Selecting a model restarts Grupetto.",
                 fontSize = 14.sp, color = Color(0xFF9EAEC0))
@@ -300,11 +384,12 @@ private fun ConnectionSummary(name: String, detail: String, enabled: Boolean) {
 }
 
 @Composable
-private fun SensorSummary(label: String, name: String, value: String, accent: Color) {
+private fun SensorSummary(label: String, name: String, value: String, accent: Color, status: String? = null) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(label, fontSize = 13.sp, lineHeight = 16.sp, color = Color(0xFFBAC6D3))
-            Text(name, fontSize = 11.sp, lineHeight = 14.sp, color = Color(0xFF8796A8), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(name, fontSize = 12.sp, lineHeight = 15.sp, color = Color(0xFF8796A8), maxLines = 3, overflow = TextOverflow.Ellipsis)
+            status?.let { Text(it, fontSize = 11.sp, lineHeight = 14.sp, color = accent, maxLines = 2, overflow = TextOverflow.Ellipsis) }
         }
         Text(value, color = accent, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
     }
@@ -366,13 +451,13 @@ private fun PowerMeterDialog(viewModel: ConfigurationViewModel, onDismiss: () ->
 }
 
 @Composable
-internal fun SettingsDialog(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+internal fun SettingsDialog(title: String, onDismiss: () -> Unit, compact: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     androidx.compose.ui.window.Dialog(onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.widthIn(max = 660.dp).fillMaxWidth(.9f),
+        Surface(Modifier.widthIn(max = if (compact) 1000.dp else 760.dp).fillMaxWidth(.94f),
             shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp), color = Color(0xFF1B2430), contentColor = Color(0xFFE8EEF5)) {
-            Column(Modifier.padding(24.dp)) {
+            Column(Modifier.padding(if (compact) 16.dp else 24.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(title, Modifier.weight(1f), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Text(title, Modifier.weight(1f), fontSize = if (compact) 20.sp else 22.sp, fontWeight = FontWeight.Bold)
                     TextButton(onDismiss) { Text("Done") }
                 }
                 Spacer(Modifier.height(8.dp))

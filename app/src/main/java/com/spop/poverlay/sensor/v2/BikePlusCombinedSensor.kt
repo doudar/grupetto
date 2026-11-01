@@ -3,6 +3,7 @@ package com.spop.poverlay.sensor.v2
 import android.os.IBinder
 import android.os.Parcel
 import com.spop.poverlay.sensor.readBikeCoreData
+import com.spop.poverlay.sensor.interfaces.SensorInterface
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -36,7 +37,7 @@ class ConsecutiveErrorCounter(private val limit: Int = 5) {
 class BikePlusCombinedSensor(
     private val binder: IBinder,
     private val onSample: (com.spop.poverlay.control.BikeSample?) -> Unit = {}
-) {
+) : SensorInterface {
 
     /** ITitanInterface transaction from dwj300's PR #50. */
     fun setResistance(resistance: Int): Boolean =
@@ -47,21 +48,21 @@ class BikePlusCombinedSensor(
         extraBufferCapacity = 64,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
-    val power = mutablePower.asSharedFlow()
+    override val power = mutablePower.asSharedFlow()
 
     private val mutableCadence = MutableSharedFlow<Float>(
         replay = 1,
         extraBufferCapacity = 64,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
-    val cadence = mutableCadence.asSharedFlow()
+    override val cadence = mutableCadence.asSharedFlow()
 
     private val mutableResistance = MutableSharedFlow<Float>(
         replay = 1,
         extraBufferCapacity = 64,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
-    val resistance = mutableResistance.asSharedFlow()
+    override val resistance = mutableResistance.asSharedFlow()
 
     private val errorCounter = ConsecutiveErrorCounter()
     private var threadRunning = AtomicBoolean(false)
@@ -80,8 +81,7 @@ class BikePlusCombinedSensor(
                         // Transact code 14 fetches the full BikeData
                         check(binder.transact(14, parcel, parcel2, 0)) { "Bike+ read transaction rejected" }
                         parcel2.readException()
-                        // Skip the first integer
-                        parcel2.readInt()
+                        check(parcel2.readInt() != 0) { "Bike+ returned no BikeData" }
                         
                         val bikeData = readBikeCoreData(parcel2)
 
