@@ -4,9 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -37,7 +35,7 @@ fun CalibrationPanel(state: CalibrationUiState, onEnabled: (Boolean) -> Unit, on
     boardContent: @Composable () -> Unit = {}) {
     var review by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().heightIn(max = calibrationContentHeight()).verticalScroll(rememberScrollState()),
+    Column(Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Button({ onEnabled(!state.enabled) }, Modifier.heightIn(min = 48.dp), enabled = state.enabled || meterReady) {
@@ -117,7 +115,7 @@ fun CalibrationPanel(state: CalibrationUiState, onEnabled: (Boolean) -> Unit, on
                         Text(cue, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = CaptureGreen)
                         Text(when {
                             !state.enabled -> if (state.sampleCount == 0) "Warm up · zero pedals in their app" else state.status
-                            state.mode == CalibrationMode.Guided && target != null -> "${target.rpm} rpm · anywhere in green · hold 8 sec"
+                            state.mode == CalibrationMode.Guided && target != null -> "${target.rpm} rpm / anywhere in green / hold ${state.progress.totalSeconds} sec"
                             else -> "Ride normally · steady moments save automatically"
                         }, fontSize = 14.sp, color = CaptureMuted)
                         if (state.mode == CalibrationMode.Guided && target != null && state.frame != null) {

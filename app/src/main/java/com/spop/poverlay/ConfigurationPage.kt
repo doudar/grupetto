@@ -2,7 +2,6 @@ package com.spop.poverlay
 
 import android.os.Build
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.*
 import androidx.compose.runtime.Composable
@@ -230,7 +229,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
         "power" -> PowerMeterDialog(viewModel) { dialog = null }
         "grupetto-calibration" -> SettingsDialog("Calibrate using power pedals", { dialog = null }, compact = true) {
             val livePosition by viewModel.liveCalibrationPosition.collectAsStateWithLifecycle(initialValue = null)
-            Column(Modifier.heightIn(max = com.spop.poverlay.calibration.calibrationContentHeight()).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+            Column {
                 com.spop.poverlay.calibration.GrupettoCalibrationPanel(grupettoTable,
                     viewModel::recordGrupettoCalibration, viewModel::activateGrupettoCalibration, viewModel::clearGrupettoCalibration,
                     viewModel::startGuidedCalibration,
@@ -453,7 +452,7 @@ private fun PowerMeterDialog(viewModel: ConfigurationViewModel, onDismiss: () ->
 @Composable
 internal fun SettingsDialog(title: String, onDismiss: () -> Unit, compact: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     androidx.compose.ui.window.Dialog(onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.widthIn(max = if (compact) 760.dp else 660.dp).fillMaxWidth(if (compact) .94f else .9f),
+        Surface(Modifier.widthIn(max = if (compact) 1000.dp else 760.dp).fillMaxWidth(.94f),
             shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp), color = Color(0xFF1B2430), contentColor = Color(0xFFE8EEF5)) {
             Column(Modifier.padding(if (compact) 16.dp else 24.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

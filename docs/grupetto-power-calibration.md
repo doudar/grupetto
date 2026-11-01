@@ -43,9 +43,9 @@ The live pulse does not require recording, activation, or an external meter. It 
 when raw bike data is stale, cadence is out of range, or the baseline differs. The table screen shows live raw bike
 watts, corrected watts, pedal watts, cadence and resistance even while recording
 is paused. Fit messages and validation details are available under **Fit details**.
-Both calibration dialogs use wider, compact layouts with a screen-height-aware
-content limit. Guided actions share a row,
-and details/review can scroll while the ordinary riding controls fit together.
+Calibration dialogs use wide, compact layouts without scrolling. The table has
+**Table**, **Fit details**, and **Backups** tabs; guided capture has Ride and Review
+views. Secondary actions use compact buttons while riding actions keep larger targets.
 The table page compares **Before calibration** and **After calibration** as mean
 absolute error in watts against the pedals, on exactly the same saved paired
 efforts. After uses the actual active snapshot, not the newer draft. When correction
@@ -88,7 +88,11 @@ draft and activation files are migrated on the next write.
 Pause **Record**, then select **Manual editor** to open **Power table studio**.
 The editor needs at least one saved usable effort to establish the bike identity
 and resistance baseline; a pedal connection is not needed while editing.
-The fullscreen heatmap covers 31 baseline resistance points and 45–120 rpm.
+The editor uses a full-display immersive window, hiding the system bars while
+open (swipe from an edge to reveal them temporarily). The heatmap covers all 31
+baseline resistance points and 45–120 rpm. **Fit table** sizes cells to the actual
+viewport in whole pixels and fits cadence labels within their rows; all four
+corners remain visible without scrolling, including after leaving Zoom.
 Tap a cell to inspect its raw resistance AD and enter a signed percentage of raw
 bike watts (−35% to +35%). **Set correction** assigns the desired correction;
 **−1% / +1%** nudge it by one percentage point. Choose a cell, cadence row,
@@ -102,17 +106,29 @@ change only selected cells. Manual input uses the same ride-time interpolation
 and correction bounds as recorded calibration, without creating synthetic pedal
 efforts or claiming measured confidence.
 
-Four one-touch tools are available:
+Four one-touch quick fixes stay visible above the table. The selection inspector
+uses **Edit**, **Scope**, and **Tools** pages without scrolling. Quick fixes affect
+the whole table and remain reversible with Undo:
 
 - **Fill all gaps:** fills every uncovered cell by inverse-distance interpolation
   of the eight closest covered cells, with distance scaled by the blend widths.
   It preserves existing covered values and extends nearby trends at the edges.
   Filled cells are estimates, not new measurements.
-- **Smooth selection:** blends selected cells halfway toward their immediate
+- **Smooth whole table:** blends every cell halfway toward its immediate
   neighbors' average to reduce abrupt changes.
-- **Reduce corrections 20%:** scales selected percentage corrections toward zero.
+- **Reduce all 20%:** scales every percentage correction toward zero.
 - **Restore recorded fit:** removes all manual edits, including edits saved in
   earlier sessions, and restores the fit from the recorded efforts.
+
+The inspector also retains **Smooth selection** and **Reduce corrections 20%**
+for cell, cadence-row, resistance-column, or whole-table selections. Compare mode
+disables edits and quick fixes until **Show edited** is selected.
+The editor explicitly uses the bundled Lato font for every text style, including
+buttons, headings, and fields. Labels use printable ASCII; manual-cell dots are
+drawn shapes, avoiding device-dependent symbol glyphs. The same bundled font is
+the default for all app typography styles.
+While the keyboard is open, the manual editor temporarily focuses on the numeric
+input and Set correction action, keeping the typed value and controls visible.
 
 **Undo / Redo** covers the last 100 changes, including tools and resets.
 **Compare original** shows the surface from when the editor opened.

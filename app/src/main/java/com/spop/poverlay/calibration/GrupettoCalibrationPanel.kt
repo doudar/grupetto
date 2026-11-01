@@ -30,9 +30,13 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
     captureSettings: CalibrationCaptureSettings = CalibrationCaptureSettings(),
     onCaptureSettings: ((CalibrationCaptureSettings) -> Unit)? = null) {
     var confirmClear by remember { mutableStateOf(false) }
-    var details by remember { mutableStateOf(false) }
+    var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     var settingsOpen by remember { mutableStateOf(false) }
     if (settingsOpen && onCaptureSettings != null) CalibrationSettingsDialog(captureSettings, onCaptureSettings) { settingsOpen = false }
+    if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text("Clear Grupetto table?") },
+        text = { Text("Clear recorded efforts and manual edits, and turn correction off?") },
+        confirmButton = { TextButton({ confirmClear = false; onClear() }) { Text("Clear Grupetto table") } },
+        dismissButton = { TextButton({ confirmClear = false }) { Text("Keep table") } })
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -45,19 +49,24 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
             Switch(state.active, onActivate, enabled = state.active || state.canActivate)
             Text("Activate", fontSize = 16.sp)
         }
+        TabRow(tab, backgroundColor = Color.Transparent) {
+            listOf("Table", "Fit details", "Backups").forEachIndexed { index, label ->
+                Tab(tab == index, { tab = index }, text = { Text(label) })
+            }
+        }
         CaptureErrorNotice(capture)
+        if (tab == 0) {
         if (!meterReady) Text("Connect a power meter to record", fontSize = 14.sp, lineHeight = 18.sp, color = Color(0xFFFBBF24))
         CalibrationMetrics(metrics, showCorrected = true)
         GrupettoCoverageChart(state.displayTable ?: state.table, capture, state.recording && meterReady, livePosition)
         CaptureHoldFeedback(capture, state.recording)
         CalibrationCorrectionLegend()
         CalibrationErrorSummary(state.errors)
-        fileControls()
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onGuide, Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Guided capture") }
-            if (onManualEdit != null) OutlinedButton(onManualEdit, Modifier.weight(1f).heightIn(min = 48.dp),
+            OutlinedButton(onGuide, Modifier.weight(1f).height(40.dp)) { Text("Guided capture", fontSize = 13.sp) }
+            if (onManualEdit != null) OutlinedButton(onManualEdit, Modifier.weight(1f).height(40.dp),
                 enabled = !state.recording && (state.displayTable ?: state.table) != null) { Text("Manual editor") }
-            if (onCaptureSettings != null) OutlinedButton({ settingsOpen = true }, Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Capture settings") }
+            if (onCaptureSettings != null) OutlinedButton({ settingsOpen = true }, Modifier.weight(1f).height(40.dp)) { Text("Capture settings", fontSize = 13.sp) }
         }
         if (state.recording) Text("Pause recording to edit the power table manually.", fontSize = 12.sp, color = Color(0xFF9EAEC0))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -68,10 +77,9 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
                 state.savedCount > 0 -> "Saved ${state.savedCount}-effort table ready to activate"
                 else -> "More ride coverage needed"
             }, Modifier.weight(1f), fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFF6EE7B7))
-            TextButton({ details = !details }) { Text(if (details) "Hide details" else "Fit details") }
-            if (!confirmClear) TextButton({ confirmClear = true }) { Text("Clear table…") }
         }
-        if (details) {
+        }
+        if (tab == 1) {
             if (capture.error == null) Text(state.message, fontSize = 14.sp, lineHeight = 18.sp)
             Text("Colors show the ${if (state.active) "active" else "preview"} table's correction as a percentage of raw bike watts. " +
                 "Red: bike overestimated. Blue: bike underestimated. Scale saturates at -10% / +10%.",
@@ -90,11 +98,11 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
             }
             Text("Record + Activate: every saved effort updates the table. Error scores are informational. Pulse: cyan shows your current cell, orange settles, yellow holds, green saves.",
                 fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFF9EAEC0))
+            TextButton({ confirmClear = true }) { Text("Clear table...") }
         }
-        if (confirmClear) {
-            Text("Clear Grupetto data and turn correction off?", fontSize = 14.sp)
-            Row { TextButton({ confirmClear = false; onClear() }) { Text("Clear Grupetto table") }
-                TextButton({ confirmClear = false }) { Text("Keep table") } }
+        if (tab == 2) {
+            Text("Save or share the current calibration, or load a backup.", fontSize = 14.sp)
+            fileControls()
         }
     }
 }

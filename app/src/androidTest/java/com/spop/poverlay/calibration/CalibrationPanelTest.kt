@@ -1,6 +1,5 @@
 package com.spop.poverlay.calibration
 
-import android.graphics.Bitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.MaterialTheme
@@ -8,15 +7,12 @@ import androidx.compose.material.Surface
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
-import androidx.test.platform.app.InstrumentationRegistry
-import java.io.File
 
 class CalibrationPanelTest {
     @get:Rule val compose = createComposeRule()
@@ -46,15 +42,12 @@ class CalibrationPanelTest {
         }
         compose.onNodeWithText("Review").performClick()
         compose.onNodeWithText("Sensor-board fit · 1 / 29 points").assertIsDisplayed()
-        val image = compose.onRoot().captureToImage().asAndroidBitmap()
-        File(InstrumentationRegistry.getInstrumentation().targetContext.filesDir, "calibration-panel.png")
-            .outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        compose.onNodeWithText("Clear capture…").performScrollTo().performClick()
+        compose.onNodeWithText("Clear capture…").assertIsDisplayed().performClick()
         assertFalse(cleared)
-        compose.onNodeWithText("Keep data").performScrollTo().performClick()
+        compose.onNodeWithText("Keep data").assertIsDisplayed().performClick()
         assertFalse(cleared)
         compose.onNodeWithText("Clear capture…").performClick()
-        compose.onNodeWithText("Delete efforts").performScrollTo().performClick()
+        compose.onNodeWithText("Delete efforts").assertIsDisplayed().performClick()
         assertTrue(cleared)
     }
 }
