@@ -6,9 +6,21 @@ on:
   pull_request:
     branches: [ "develop", "main" ]
 
+# Both release branches share tags; hold the lock from allocation through upload.
+# PR builds have their own group and never block a publication.
+concurrency:
+  group: android-${{ github.event_name == 'push' && 'release' || github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      TAG_NAME: ${{ steps.version_info.outputs.TAG_NAME }}
+      PREVIOUS_TAG: ${{ steps.version_info.outputs.PREVIOUS_TAG }}
+      VERSION_CODE: ${{ steps.version_info.outputs.VERSION_CODE }}
+      NEW_VERSION_CODE: ${{ steps.version_info.outputs.NEW_VERSION_CODE }}
+      SOURCE_SHA: ${{ steps.version_info.outputs.SOURCE_SHA }}
 
     steps:
     - name: Checkout code
@@ -61,39 +73,12 @@ jobs:
         keyPassword=$KEY_PASSWORD
         EOF
 
+    - name: Test release version allocation
+      run: bash .github/scripts/test-release-version.sh
+
     - name: Extract version info
       id: version_info
-      run: |
-        VERSION_NAME=$(grep "versionName" app/build.gradle | cut -d'"' -f2)
-        VERSION_CODE=$(grep "versionCode" app/build.gradle | awk '{print $2}')
-        
-        # Get the latest tag and increment it
-        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-        echo "Latest tag found: $LATEST_TAG"
-        
-        # Extract version numbers (remove 'v' prefix and split by dots)
-        VERSION_NUMBERS=$(echo $LATEST_TAG | sed 's/^v//' | tr '.' ' ')
-        read -r MAJOR MINOR PATCH <<< "$VERSION_NUMBERS"
-        
-        # Default to 0.0.0 if parsing fails
-        MAJOR=${MAJOR:-0}
-        MINOR=${MINOR:-0}
-        PATCH=${PATCH:-0}
-        
-        # Increment patch version
-        NEW_PATCH=$((PATCH + 1))
-        NEW_TAG="v${MAJOR}.${MINOR}.${NEW_PATCH}"
-        
-        # Calculate new version code (increment current version code)
-        NEW_VERSION_CODE=$((VERSION_CODE + 1))
-        
-        echo "New tag will be: $NEW_TAG"
-        echo "New version code will be: $NEW_VERSION_CODE"
-        echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_OUTPUT
-        echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_OUTPUT
-        echo "NEW_VERSION_CODE=$NEW_VERSION_CODE" >> $GITHUB_OUTPUT
-        echo "TAG_NAME=$NEW_TAG" >> $GITHUB_OUTPUT
-        echo "PREVIOUS_TAG=$LATEST_TAG" >> $GITHUB_OUTPUT
+      run: bash .github/scripts/release-version.sh
 
     - name: Update build.gradle versions
       run: |
@@ -134,48 +119,15 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
-
-    - name: Extract version info
-      id: version_info
-      run: |
-        VERSION_NAME=$(grep "versionName" app/build.gradle | cut -d'"' -f2)
-        VERSION_CODE=$(grep "versionCode" app/build.gradle | awk '{print $2}')
-        
-        # Get the latest tag and increment it
-        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-        echo "Latest tag found: $LATEST_TAG"
-        
-        # Extract version numbers (remove 'v' prefix and split by dots)
-        VERSION_NUMBERS=$(echo $LATEST_TAG | sed 's/^v//' | tr '.' ' ')
-        read -r MAJOR MINOR PATCH <<< "$VERSION_NUMBERS"
-        
-        # Default to 0.0.0 if parsing fails
-        MAJOR=${MAJOR:-0}
-        MINOR=${MINOR:-0}
-        PATCH=${PATCH:-0}
-        
-        # Increment patch version
-        NEW_PATCH=$((PATCH + 1))
-        NEW_TAG="v${MAJOR}.${MINOR}.${NEW_PATCH}"
-        
-        # Calculate new version code (increment current version code)
-        NEW_VERSION_CODE=$((VERSION_CODE + 1))
-        
-        echo "New tag will be: $NEW_TAG"
-        echo "New version code will be: $NEW_VERSION_CODE"
-        echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_OUTPUT
-        echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_OUTPUT
-        echo "NEW_VERSION_CODE=$NEW_VERSION_CODE" >> $GITHUB_OUTPUT
-        echo "TAG_NAME=$NEW_TAG" >> $GITHUB_OUTPUT
-        echo "PREVIOUS_TAG=$LATEST_TAG" >> $GITHUB_OUTPUT
+        ref: ${{ needs.build.outputs.SOURCE_SHA }}
 
     - name: Update build.gradle versions
       run: |
         # Update versionName to match the new tag
-        sed -i "s/versionName \".*\"/versionName \"${{ steps.version_info.outputs.TAG_NAME }}\"/" app/build.gradle
+        sed -i "s/versionName \".*\"/versionName \"${{ needs.build.outputs.TAG_NAME }}\"/" app/build.gradle
         
         # Update versionCode to incremented value
-        sed -i "s/versionCode [0-9]*/versionCode ${{ steps.version_info.outputs.NEW_VERSION_CODE }}/" app/build.gradle
+        sed -i "s/versionCode [0-9]*/versionCode ${{ needs.build.outputs.NEW_VERSION_CODE }}/" app/build.gradle
         
         # Verify changes
         echo "Updated build.gradle versions:"
@@ -186,8 +138,8 @@ jobs:
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
         git add app/build.gradle
-        git commit -m "Auto-update version to ${{ steps.version_info.outputs.TAG_NAME }} (build ${{ steps.version_info.outputs.NEW_VERSION_CODE }})" || echo "No changes to commit"
-        git push origin HEAD:${{ github.ref_name }} || echo "Failed to push version update"
+        git commit -m "Auto-update version to ${{ needs.build.outputs.TAG_NAME }} (build ${{ needs.build.outputs.NEW_VERSION_CODE }})"
+        git push origin HEAD:${{ github.ref_name }} || echo "::warning::Branch advanced; release tag will retain the version commit"
 
     - name: Download release APK
       uses: actions/download-artifact@v4
@@ -207,12 +159,12 @@ jobs:
         echo "Found APK: $APK_FILE"
         echo "APK_PATH=$APK_FILE" >> $GITHUB_OUTPUT
 
-    - name: Create/Update tag
+    - name: Create new tag
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        git tag -a "${{ steps.version_info.outputs.TAG_NAME }}" -m "Release ${{ steps.version_info.outputs.TAG_NAME }}"
-        git push origin "${{ steps.version_info.outputs.TAG_NAME }}"
+        git tag -a "${{ needs.build.outputs.TAG_NAME }}" -m "Release ${{ needs.build.outputs.TAG_NAME }}"
+        git push origin "${{ needs.build.outputs.TAG_NAME }}"
 
     - name: Create GitHub Release
       uses: actions/create-release@v1
@@ -220,19 +172,19 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ steps.version_info.outputs.TAG_NAME }}
-        release_name: "Grupetto ${{ steps.version_info.outputs.TAG_NAME }}"
+        tag_name: ${{ needs.build.outputs.TAG_NAME }}
+        release_name: "Grupetto ${{ needs.build.outputs.TAG_NAME }}"
         body: |
-          ## Grupetto Release ${{ steps.version_info.outputs.TAG_NAME }}
+          ## Grupetto Release ${{ needs.build.outputs.TAG_NAME }}
           
-          **Version:** ${{ steps.version_info.outputs.TAG_NAME }}
-          **Previous Version:** ${{ steps.version_info.outputs.PREVIOUS_TAG }}
-          **Build Code:** ${{ steps.version_info.outputs.NEW_VERSION_CODE }} (was ${{ steps.version_info.outputs.VERSION_CODE }})
-          **Commit:** ${{ github.sha }}
+          **Version:** ${{ needs.build.outputs.TAG_NAME }}
+          **Previous Version:** ${{ needs.build.outputs.PREVIOUS_TAG }}
+          **Build Code:** ${{ needs.build.outputs.NEW_VERSION_CODE }} (was ${{ needs.build.outputs.VERSION_CODE }})
+          **Commit:** ${{ needs.build.outputs.SOURCE_SHA }}
           
           ### Changes
           - Automated release from ${{ github.ref_name }} branch
-          - Auto-incremented from ${{ steps.version_info.outputs.PREVIOUS_TAG }}
+          - Auto-incremented from ${{ needs.build.outputs.PREVIOUS_TAG }}
           - Updated app/build.gradle with new version numbers
           
           ### Installation
@@ -249,6 +201,6 @@ jobs:
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
         asset_path: app-release.apk
-        asset_name: grupetto-${{ steps.version_info.outputs.TAG_NAME }}.apk
+        asset_name: grupetto-${{ needs.build.outputs.TAG_NAME }}.apk
         asset_content_type: application/vnd.android.package-archive
     
