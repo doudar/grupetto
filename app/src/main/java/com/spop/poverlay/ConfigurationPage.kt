@@ -154,7 +154,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                                 Text(if (externalWatts != null) "EXTERNAL POWER" else "BUILT-IN POWER", fontSize = 10.sp, color = Color(0xFF9EAEC0))
                             }
                             Text(when (bike.mode) {
-                                com.spop.poverlay.control.ControlMode.Erg -> "Shift ${bike.wattsPerShift} W   ·   Gain ${"%.3f".format(java.util.Locale.US, bike.gain)}"
+                                com.spop.poverlay.control.ControlMode.Erg -> "Shift ${bike.wattsPerShift} W   ·   Gain ${"%.3f".format(java.util.Locale.US, bike.gain)}   ·   Ramp ${bike.rampRate}/s"
                                 com.spop.poverlay.control.ControlMode.Simulation -> "Shift ${bike.shiftSize} pts   ·   ${"%.1f".format(java.util.Locale.US, bike.inclineSensitivity)} pts / 1% incline"
                                 else -> "Shift ${bike.shiftSize} pts"
                             },
