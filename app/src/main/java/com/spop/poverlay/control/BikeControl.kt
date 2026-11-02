@@ -107,6 +107,11 @@ class BikeControl(
     // low-cadence riding does not restart the window.
     private var pedaling = false
     private var pedalingSince = 0L
+    // The wait ends early once the rider's cadence has been steady (SPIN_UP_STEADY_RPM over
+    // SPIN_UP_STEADY_MS, after at least SPIN_UP_MIN_MS of pedaling): on Nov 2 the rider was at a
+    // steady 92 rpm 3 s after starting but the fixed 15 s wait held 165 W back another 9 s.
+    private var spinUpDone = false
+    private val spinUpSamples = ArrayDeque<Pair<Long, Float>>()
     private var waitingTarget: Int? = null
     private var waitSince = 0L
     private var targetChangedAt = 0L
@@ -523,7 +528,30 @@ class BikeControl(
         }
     }
 
-    private fun spinningUp(): Boolean = !pedaling || clock() - pedalingSince < SPIN_UP_MS
+    private fun spinningUp(): Boolean = !pedaling || (!spinUpDone && clock() - pedalingSince < SPIN_UP_MS)
+
+    /**
+     * End the spin-up wait once cadence is steady. The 5 s average still trails a rider who has just
+     * settled, so it is re-seeded with the steady window's mean: the jump is sized for the cadence the
+     * rider is actually holding, not one still climbing from 0.
+     */
+    private fun checkSpinUpSteady(reading: BikeSample) {
+        if (!pedaling || spinUpDone) { if (!pedaling) spinUpSamples.clear(); return }
+        val now = clock()
+        spinUpSamples.addLast(now to reading.cadence)
+        while (spinUpSamples.isNotEmpty() && now - spinUpSamples.first().first > SPIN_UP_STEADY_MS) spinUpSamples.removeFirst()
+        if (now - pedalingSince < SPIN_UP_MIN_MS || now - pedalingSince >= SPIN_UP_MS) return
+        val oldest = spinUpSamples.firstOrNull() ?: return
+        if (spinUpSamples.size < SPIN_UP_STEADY_SAMPLES || now - oldest.first < SPIN_UP_STEADY_MS - SPIN_UP_STEADY_SLACK_MS) return
+        val low = spinUpSamples.minOf { it.second }
+        val high = spinUpSamples.maxOf { it.second }
+        if (low < MODEL_MIN_CADENCE || high - low > SPIN_UP_STEADY_RPM) return
+        spinUpDone = true
+        val mean = spinUpSamples.map { it.second }.average().toFloat()
+        cadenceAverage = mean
+        spinUpSamples.clear()
+        trace?.invoke("spin-up steady cad=${f1(mean)} range=${f1(high - low)} pedaling=${now - pedalingSince}ms")
+    }
 
     /** Forget any modeled jump: its ramp, settle hold and arrival wait. */
     private fun clearFeedForward() {
@@ -543,7 +571,7 @@ class BikeControl(
         clock() < feedForwardUntil || (feedForwardArrivalPending && clock() < feedForwardDeadline)
 
     private fun averageCadence(reading: BikeSample) {
-        if (!pedaling && reading.cadence >= PEDALING_START_RPM) { pedaling = true; pedalingSince = clock() }
+        if (!pedaling && reading.cadence >= PEDALING_START_RPM) { pedaling = true; pedalingSince = clock(); spinUpDone = false; spinUpSamples.clear() }
         if (reading.cadence < PEDALING_STOP_RPM) pedaling = false
         val previous = cadenceAverage
         val seconds = ((reading.timestamp - cadenceAverageTime) / 1000f).coerceIn(0f, 1f)
@@ -557,6 +585,8 @@ class BikeControl(
         if (cadenceForgotten && pedaling && reading.cadence >= MODEL_MIN_CADENCE) {
             cadenceForgotten = false
             pedalingSince = clock()
+            spinUpDone = false
+            spinUpSamples.clear()
         }
         if (reading.cadence < PEDALING_STOP_RPM) cadenceForgotten = false
         cadenceAverage = when {
@@ -567,6 +597,7 @@ class BikeControl(
             previous == null -> reading.cadence
             else -> previous + seconds / (CADENCE_AVERAGE_S + seconds) * (reading.cadence - previous)
         }
+        checkSpinUpSteady(reading)
     }
 
     /** Learn watts per level from readings taken after the resistance has been still for a while. */
@@ -605,6 +636,14 @@ class BikeControl(
         const val SNAPSHOT_MS = 1000L
         // No modeled jump until the rider has pedaled (40+ rpm) this long: their cadence is still rising.
         const val SPIN_UP_MS = 15_000L
+        // ...or less, once cadence has stayed within SPIN_UP_STEADY_RPM (all samples at 50+ rpm) for
+        // SPIN_UP_STEADY_MS, after at least SPIN_UP_MIN_MS of pedaling. 4 rpm in 3 s excludes a rider
+        // still climbing at more than ~1.3 rpm/s.
+        const val SPIN_UP_MIN_MS = 4_000L
+        const val SPIN_UP_STEADY_MS = 3_000L
+        const val SPIN_UP_STEADY_SLACK_MS = 1_000L
+        const val SPIN_UP_STEADY_SAMPLES = 3
+        const val SPIN_UP_STEADY_RPM = 4f
         const val PEDALING_START_RPM = 40f
         const val PEDALING_STOP_RPM = 25f
         const val MODEL_MIN_CADENCE = 50f
