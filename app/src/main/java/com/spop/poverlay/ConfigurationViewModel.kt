@@ -251,13 +251,14 @@ class ConfigurationViewModel(
     fun forgetPowerMeter(address: String) { powerMeters.forget(address) }
     val bikeControlState = bikeControl?.state ?: MutableStateFlow(com.spop.poverlay.control.ControlState())
 
-    fun setBikeTuning(shiftSize: Int, gain: Float, wattsPerShift: Int, inclineSensitivity: Float) {
-        bikeControl?.tune(shiftSize, gain, wattsPerShift, inclineSensitivity)
+    fun setBikeTuning(shiftSize: Int, gain: Float, wattsPerShift: Int, inclineSensitivity: Float, rampRate: Int) {
+        bikeControl?.tune(shiftSize, gain, wattsPerShift, inclineSensitivity, rampRate)
         if (isPreview) return
         bikeControl?.state?.value?.let { state ->
             getApplication<Application>().getSharedPreferences(ConfigurationRepository.SharedPrefsName, Context.MODE_PRIVATE)
                 .edit().putInt("bikeShiftSize", state.shiftSize).putFloat("bikeProportionalGain", state.gain)
-                .putInt("bikeWattsPerShift", state.wattsPerShift).putFloat("bikeInclineSensitivity", state.inclineSensitivity).apply()
+                .putInt("bikeWattsPerShift", state.wattsPerShift).putFloat("bikeInclineSensitivity", state.inclineSensitivity)
+                .putInt("bikeRampRate", state.rampRate).apply()
         }
     }
     fun startErg(watts: Int) {

@@ -28,6 +28,8 @@ data class ControlState(
     val shiftOffset: Int = 0,
     val shiftSize: Int = 2,
     val gain: Float = .007f,
+    /** Modeled-jump ramp speed in resistance levels per second (rider preference). */
+    val rampRate: Int = BikeControl.RAMP_RATE_DEFAULT,
     val permissionLostCount: Int = 0,
     val message: String = "Waiting for Bike+"
 )
@@ -79,6 +81,11 @@ class BikeControl(
     // Smooth ramp toward the modeled level: one level per 100 ms tick, so the motor turns
     // continuously instead of moving in bursts between write/echo round trips.
     private var rampLevel: Float? = null
+    private var rampUp = true
+    private var rampExtreme: Int? = null
+    // Readings one level against the ramp, counted per new sample: a single boundary blip is not a knob move.
+    private var againstSamples = 0
+    private var againstSampleTime = Long.MIN_VALUE
     private var rampTime = 0L
     private var rampOffSince = 0L
     private var steadyResistance = -1
@@ -87,6 +94,35 @@ class BikeControl(
     // change, and one rpm moves the modeled level by up to a whole step near 350 W.
     private var cadenceAverage: Float? = null
     private var cadenceAverageTime = 0L
+    // Since when the rider has been continuously below the model's range (but still pedaling):
+    // after LOW_CADENCE_FORGET_MS the old average no longer describes them.
+    private var belowModelSince: Long? = null
+    // Set when that average was forgotten: the next rise into the model's range is a fresh spin-up.
+    private var cadenceForgotten = false
+    private val cadenceHistory = CadenceHistory()
+    // When the rider (re)started pedaling. While they spin up the cadence average is still low:
+    // on Oct 31 a jump sized for a 55 rpm average put out ~285 W at 75 rpm. So a request for more
+    // power waits at the current level until SPIN_UP_MS of pedaling, then jumps for the real cadence.
+    // Pedaling starts at PEDALING_START_RPM and only stops below PEDALING_STOP_RPM, so a dip or
+    // low-cadence riding does not restart the window.
+    private var pedaling = false
+    private var pedalingSince = 0L
+    private var waitingTarget: Int? = null
+    private var waitSince = 0L
+    private var targetChangedAt = 0L
+
+    /**
+     * Debug trace of what ERG control sees and decides: controller commands, target changes
+     * (with the cadence and modeled level used), ramp/settle progress, every resistance write
+     * with its reason, stops, and a 1 s snapshot while a mode is active. Null (the default)
+     * costs nothing: Kotlin skips building the message on a null safe call.
+     */
+    @Volatile var trace: ((String) -> Unit)? = null
+    private var lastSnapshot = 0L
+    // Last feedback (trim) values, for the trace; cleared while a modeled jump owns the level.
+    private var lastFiltered: Float? = null
+    private var lastError: Float? = null
+    private var lastBand: Float? = null
 
     @Synchronized fun useExternalPower(reading: com.spop.poverlay.sensor.power.ExternalPowerReading?) {
         val next = reading?.takeIf { com.spop.poverlay.sensor.power.freshExternalPower(it, clock()) != null }
@@ -100,8 +136,10 @@ class BikeControl(
 
     @Synchronized fun tune(shiftSize: Int, gain: Float,
         wattsPerShift: Int = state.value.wattsPerShift,
-        inclineSensitivity: Float = state.value.inclineSensitivity) {
+        inclineSensitivity: Float = state.value.inclineSensitivity,
+        rampRate: Int = state.value.rampRate) {
         mutableState.value = state.value.copy(shiftSize = shiftSize.coerceIn(1, 10),
+            rampRate = rampRate.coerceIn(RAMP_RATE_MIN, RAMP_RATE_MAX),
             wattsPerShift = wattsPerShift.coerceIn(1, 50),
             inclineSensitivity = if (inclineSensitivity.isFinite()) inclineSensitivity.coerceIn(0f, 5f) else 2f,
             gain = if (gain.isFinite()) gain.coerceIn(.001f, .03f) else .007f)
@@ -125,18 +163,20 @@ class BikeControl(
     private fun fresh(): Boolean = supported && sample?.let { clock() - it.timestamp in 0..1500 } == true
     private fun unavailable(reason: String) {
         stop(reason)
+        // After a gap the rider may have stopped: spin-up protection applies again on reconnect.
+        pedaling = false
+        cadenceAverage = null
         mutableState.value = state.value.copy(connected = false)
     }
     @Synchronized fun stop(reason: String = "Manual control", releaseControl: Boolean = true) {
+        if (state.value.mode != ControlMode.Manual || pausedMode != null)
+            trace?.invoke("stop reason=\"$reason\" mode=${state.value.mode} level=${sample?.resistance}")
         val lostPermission = releaseControl && owner != null
         if (releaseControl) owner = null
         pausedMode = null
         expectedResistance = null
         filteredPower = null
-        feedForwardTarget = null
-        feedForwardUntil = 0L
-        feedForwardArrivalPending = false
-        rampLevel = null
+        clearFeedForward()
         mutableState.value = state.value.copy(mode = ControlMode.Manual, shiftOffset = 0, message = reason, externalControl = null,
             targetResistance = sample?.resistance ?: state.value.targetResistance,
             permissionLostCount = state.value.permissionLostCount + if (lostPermission) 1 else 0)
@@ -147,6 +187,7 @@ class BikeControl(
     private fun setMode(mode: ControlMode) {
         pausedMode = null
         if (state.value.mode != mode) {
+            trace?.invoke("mode ${state.value.mode}->$mode level=${sample!!.resistance}")
             requestedResistance = sample!!.resistance.toFloat()
             expectedResistance = sample!!.resistance
             commandTime = clock()
@@ -217,8 +258,16 @@ class BikeControl(
             lastSampleTime = reading.timestamp
             learnPowerModel(reading)
             averageCadence(reading)
+            cadenceHistory.record(reading.timestamp, reading.cadence)
         }
         if (state.value.mode == ControlMode.Manual) return
+        if (newSample && clock() - lastSnapshot >= SNAPSHOT_MS) {
+            lastSnapshot = clock()
+            trace?.invoke("snap mode=${state.value.mode} target=${state.value.targetWatts} power=${f1(reading.power)}" +
+                " ext=${externalPower?.watts} filt=${lastFiltered?.let(::f1)} cad=${f1(reading.cadence)}" +
+                " cadAvg=${cadenceAverage?.let(::f1)} level=${reading.resistance} req=${f1(requestedResistance)}" +
+                " err=${lastError?.let(::f1)} band=${lastBand?.let(::f1)} ff=${feedForwardActive()} ramp=${rampLevel?.let(::f1)}")
+        }
         if (rampLevel != null) { rampTick(reading); return }
         val dt = ((clock() - previousTick) / 1000f).coerceIn(0f, .4f)
         previousTick = clock()
@@ -229,9 +278,20 @@ class BikeControl(
             if (clock() - commandTime > ackTimeoutMs) stop("Resistance changed manually or command not acknowledged")
             return
         }
-        if (reading.cadence < 25f) {
+        if (reading.cadence < PEDALING_STOP_RPM) {
             filteredPower = null
             requestedResistance = reading.resistance.toFloat()
+            // A stop mid-ramp drops the expectation (the stopped bike may never finish the last
+            // write). Once the reading has been still for the acknowledgement window, expect it
+            // again, so a knob turned while stopped is still caught as a manual override.
+            if (expectedResistance == null && clock() - steadySince >= ACK_TIMEOUT_MS) {
+                expectedResistance = reading.resistance
+                commandTime = clock()
+                ackTimeoutMs = ACK_TIMEOUT_MS
+            }
+            // A stop ends any jump or settle hold: on restart the target is judged afresh,
+            // with spin-up protection, rather than resuming the old jump.
+            if (feedForwardTarget != null || feedForwardActive() || waitingTarget != null) clearFeedForward()
             return
         }
         val target = when (state.value.mode) {
@@ -239,21 +299,82 @@ class BikeControl(
                 val external = com.spop.poverlay.sensor.power.freshExternalPower(externalPower, clock())
                 val measured = external ?: reading.power
                 val targetWatts = state.value.targetWatts
+                // The wait is bounded: a rider who never reaches PEDALING_START_RPM still gets
+                // feedback after SPIN_UP_MS instead of holding forever.
+                if (feedForwardTarget != targetWatts && external == null && spinningUp() &&
+                    targetWatts - measured >= FEED_FORWARD_MIN_WATTS &&
+                    (waitingTarget != targetWatts || clock() - waitSince < SPIN_UP_MS)) {
+                    if (waitingTarget != targetWatts) {
+                        waitingTarget = targetWatts
+                        waitSince = clock()
+                        trace?.invoke("wait spin-up target=$targetWatts measured=${f1(measured)} level=${reading.resistance}" +
+                            " cad=${f1(reading.cadence)} cadAvg=${cadenceAverage?.let(::f1)}" +
+                            " pedaling=${if (!pedaling) "no" else "${clock() - pedalingSince}ms"}")
+                    }
+                    filteredPower = null
+                    requestedResistance = reading.resistance.toFloat()
+                    return
+                }
+                waitingTarget = null
                 if (feedForwardTarget != targetWatts) {
+                    val previousTarget = feedForwardTarget
                     feedForwardTarget = targetWatts
+                    targetChangedAt = clock()
+                    // Drops use the cadence held at about the new target (or the rider's typical
+                    // cadence): riders settle back from a hard effort's higher cadence within seconds.
+                    // The remembered cadence is floored at the current average minus DROP_CADENCE_ALLOWANCE:
+                    // that covers the post-effort settle (97 -> 89 rpm) but a remembered slow cadence
+                    // (a 60 rpm warm-up) cannot size a heavy "drop" for a rider now at 95 rpm.
+                    // Only a real easing-off is a drop: a lower target that is still above the measured power
+                    // (320 -> 300 W while the 150 -> 320 W ramp is in flight) is still a rise.
+                    val drop = previousTarget != null && targetWatts < previousTarget && measured > targetWatts
+                    val held = if (drop) cadenceHistory.cadenceAt(targetWatts, clock()) else null
+                    val typical = if (drop && held == null) cadenceHistory.typicalCadence(clock()) else null
+                    val remembered = held ?: typical
+                    val current = cadenceAverage ?: reading.cadence
+                    val floor = current - DROP_CADENCE_ALLOWANCE
+                    val cadence = if (drop && remembered != null) maxOf(remembered, floor) else current
+                    val cadenceSource = when {
+                        drop && remembered != null && floor > remembered -> "floor"
+                        held != null -> "held"
+                        typical != null -> "median2m"
+                        cadenceAverage != null -> "avg5s"
+                        else -> "reading"
+                    }
+                    // After spin-up, a rider still below the model's range (50 rpm) gets plain feedback.
+                    val lowCadence = cadenceAverage.let { it == null || it < MODEL_MIN_CADENCE }
                     // Only large requests jump; small ones keep the existing smooth trim.
                     // The model predicts Bike+ native power, so an external meter keeps pure feedback.
                     // Beyond the fitted range the model is unreliable: jump no higher than
                     // FEED_FORWARD_MAX_LEVEL and let ordinary feedback climb the rest.
-                    val level = if (external == null && abs(targetWatts - measured) >= FEED_FORWARD_MIN_WATTS)
-                        powerModel.nearestLevelFor(targetWatts.toFloat(), cadenceAverage ?: reading.cadence)?.coerceAtMost(FEED_FORWARD_MAX_LEVEL) else null
+                    // A drop, or any request while spinning up (only easing off gets here then), never adds resistance.
+                    val modeled = if (external == null && !lowCadence && abs(targetWatts - measured) >= FEED_FORWARD_MIN_WATTS)
+                        powerModel.nearestLevelFor(targetWatts.toFloat(), cadence)?.coerceAtMost(FEED_FORWARD_MAX_LEVEL)
+                            ?.let { if (drop || spinningUp()) minOf(it, reading.resistance) else it } else null
+                    // A "jump" to the current level is no jump: no settle hold, ordinary feedback takes it.
+                    val level = modeled?.takeIf { it != reading.resistance }
+                    trace?.invoke("target from=$previousTarget to=$targetWatts measured=${f1(measured)}" +
+                        " ext=${external != null} level=${reading.resistance} cad=${f1(reading.cadence)}" +
+                        " cadAvg=${cadenceAverage?.let(::f1)} cadUsed=${f1(cadence)} cadSrc=$cadenceSource" +
+                        " action=" + when {
+                            level != null -> "jump to=$level rate=${state.value.rampRate}/s"
+                            modeled != null -> "trim(at level)"
+                            external != null -> "trim(external power)"
+                            lowCadence -> "trim(low cadence)"
+                            abs(targetWatts - measured) < FEED_FORWARD_MIN_WATTS -> "trim(small change)"
+                            else -> "trim(no model)"
+                        })
                     if (level != null) {
                         feedForwardLevel = level.toFloat()
                         feedForwardUntil = clock() + FEED_FORWARD_SETTLE_MS
                         feedForwardArrivalPending = true
                         feedForwardDeadline = clock() + FEED_FORWARD_MAX_MS
                         filteredPower = null
+                        lastFiltered = null; lastError = null; lastBand = null
                         rampLevel = reading.resistance.toFloat()
+                        rampUp = level >= reading.resistance
+                        rampExtreme = null
+                        againstSamples = 0
                         rampTime = clock() - RAMP_TICK_MS
                         rampOffSince = 0L
                         rampTick(reading)
@@ -261,12 +382,17 @@ class BikeControl(
                     } else {
                         feedForwardUntil = 0L
                         feedForwardArrivalPending = false
+                        feedForwardDeadline = 0L
                     }
                 }
                 if (feedForwardArrivalPending && reading.resistance == feedForwardLevel.roundToInt()) {
+                    trace?.invoke("arrive level=${reading.resistance} after=${clock() - targetChangedAt}ms power=${f1(measured)}" +
+                        " cad=${f1(reading.cadence)} settle=${FEED_FORWARD_SETTLE_MS}ms")
                     feedForwardArrivalPending = false
                     feedForwardUntil = maxOf(feedForwardUntil, clock() + FEED_FORWARD_SETTLE_MS)
                 }
+                if (!feedForwardActive() && clock() - targetChangedAt >= STEADY_AFTER_CHANGE_MS && abs(measured - targetWatts) <= 7f)
+                    cadenceHistory.recordSteady(reading.timestamp, reading.cadence, targetWatts)
                 if (feedForwardActive()) feedForwardLevel
                 else {
                     val power = filteredPower?.let { it + dt / (2f + dt) * (measured - it) } ?: measured
@@ -278,6 +404,9 @@ class BikeControl(
                     val cadence = cadenceAverage ?: reading.cadence
                     val band = maxOf(MIN_DEADBAND_WATTS,
                         DEADBAND_LEVEL_FRACTION * (powerModel.wattsAt(level + 1, cadence) - powerModel.wattsAt(level, cadence)))
+                    lastFiltered = power
+                    lastError = error
+                    lastBand = band
                     requestedResistance + if (abs(error) <= band) 0f else state.value.gain * error * dt / .1f
                 }
             }
@@ -285,16 +414,18 @@ class BikeControl(
             ControlMode.Resistance -> state.value.targetResistance.toFloat()
             else -> return
         }
-        // Limit every mode to 3 Peloton resistance points / second, including mode changes.
-        // A modeled ERG jump travels faster, but not instantly: a one-command jump made the
-        // load-cell power overshoot by 10-15 W while the rider's cadence caught up. The
-        // acknowledgement window grows with each write's distance so a long slew is not
-        // mistaken for a knob override.
+        // Limit every mode outside a modeled ramp to 3 Peloton resistance points / second,
+        // including mode changes. Modeled jumps travel only through rampTick() at the rider's
+        // ramp speed; during the settle hold that follows, the level is already at its goal.
         val jump = state.value.mode == ControlMode.Erg && feedForwardActive()
-        val rate = if (jump) FEED_FORWARD_RATE else RESISTANCE_RATE
-        requestedResistance = target.coerceIn(requestedResistance - rate * dt, requestedResistance + rate * dt).coerceIn(0f, 100f)
+        requestedResistance = target.coerceIn(requestedResistance - RESISTANCE_RATE * dt, requestedResistance + RESISTANCE_RATE * dt).coerceIn(0f, 100f)
         val next = requestedResistance.roundToInt()
         if (next != reading.resistance) {
+            trace?.invoke("write level=$next from=${reading.resistance} why=" + when {
+                jump -> "settle"
+                state.value.mode == ControlMode.Erg -> "trim err=${lastError?.let(::f1)} band=${lastBand?.let(::f1)} filt=${lastFiltered?.let(::f1)}"
+                else -> state.value.mode.name.lowercase()
+            })
             if (!writeResistance(next)) { stop("Resistance command failed"); return }
             ackTimeoutMs = ACK_TIMEOUT_MS + if (jump) abs(next - reading.resistance) * ACK_MS_PER_LEVEL else 0L
             expectedResistance = next
@@ -310,12 +441,53 @@ class BikeControl(
     private fun rampTick(reading: BikeSample) {
         val ramp = rampLevel ?: return
         val goal = feedForwardLevel.roundToInt()
-        if (state.value.mode != ControlMode.Erg || state.value.targetWatts != feedForwardTarget || reading.cadence < 25f) {
-            rampLevel = null
-            requestedResistance = reading.resistance.toFloat()
-            expectedResistance = reading.resistance
+        if (state.value.mode != ControlMode.Erg || state.value.targetWatts != feedForwardTarget || reading.cadence < PEDALING_STOP_RPM) {
+            trace?.invoke("ramp cancelled at=${reading.resistance} goal=$goal mode=${state.value.mode}" +
+                " target=${state.value.targetWatts} cad=${f1(reading.cadence)}")
+            // Nothing of the cancelled jump may survive: no settle hold aimed at its goal.
+            // A changed target keeps feedForwardTarget so the next tick still sees the drop/rise.
+            val targetChanged = state.value.mode == ControlMode.Erg && state.value.targetWatts != feedForwardTarget
+            val keep = feedForwardTarget
+            clearFeedForward()
+            if (targetChanged) feedForwardTarget = keep
+            // The last ramp write is usually ahead of the echo: keep expecting it (with time to arrive)
+            // rather than the lagging reading, or the arriving echo would look like a knob override.
+            // A real knob move never reaches the written level, so it still times out and stops.
+            if (reading.cadence < PEDALING_STOP_RPM) {
+                // Stopped mid-ramp: the bike may not finish the last write while nobody pedals, so
+                // expect nothing; the next write after the rider restarts sets a fresh expectation.
+                requestedResistance = reading.resistance.toFloat()
+                expectedResistance = null
+                commandTime = clock()
+                previousTick = clock()
+                return
+            }
+            val written = expectedResistance ?: reading.resistance
+            requestedResistance = written.toFloat()
+            expectedResistance = written
+            ackTimeoutMs = ACK_TIMEOUT_MS + abs(written - reading.resistance) * ACK_MS_PER_LEVEL
             commandTime = clock()
             previousTick = clock()
+            return
+        }
+        // The echo trails the ramp but never runs against it: a reading that falls back from the
+        // furthest level reached (or rises, on a downward ramp) is the knob, so stop, whatever the size.
+        rampExtreme = rampExtreme?.let { if (rampUp) maxOf(it, reading.resistance) else minOf(it, reading.resistance) }
+            ?: reading.resistance
+        val against = if (rampUp) rampExtreme!! - reading.resistance else reading.resistance - rampExtreme!!
+        if (against <= 0) againstSamples = 0
+        else if (reading.timestamp != againstSampleTime) { againstSamples++; againstSampleTime = reading.timestamp }
+        // Two levels back at once, or one level back on two samples in a row (~400 ms): a single
+        // one-level blip at a level boundary is not treated as a knob move.
+        if (against >= KNOB_AGAINST_RAMP_LEVELS || (against >= 1 && againstSamples >= KNOB_AGAINST_RAMP_SAMPLES)) {
+            trace?.invoke("ramp knob override level=${reading.resistance} extreme=$rampExtreme goal=$goal")
+            stop("Resistance changed manually")
+            return
+        }
+        if (against >= 1) {
+            // Hold the ramp until the next reading: with no write in between, a knob turn stays
+            // visible and is confirmed, while a boundary blip clears by itself.
+            rampTime = clock()
             return
         }
         val expected = expectedResistance
@@ -329,11 +501,12 @@ class BikeControl(
         rampOffSince = 0L
         val seconds = ((clock() - rampTime) / 1000f).coerceIn(0f, .2f)
         rampTime = clock()
-        val step = RAMP_RATE * seconds
+        val step = state.value.rampRate * seconds
         val next = if (goal > ramp) minOf(ramp + step, goal.toFloat()) else maxOf(ramp - step, goal.toFloat())
         rampLevel = next
         val level = next.roundToInt()
         if (level != expectedResistance && level != reading.resistance) {
+            trace?.invoke("write level=$level from=${reading.resistance} why=ramp goal=$goal")
             if (!writeResistance(level)) { stop("Resistance command failed"); return }
             expectedResistance = level
             commandTime = clock()
@@ -341,20 +514,56 @@ class BikeControl(
         }
         requestedResistance = level.toFloat()
         if (level == goal) {
+            trace?.invoke("ramp done level=$level after=${clock() - targetChangedAt}ms")
             rampLevel = null
+            rampExtreme = null
             previousTick = clock()
+            // A slow ramp (3 levels/s) may use up the arrival deadline; give the bike its usual time.
+            feedForwardDeadline = maxOf(feedForwardDeadline, clock() + ARRIVAL_AFTER_RAMP_MS)
         }
+    }
+
+    private fun spinningUp(): Boolean = !pedaling || clock() - pedalingSince < SPIN_UP_MS
+
+    /** Forget any modeled jump: its ramp, settle hold and arrival wait. */
+    private fun clearFeedForward() {
+        feedForwardTarget = null
+        feedForwardUntil = 0L
+        feedForwardArrivalPending = false
+        feedForwardDeadline = 0L
+        rampLevel = null
+        rampExtreme = null
+        againstSamples = 0
+        // A stop (or anything else that drops the jump) also ends a spin-up wait: the next restart waits afresh.
+        waitingTarget = null
+        waitSince = 0L
     }
 
     private fun feedForwardActive(): Boolean =
         clock() < feedForwardUntil || (feedForwardArrivalPending && clock() < feedForwardDeadline)
 
     private fun averageCadence(reading: BikeSample) {
+        if (!pedaling && reading.cadence >= PEDALING_START_RPM) { pedaling = true; pedalingSince = clock() }
+        if (reading.cadence < PEDALING_STOP_RPM) pedaling = false
         val previous = cadenceAverage
         val seconds = ((reading.timestamp - cadenceAverageTime) / 1000f).coerceIn(0f, 1f)
         cadenceAverageTime = reading.timestamp
+        belowModelSince = if (reading.cadence >= MODEL_MIN_CADENCE || reading.cadence < PEDALING_STOP_RPM) null
+            else belowModelSince ?: clock()
+        val forgotten = belowModelSince?.let { clock() - it >= LOW_CADENCE_FORGET_MS } == true
+        if (forgotten) cadenceForgotten = true
+        // After a long low-cadence stretch the rider is spinning up again: restart the spin-up window
+        // so a jump is not sized from the first sample above 50 rpm (Fable review: 55 rpm -> level 75).
+        if (cadenceForgotten && pedaling && reading.cadence >= MODEL_MIN_CADENCE) {
+            cadenceForgotten = false
+            pedalingSince = clock()
+        }
+        if (reading.cadence < PEDALING_STOP_RPM) cadenceForgotten = false
         cadenceAverage = when {
-            reading.cadence < 50f -> null
+            reading.cadence < PEDALING_STOP_RPM -> null
+            forgotten -> null
+            // The power model is only valid from 50 rpm: slower samples neither feed nor reset the average.
+            reading.cadence < MODEL_MIN_CADENCE -> previous
             previous == null -> reading.cadence
             else -> previous + seconds / (CADENCE_AVERAGE_S + seconds) * (reading.cadence - previous)
         }
@@ -374,16 +583,18 @@ class BikeControl(
         const val RESISTANCE_RATE = 3f
         // Highest level a modeled jump may target; the fit covers levels 18-63.
         const val FEED_FORWARD_MAX_LEVEL = 75
-        // Nominal modeled-jump rate; echo waits make the real slew roughly 10 points/s.
-        const val FEED_FORWARD_RATE = 16f
-        // Modeled jumps ramp at 10 levels/s, one level per 100 ms tick (43% -> 58% in 1.5 s).
-        const val RAMP_RATE = 10f
+        // Modeled jumps ramp at 10 levels/s by default, one level per 100 ms tick (43% -> 58% in 1.5 s).
+        // How abrupt a jump should feel is a rider preference, so the rate is adjustable (3-20 levels/s).
+        const val RAMP_RATE_DEFAULT = 10
+        const val RAMP_RATE_MIN = 3
+        const val RAMP_RATE_MAX = 20
         const val RAMP_TICK_MS = 100L
         const val RAMP_ECHO_LAG_LEVELS = 5
         // ERG holds within half a resistance level's watts, never less than 3 W.
         const val DEADBAND_LEVEL_FRACTION = .5f
         const val MIN_DEADBAND_WATTS = 3f
         const val CADENCE_AVERAGE_S = 5f
+        const val STEADY_AFTER_CHANGE_MS = 8000L
         const val ACK_TIMEOUT_MS = 1500L
         const val ACK_MS_PER_LEVEL = 100L
         const val FEED_FORWARD_MIN_WATTS = 15
@@ -391,11 +602,52 @@ class BikeControl(
         const val FEED_FORWARD_SETTLE_MS = 4500L
         const val FEED_FORWARD_MAX_MS = 10_000L
         const val LEARN_SETTLE_MS = 2500L
+        const val SNAPSHOT_MS = 1000L
+        // No modeled jump until the rider has pedaled (40+ rpm) this long: their cadence is still rising.
+        const val SPIN_UP_MS = 15_000L
+        const val PEDALING_START_RPM = 40f
+        const val PEDALING_STOP_RPM = 25f
+        const val MODEL_MIN_CADENCE = 50f
+        // A drop's remembered cadence may sit at most this far below the current average.
+        const val DROP_CADENCE_ALLOWANCE = 8f
+        // A reading this far back against the ramp direction is a knob move, not echo lag: the echo
+        // trails but never reverses (0 reversals in 26 ramps on the Oct 31 rides). One level back
+        // counts only when it persists for KNOB_AGAINST_RAMP_SAMPLES samples (a boundary blip does not).
+        const val KNOB_AGAINST_RAMP_LEVELS = 2
+        const val KNOB_AGAINST_RAMP_SAMPLES = 2
+        // Continuously below 50 rpm (still pedaling) this long: forget the old cadence average.
+        const val LOW_CADENCE_FORGET_MS = 30_000L
+        // After a ramp ends, wait this long for the bike to report the goal before falling back to feedback.
+        const val ARRIVAL_AFTER_RAMP_MS = 8_500L
+        private fun f1(value: Float) = (value * 10f).roundToInt() / 10f
     }
 
     /** FTMS v1.0.1 control point. Returns the protocol result and optional Machine Status. */
     data class Reply(val result: Int, val status: ByteArray? = null)
     @Synchronized fun procedure(client: String, bytes: ByteArray): Reply {
+        val reply = runProcedure(client, bytes)
+        trace?.invoke("cmd client=$client bytes=${bytes.joinToString(" ") { "%02X".format(it) }} " +
+            describeCommand(bytes) + " result=${reply.result} mode=${state.value.mode}")
+        return reply
+    }
+
+    private fun describeCommand(bytes: ByteArray): String {
+        fun signed(index: Int) = if (bytes.size < index + 2) null
+            else ((bytes[index].toInt() and 255) or (bytes[index + 1].toInt() shl 8)).toShort().toInt()
+        return when (bytes.firstOrNull()?.toInt()?.and(255)) {
+            0 -> "op=request-control"
+            1 -> "op=reset"
+            4 -> "op=set-resistance level=${signed(1)?.let { it / 10f }}"
+            5 -> "op=set-power watts=${signed(1)}"
+            7 -> "op=start-resume"
+            8 -> "op=stop-pause param=${bytes.getOrNull(1)}"
+            0x11 -> "op=sim grade=${signed(3)?.let { it / 100f }} wind=${signed(1)?.let { it / 1000f }}"
+            null -> "op=empty"
+            else -> "op=${"%02X".format(bytes[0])}"
+        }
+    }
+
+    private fun runProcedure(client: String, bytes: ByteArray): Reply {
         val op = bytes.firstOrNull()?.toInt()?.and(255) ?: return Reply(3)
         val size = when (op) { 0, 1, 7 -> 1; 8 -> 2; 4, 5 -> 3; 0x11 -> 7; else -> return Reply(2) }
         if (bytes.size != size) return Reply(3)

@@ -29,13 +29,17 @@ class PelotonBikePlusSensorInterface(val context: Context, controlSupported: Boo
     @Volatile private var activeSensor: BikePlusCombinedSensor? = null
     override val bikeControl = com.spop.poverlay.control.BikeControl(
         controlSupported, android.os.SystemClock::elapsedRealtime
-    ) { activeSensor?.setResistance(it) == true }
+    ) { activeSensor?.setResistance(it) == true }.apply {
+        // Debug builds log every ERG input and decision under the "ErgTrace" logcat tag.
+        if (com.spop.poverlay.BuildConfig.DEBUG) trace = { timber.log.Timber.tag("ErgTrace").d(it) }
+    }
 
     init {
         if (controlSupported) {
             val preferences = context.getSharedPreferences(com.spop.poverlay.ConfigurationRepository.SharedPrefsName, Context.MODE_PRIVATE)
             bikeControl.tune(preferences.getInt("bikeShiftSize", 2), preferences.getFloat("bikeProportionalGain", .007f),
-                preferences.getInt("bikeWattsPerShift", 10), preferences.getFloat("bikeInclineSensitivity", 2f))
+                preferences.getInt("bikeWattsPerShift", 10), preferences.getFloat("bikeInclineSensitivity", 2f),
+                preferences.getInt("bikeRampRate", com.spop.poverlay.control.BikeControl.RAMP_RATE_DEFAULT))
             launch { while (isActive) { bikeControl.tick(); delay(100) } }
         }
     }
