@@ -111,7 +111,7 @@ jobs:
         CODE=$(sed -n "s/.*versionCode='\\([0-9]*\\)'.*/\\1/p" apk-badging.txt | head -1)
         test "$CODE" -gt 51
         sha256sum "$APK" | tee -a apk-verification.txt
-        echo "Source PR90: 9cf8306f3222abf1eefc934b5d25e22ea55cdaed" | tee -a apk-verification.txt
+        echo "Source PR90: e6147d4de99d39e6158888c44db4624c12781569" | tee -a apk-verification.txt
         echo "Source PR89: 173f3a6e8b5407204184913f49a0480540201ecd" | tee -a apk-verification.txt
         git rev-parse HEAD | tee -a apk-verification.txt
 
