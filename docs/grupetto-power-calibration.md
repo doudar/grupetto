@@ -166,8 +166,21 @@ the exact saved gains, folds existing manual adjustments into targets once, keep
 original readings, and discards the offsets. Draft and saved activation snapshots
 migrate independently. Schema-2 backups store the shared surface and timestamp;
 older app versions reject them instead of silently applying old offset semantics.
+Valid old snapshots are rewritten atomically at startup, including the older
+separate draft/active files. Versions v0.0.49 and v0.0.50 use the supported schema-1
+format. If persisted calibration is malformed, oversized, or uses an unsupported
+format, startup keeps a recoverable copy, writes an empty calibration snapshot,
+and turns correction off. An on-disk reset marker prevents old captures from
+reappearing after an interrupted upgrade. Unrelated settings and the separate raw
+sensor-board capture remain unchanged. Real storage I/O failures do not authorize
+discarding data; correction stays off with an error instead. Explicit backup
+imports still reject invalid files without replacing the current calibration.
+
 Export a backup before testing this branch if you may want to return to an older
-version. The separate raw sensor-board capture store is unchanged.
+version. CI tests the source-built v0.0.49/v0.0.50 debug APKs with the same disposable
+key, then installs the new APK in place without clearing data. The old binary
+writes the smoothed calibration used by the migration assertions; these tests do
+not substitute for matching the production APK signature on the actual bike.
 
 ### Recorded fit
 
