@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,7 +51,7 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
             confirmButton = { TextButton({ confirmClear = false; onClear() }) { Text("Clear Grupetto table", color = MaterialTheme.colors.error) } },
             dismissButton = {
                 val keepFocus = remember { FocusRequester() }
-                TextButton({ confirmClear = false }, Modifier.focusRequester(keepFocus)) { Text("Keep table") }
+                TextButton({ confirmClear = false }, Modifier.focusProperties { canFocus = true }.focusRequester(keepFocus)) { Text("Keep table") }
                 // The dialog owns a separate composition. Request only after its button is attached.
                 LaunchedEffect(Unit) {
                     withFrameNanos { }
