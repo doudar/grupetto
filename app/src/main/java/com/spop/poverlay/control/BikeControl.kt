@@ -328,7 +328,7 @@ class BikeControl(
                     // Drops use the cadence held at about the new target (or the rider's typical
                     // cadence): riders settle back from a hard effort's higher cadence within seconds.
                     // The remembered cadence is floored at the current average minus DROP_CADENCE_ALLOWANCE:
-                    // that covers the post-effort settle (97 -> 89 rpm) but a remembered slow cadence
+                    // that covers the post-effort settle (102 -> 88 rpm) but a remembered slow cadence
                     // (a 60 rpm warm-up) cannot size a heavy "drop" for a rider now at 95 rpm.
                     // Only a real easing-off is a drop: a lower target that is still above the measured power
                     // (320 -> 300 W while the 150 -> 320 W ramp is in flight) is still a rise.
@@ -647,8 +647,9 @@ class BikeControl(
         const val PEDALING_START_RPM = 40f
         const val PEDALING_STOP_RPM = 25f
         const val MODEL_MIN_CADENCE = 50f
-        // A drop's remembered cadence may sit at most this far below the current average.
-        const val DROP_CADENCE_ALLOWANCE = 8f
+        // A drop's remembered cadence may sit at most this far below the current average. 8 rpm left
+        // drops after 99-102 rpm efforts a level light (riders settle to 88-89 rpm): 10-15 W dips on Nov 2-3.
+        const val DROP_CADENCE_ALLOWANCE = 15f
         // A reading this far back against the ramp direction is a knob move, not echo lag: the echo
         // trails but never reverses (0 reversals in 26 ramps on the Oct 31 rides). One level back
         // counts only when it persists for KNOB_AGAINST_RAMP_SAMPLES samples (a boundary blip does not).

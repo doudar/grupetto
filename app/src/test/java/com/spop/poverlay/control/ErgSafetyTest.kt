@@ -105,6 +105,20 @@ class ErgSafetyTest {
         assertEquals(expected.toDouble(), resistance.toDouble(), 1.0)
     }
 
+    @Test fun dropAfterA102RpmEffortStillUsesHeldCadence() {
+        // Nov 3: 362 W spun at 102 rpm, recovery settles to 88. With an 8 rpm allowance the drop was
+        // floored at 94 rpm, a level light (dip to ~150 W); 15 rpm lets the held 88 rpm through.
+        ride(20_000, 88f)
+        assertTrue(control.localErg(165)); ride(40_000, 88f)
+        assertTrue(control.localErg(362)); ride(30_000, 102f)
+        assertTrue(control.localErg(165)); ride(1_000, 102f)
+        val jump = lines.last { "target from=362 to=165" in it }
+        assertTrue(jump, "cadSrc=held" in jump)
+        val expected = control.powerModel.nearestLevelFor(165f, 88f)!!
+        ride(4_000, 88f)
+        assertEquals(expected.toDouble(), resistance.toDouble(), 1.0)
+    }
+
     @Test fun cancelledRampDoesNotResumeAsAFastJump() {
         resistance = 44
         ride(20_000, 90f)
