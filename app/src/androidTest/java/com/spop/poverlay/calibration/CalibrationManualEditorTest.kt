@@ -70,13 +70,13 @@ class CalibrationManualEditorTest {
         compose.setContent { MaterialTheme(colors = darkColors()) {
             CalibrationManualEditor(table(), true, { _, _ -> saves++ }, { closed = true })
         } }
-        listOf("Fill all gaps", "Smooth whole table", "Reduce all 20%", "Restore recorded fit").forEach {
+        listOf("Fill all gaps", "Smooth whole table", "Reduce all 20%", "Reset corrections").forEach {
             compose.onNodeWithText(it).assertIsDisplayed()
         }
         compose.onNodeWithText("Fill all gaps").performClick()
         compose.onNodeWithText("Fill all gaps").assertIsNotEnabled()
-        compose.onNodeWithText("Restore recorded fit").performClick()
-        compose.onNodeWithText("Fill all gaps").assertIsEnabled()
+        compose.onNodeWithText("Reset corrections").performClick()
+        compose.onNodeWithText("Fill all gaps").assertIsNotEnabled()
         compose.onNodeWithText("Undo").performClick()
         compose.onNodeWithText("Zoom in").performClick()
         compose.onNodeWithText("Fit table").assertExists().performClick()
@@ -108,14 +108,15 @@ class CalibrationManualEditorTest {
                 CalibrationManualEdit.percent(history.current.gains[index]), 1e-9) }
         }
         compose.onNodeWithText("Compare original").performClick()
-        listOf("Smooth whole table", "Reduce all 20%", "Restore recorded fit").forEach {
+        listOf("Smooth whole table", "Reduce all 20%", "Reset corrections").forEach {
             compose.onNodeWithText(it).assertIsNotEnabled()
         }
         compose.onNodeWithText("Show edited").performClick()
-        compose.onNodeWithText("Restore recorded fit").performClick()
+        compose.onNodeWithText("Reset corrections").performClick()
         compose.runOnIdle {
-            original.gains.indices.forEach { assertEquals(original.gains[it], history.current.gains[it], 1e-12) }
-            assertTrue(history.current.manualCoverage.isEmpty())
+            assertTrue(history.current.gains.all { it == 0.0 })
+            assertEquals(496, history.current.correctionPercent.count { it != null })
+            assertTrue(history.current.ready)
         }
     }
 
