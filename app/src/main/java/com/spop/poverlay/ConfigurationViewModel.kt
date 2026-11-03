@@ -15,6 +15,7 @@ import androidx.lifecycle.viewModelScope
 import com.spop.poverlay.overlay.OverlayService
 import com.spop.poverlay.releases.Release
 import com.spop.poverlay.releases.ReleaseChecker
+import com.spop.poverlay.sensor.averageCadenceBuckets
 import com.spop.poverlay.sensor.heartrate.HeartRateDevice
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import kotlinx.coroutines.Dispatchers
@@ -234,7 +235,7 @@ class ConfigurationViewModel(
     val powerMeterSaved = powerMeters.savedDevices
     val powerMeterScanning = powerMeters.scanning
     val livePowerDisplay = (application as GrupettoApplication).sensorInterface.displayPower
-    val liveCadence = (application as GrupettoApplication).sensorInterface.cadence
+    val liveCadence = (application as GrupettoApplication).sensorInterface.cadence.averageCadenceBuckets()
     val liveResistance = (application as GrupettoApplication).sensorInterface.resistance
     val liveSpeed = (application as GrupettoApplication).sensorInterface.speed
     val liveIncline = (application as GrupettoApplication).sensorInterface.incline
