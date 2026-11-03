@@ -44,13 +44,19 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
     var settingsOpen by remember { mutableStateOf(false) }
     if (settingsOpen && onCaptureSettings != null) CalibrationSettingsDialog(captureSettings, onCaptureSettings) { settingsOpen = false }
     if (confirmClear) {
-        val keepFocus = remember { FocusRequester() }
         AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text("Clear Grupetto table?") },
             text = { Text("Delete all saved Grupetto efforts and manual edits, stop recording, and turn correction off? " +
                 "This cannot be undone without loading an exported backup. The bike's own calibration and exported backups are unchanged.") },
             confirmButton = { TextButton({ confirmClear = false; onClear() }) { Text("Clear Grupetto table", color = MaterialTheme.colors.error) } },
-            dismissButton = { TextButton({ confirmClear = false }, Modifier.focusRequester(keepFocus)) { Text("Keep table") } })
-        LaunchedEffect(Unit) { keepFocus.requestFocus() }
+            dismissButton = {
+                val keepFocus = remember { FocusRequester() }
+                TextButton({ confirmClear = false }, Modifier.focusRequester(keepFocus)) { Text("Keep table") }
+                // The dialog owns a separate composition. Request only after its button is attached.
+                LaunchedEffect(Unit) {
+                    withFrameNanos { }
+                    keepFocus.requestFocus()
+                }
+            })
     }
     if (showInformation) AlertDialog(onDismissRequest = { showInformation = false },
         title = { Text("Calibration information") }, text = {
