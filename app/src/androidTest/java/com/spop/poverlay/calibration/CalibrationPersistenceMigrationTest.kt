@@ -200,7 +200,7 @@ class CalibrationPersistenceMigrationTest {
             val recorded = observations.getJSONObject(index)
             assertEquals(recorded.getDouble("pedalWatts"), sample.measuredPedalWatts, 0.0)
             assertEquals(recorded.getLong("capturedAt"), sample.capturedAt)
-            assertEquals(migrated.saved.table.corrected(sample.nativeWatts, sample.ad, sample.rpm), sample.pedalWatts, 0.0)
+            assertEquals(migrated.saved.table!!.corrected(sample.nativeWatts, sample.ad, sample.rpm), sample.pedalWatts, 0.0)
         }
         val upgraded = JSONObject(File(directory, "grupetto-calibration.json").readText())
         assertEquals(2, upgraded.getInt("schema"))

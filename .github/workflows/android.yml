@@ -35,8 +35,8 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    - name: Run unit tests
-      run: bash ./gradlew testDebugUnitTest
+    - name: Run unit tests and compile instrumentation
+      run: bash ./gradlew testDebugUnitTest compileDebugAndroidTestKotlin
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
@@ -239,13 +239,13 @@ jobs:
         script: |
           adb shell wm size 1920x1080
           adb shell wm density 240
-          bash ./gradlew connectedDebugAndroidTest
+          bash -c 'set +e; bash ./gradlew connectedDebugAndroidTest; result=$?; adb pull /sdcard/Android/data/com.spop.poverlay/files/calibration-test-diagnostics app/build/reports/androidTests/diagnostics || true; exit "$result"'
     - name: Preserve instrumentation test reports
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: calibration-instrumentation-reports
-        path: app/build/reports/androidTests/connected
+        path: app/build/reports/androidTests
 
   calibration-upgrade-tests:
     runs-on: ubuntu-latest

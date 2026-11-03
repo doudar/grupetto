@@ -1,16 +1,115 @@
 package com.spop.poverlay.calibration
 
+import android.graphics.Bitmap
+import android.graphics.Rect
+import android.os.Build
+import android.view.View
+import android.view.ViewGroup
+import android.view.WindowManager
+import android.view.inspector.WindowInspector
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.darkColors
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.junit4.StateRestorationTester
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
+import org.junit.rules.TestWatcher
+import org.junit.runner.Description
+import java.io.File
 
 class CalibrationManualEditorTest {
-    @get:Rule val compose = createComposeRule()
+    private val compose = createComposeRule()
+    private val failureDiagnostics = object : TestWatcher() {
+        override fun failed(error: Throwable, description: Description) {
+            // Capture before Compose disposes the dialog. Diagnostic failures must
+            // never hide the original assertion or change the behavior under test.
+            runCatching { captureFailure(description, error) }.onFailure {
+                android.util.Log.e("ManualEditorTest", "Could not save failure diagnostics", it)
+            }
+        }
+    }
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(compose).around(failureDiagnostics)
+
+    private fun captureFailure(description: Description, failure: Throwable) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val directory = File(checkNotNull(context.getExternalFilesDir(null)), "calibration-test-diagnostics")
+        check(directory.isDirectory || directory.mkdirs())
+        val name = description.methodName.replace(Regex("[^A-Za-z0-9_.-]"), "_")
+        val report = StringBuilder().appendLine(description.displayName).appendLine(failure.stackTraceToString())
+        fun section(title: String, capture: () -> String) {
+            report.appendLine("\n=== $title ===")
+            report.appendLine(runCatching(capture).getOrElse { "Capture failed: ${it.stackTraceToString()}" })
+        }
+        // This is the actual device screen, including dialog clipping/system bars,
+        // rather than a rendering of only the Compose root's nominal bounds.
+        section("Device screenshot") {
+            val bitmap = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+            try {
+                File(directory, "$name.png").outputStream().use {
+                    check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+                }
+                "${bitmap.width} x ${bitmap.height} pixels"
+            } finally { bitmap.recycle() }
+        }
+        section("Display and configuration") {
+            val display = android.util.DisplayMetrics()
+            @Suppress("DEPRECATION")
+            (context.getSystemService(android.content.Context.WINDOW_SERVICE) as WindowManager)
+                .defaultDisplay.getRealMetrics(display)
+            "Real display: $display\nResources: ${context.resources.displayMetrics}\n" +
+                "Configuration: ${context.resources.configuration}"
+        }
+        section("Native window and view geometry") {
+            var details = "WindowInspector requires API 29 or later."
+            if (Build.VERSION.SDK_INT >= 29) instrumentation.runOnMainSync {
+                details = buildString {
+                    WindowInspector.getGlobalWindowViews().take(10).forEachIndexed { index, root ->
+                        appendLine("Window $index: ${root.layoutParams}")
+                        val insets = ViewCompat.getRootWindowInsets(root)
+                        appendLine("System bars: ${insets?.getInsets(WindowInsetsCompat.Type.systemBars())}; " +
+                            "IME: ${insets?.getInsets(WindowInsetsCompat.Type.ime())}; " +
+                            "IME visible: ${insets?.isVisible(WindowInsetsCompat.Type.ime())}")
+                        var remaining = 100
+                        fun visit(view: View, depth: Int) {
+                            if (remaining-- <= 0 || depth > 12) return
+                            val location = IntArray(2).also(view::getLocationOnScreen)
+                            val visible = Rect()
+                            val isVisible = view.getGlobalVisibleRect(visible)
+                            val frame = Rect().also(view::getWindowVisibleDisplayFrame)
+                            appendLine("${"  ".repeat(depth)}${view.javaClass.name}: " +
+                                "size=${view.width}x${view.height}, measured=${view.measuredWidth}x${view.measuredHeight}, " +
+                                "screen=${location.contentToString()}, shown=${view.isShown}, " +
+                                "globalVisible=$isVisible/$visible, windowFrame=$frame, layout=${view.layoutParams}")
+                            if (view is ViewGroup) for (child in 0 until view.childCount) visit(view.getChildAt(child), depth + 1)
+                        }
+                        visit(root, 0)
+                    }
+                }
+            }
+            details
+        }
+        for (unmerged in listOf(false, true)) section("Semantics (unmerged=$unmerged)") {
+            compose.onAllNodes(isRoot(), useUnmergedTree = unmerged).printToString(maxDepth = 40).take(500_000)
+        }
+        section("Important bounds in window and root") {
+            val matcher = hasTestTag("power-table-studio") or hasTestTag("calibration-grid-viewport") or
+                hasText("Correction (%)") or hasText("Fill all gaps") or hasText("Set correction") or
+                hasContentDescription("Point 0, 45 rpm,", substring = true) or
+                hasContentDescription("Point 30, 120 rpm,", substring = true)
+            compose.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().joinToString("\n") {
+                "Node ${it.id}: window=${it.boundsInWindow}, root=${it.boundsInRoot}, size=${it.size}; ${it.config}"
+            }
+        }
+        File(directory, "$name.txt").writeText(report.toString())
+    }
+
     private fun clickAfterKeyboardLayoutSettles(label: String) {
         var lastBounds: androidx.compose.ui.geometry.Rect? = null
         var stableSince = android.os.SystemClock.uptimeMillis()
