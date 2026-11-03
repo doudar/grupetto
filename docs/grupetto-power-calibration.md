@@ -52,14 +52,14 @@ while retaining 48 dp touch targets. Clear opens an explicit confirmation with
 **Keep table** initially focused. Cancel, Back, or dismissal leaves everything intact.
 Only **Clear Grupetto table** deletes saved Grupetto efforts and manual edits, stops
 recording, and disables correction; exported backups and bike calibration are unchanged.
-The table page compares **Before calibration** and **After calibration** as mean
+The table page compares **Raw bike error** and **Corrected error** as mean
 absolute error in watts against the pedals, on exactly the same saved paired
-efforts. After uses the actual active snapshot, not the newer draft. When correction
+efforts. Corrected error uses the actual active snapshot, not the newer draft. When correction
 is off, it is labeled **preview** and uses the table Activate would select, or the
 unfinished draft when no validated table exists. Unknown values show a dash.
 This descriptive comparison updates with recording and activation. Both it and
-the separate held-out RMSE are informational; neither gates table updates.
-Capture → Review shows the Grupetto draft's measured cells, validation error and
+the separate saved-effort RMSE are informational; neither gates table updates.
+Capture → Review shows the Grupetto draft's measured cells, saved-effort error and
 readiness, with a shortcut to its controls. The rider flow does not expose the
 experimental sensor-board fit or write controls. Raw paired efforts remain saved
 for future work translating Grupetto calibration into bike-table offsets.
@@ -311,3 +311,43 @@ to or been validated on the real board**. An aligned knob can still move between
 the final read and the capture command; readback detects a mismatch and stops.
 No board write occurs during recording, fitting, activation of the Grupetto table,
 or installation. Board setup disables the separate Grupetto correction.
+
+### Optional refit from retained original measurements
+
+While recording is paused, open **Calibration information → Refit saved data...**.
+This explicit offline operation uses all eligible retained efforts (at most 3600),
+not only each cell's rolling ten-value live weight. It does not run automatically
+between rides. The preview compares the current and fitted table's mean absolute
+error, signed bias (corrected minus pedals), RMSE, fitted cells and bound hits.
+**Apply refit** changes the shared table only after confirmation; **Cancel** leaves
+it unchanged. **Undo refit** restores the complete previous saved snapshots while
+no later calibration operation has changed them. Applying while active updates
+live compensation; applying while inactive leaves correction off. Normal readiness
+is preserved rather than bypassed.
+
+The objective is bounded least absolute deviation in each already populated cell:
+minimize `sum(abs(nativeWatts * gain - originalPedalWatts))`, with gain in
+0.65–1.35. The optimum is the weighted median of original-pedal/native ratios,
+weighted by native watts. When half the weight lies on either side of an interval,
+the old gain is projected into that interval, preserving an already optimal value.
+No global polynomial, neighbor smoothing, or fictitious zero-error claim is used.
+Cells without eligible evidence retain their values; unfilled cells remain unfilled,
+although their nearest-cell fallback output can change when its source is refitted.
+
+Refit leaves original observations and edited targets untouched. It preserves the
+processed-history boundary (advancing only to cover retained data it consumes)
+and each cell's live count, raising it to the smaller of ten and its fit-evidence
+count if larger. Subsequent live recording therefore still uses the same
+first-ten average / tenth-weight update, not a permanent offline override.
+Record, Clear, imports, edits, activation or baseline changes invalidate stale
+previews. Fitting runs off the UI thread; disk save completes before publication.
+
+#### Exported measurement fields
+
+For backward compatibility, exported `pedalWatts` is the calibration target. Before
+any manual target change it is the original pedal measurement. Once an edit
+changes that target, `recordedPedalWatts` retains the immutable original measurement.
+For example, native 195 W, target 191.69 W and recorded 177 W mean a 177 W pedal
+observation with a later 191.69 W calibration target, not two simultaneous pedal
+readings. Displayed errors and optional refit always use `recordedPedalWatts` when
+present, otherwise `pedalWatts`. Live recording uses newly captured pedal readings.

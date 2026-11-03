@@ -36,7 +36,8 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
     fileControls: @Composable () -> Unit = {}, onManualEdit: (() -> Unit)? = null,
     livePosition: CalibrationTablePosition? = null,
     captureSettings: CalibrationCaptureSettings = CalibrationCaptureSettings(),
-    onCaptureSettings: ((CalibrationCaptureSettings) -> Unit)? = null) {
+    onCaptureSettings: ((CalibrationCaptureSettings) -> Unit)? = null,
+    onRefit: (() -> Unit)? = null) {
     var confirmClear by remember { mutableStateOf(false) }
     var showInformation by remember { mutableStateOf(false) }
     var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
@@ -64,6 +65,10 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
             Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(state.message)
+                if (onRefit != null) OutlinedButton({ showInformation = false; onRefit() },
+                    enabled = !state.recording && (state.displayTable ?: state.table) != null) {
+                    Text("Refit saved data…")
+                }
                 Text("Record + Activate: each usable saved effort updates the active table automatically. " +
                     "Activate is still required the first time and after loading a backup.")
                 Text("Colors show the ${if (state.active) "active" else "preview"} correction as a percentage of raw bike watts. " +
@@ -78,6 +83,7 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
                     Text(String.format(Locale.US, "Saved-effort RMSE %.2f to %.2f W", table.beforeRmse, table.afterRmse))
                     if (!table.ready) Text("Draft needs more resistances and cadences.")
                 }
+                Text("In exported files, pedalWatts is the editable calibration target. recordedPedalWatts keeps the original pedal measurement after an edit; when absent, pedalWatts is still the original. Error scores and refitting use the original measurement.")
                 Text("Error scores describe the saved efforts and are informational. Pulse: cyan shows your current cell even when not recording; orange settles, yellow holds, green saves. A separate pulsing green border marks the nearest filled cell used when your current cell has no data.")
             }
         }, confirmButton = { TextButton({ showInformation = false }) { Text("Close") } })

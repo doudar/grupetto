@@ -178,6 +178,18 @@ class ConfigurationViewModel(
     suspend fun exportCalibrationBackup() = grupettoCalibration.exportBackup()
     suspend fun saveManualCalibration(expected: com.spop.poverlay.calibration.GrupettoCalibrationTable,
         edited: com.spop.poverlay.calibration.GrupettoCalibrationTable) = grupettoCalibration.saveManualEdit(expected, edited)
+    suspend fun previewCalibrationRefit(): com.spop.poverlay.calibration.CalibrationRefitPreview {
+        check(!calibration.state.value.enabled && !boardSetupRunning()) { "Pause calibration capture before refitting." }
+        return grupettoCalibration.prepareRefit()
+    }
+    suspend fun applyCalibrationRefit(preview: com.spop.poverlay.calibration.CalibrationRefitPreview) {
+        check(!calibration.state.value.enabled && !boardSetupRunning()) { "Pause calibration capture before applying a refit." }
+        grupettoCalibration.applyRefit(preview)
+    }
+    suspend fun undoCalibrationRefit(preview: com.spop.poverlay.calibration.CalibrationRefitPreview) {
+        check(!calibration.state.value.enabled && !boardSetupRunning()) { "Pause calibration capture before undoing a refit." }
+        grupettoCalibration.undoRefit(preview)
+    }
     internal suspend fun loadCalibrationBackup(backup: com.spop.poverlay.calibration.CalibrationBackup): com.spop.poverlay.calibration.CalibrationLoadResult {
         check(!calibration.state.value.enabled && !boardSetupRunning()) {
             "Pause calibration capture before loading a table."

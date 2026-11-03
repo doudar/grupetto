@@ -250,9 +250,16 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                             canLoad = !grupettoTable.recording && !calibration.enabled,
                             export = viewModel::exportCalibrationBackup, load = viewModel::loadCalibrationBackup)
                     }, onManualEdit = { dialog = "manual-calibration" }, livePosition = livePosition,
-                    captureSettings = captureSettings, onCaptureSettings = viewModel::setCalibrationCaptureSettings)
+                    captureSettings = captureSettings, onCaptureSettings = viewModel::setCalibrationCaptureSettings,
+                    onRefit = { dialog = "refit-calibration" })
             }
         }
+        "refit-calibration" -> com.spop.poverlay.calibration.CalibrationRefitDialog(
+            recording = grupettoTable.recording || calibration.enabled,
+            onPreview = viewModel::previewCalibrationRefit,
+            onApply = viewModel::applyCalibrationRefit,
+            onUndo = viewModel::undoCalibrationRefit,
+            onClose = { dialog = "grupetto-calibration" })
         "manual-calibration" -> {
             val session = viewModel.manualCalibrationSession ?: (grupettoTable.displayTable ?: grupettoTable.table)?.let {
                 com.spop.poverlay.calibration.CalibrationEditHistory(it).also { session -> viewModel.manualCalibrationSession = session }

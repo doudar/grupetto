@@ -12,9 +12,7 @@ internal fun calibrationErrorComparison(draft: GrupettoCalibrationProfile?, acti
     // Show the table actually in use. When off, preview what Activate would select, or the unfinished draft.
     val profile = if (active != null) active else activationProfile(draft, saved) ?: draft
     val table = profile?.takeIf { it.matches(capture) }?.table?.takeIf { it.baseline == capture.baseline }
-    val samples = capture.samples.filter { it.nativeWatts in CalibrationPowerRange &&
-        it.measuredPedalWatts in CalibrationPowerRange && it.rpm in 45.0..120.0 &&
-        calibrationCoordinate(capture.baseline, it.ad) != null }
+    val samples = eligibleCalibrationErrorSamples(capture.baseline, capture.samples)
     if (samples.isEmpty()) return null
     val before = samples.sumOf { abs(it.nativeWatts - it.measuredPedalWatts) } / samples.size
     val after = table?.let { correction ->

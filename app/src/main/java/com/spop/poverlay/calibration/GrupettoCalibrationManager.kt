@@ -17,6 +17,9 @@ data class GrupettoCalibrationUiState(val recording: Boolean = false, val active
     val canActivate get() = table?.ready == true || savedCount > 0
 }
 
+/** Frozen preview token. Only the manager holding its matching snapshot can apply or undo it. */
+data class CalibrationRefitPreview(val id: Long, val result: CalibrationRefitResult)
+
 /** First activation is explicit. While recording, every usable fit replaces the active snapshot. */
 class GrupettoCalibrationManager(private val context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -36,6 +39,18 @@ class GrupettoCalibrationManager(private val context: Context) {
     private var recordingRequested = false
     private var activationGeneration = 0
     val isActive get() = activeProfile != null
+    private val refitRevision = java.util.concurrent.atomic.AtomicLong()
+    private var nextRefitId = 0L
+    private data class RefitSession(val preview: CalibrationRefitPreview, val revision: Long,
+        val generation: Int, val baseline: List<Int>?,
+        val draft: GrupettoCalibrationProfile?, val saved: GrupettoCalibrationProfile?,
+        val active: GrupettoCalibrationProfile?, val capture: CalibrationCapture)
+    private var pendingRefit: RefitSession? = null
+    private var undoRefitSession: RefitSession? = null
+    private var refitAppliedDraft: GrupettoCalibrationProfile? = null
+    private var refitAppliedSaved: GrupettoCalibrationProfile? = null
+    private var refitAppliedActive: GrupettoCalibrationProfile? = null
+
     private val initialized = scope.async {
         try {
             val loaded = withContext(Dispatchers.IO) { store.load() }
@@ -63,7 +78,7 @@ class GrupettoCalibrationManager(private val context: Context) {
         } catch (_: Exception) { mutableState.update { it.copy(message = "Saved Grupetto table is unreadable. Clear it to start again.") } }
     }
     suspend fun record(enabled: Boolean, existing: CalibrationCapture?) {
-        synchronized(activationLock) { recordingRequested = enabled }
+        synchronized(activationLock) { recordingRequested = enabled; refitRevision.incrementAndGet() }
         initialized.await()
         mutex.withLock {
             recordingSince = if (enabled) System.currentTimeMillis() else Long.MAX_VALUE
@@ -124,7 +139,7 @@ class GrupettoCalibrationManager(private val context: Context) {
     }
     fun activate(enabled: Boolean) {
         if (!enabled) { deactivate("Grupetto correction off"); return }
-        val generation = synchronized(activationLock) { ++activationGeneration }
+        val generation = synchronized(activationLock) { refitRevision.incrementAndGet(); ++activationGeneration }
         scope.launch {
             initialized.await()
             mutex.withLock {
@@ -179,6 +194,7 @@ class GrupettoCalibrationManager(private val context: Context) {
     fun deactivate(message: String) {
         synchronized(activationLock) {
             ++activationGeneration
+            refitRevision.incrementAndGet()
             activeProfile = null
             preferences.edit().putBoolean("active", false).apply()
             mutableState.update { it.copy(active = false, verified = false, activeCount = 0, message = message,
@@ -216,6 +232,7 @@ class GrupettoCalibrationManager(private val context: Context) {
         initialized.await()
         mutex.withLock {
             check(!recordingRequested && !mutableState.value.recording) { "Pause recording before saving manual edits." }
+            refitRevision.incrementAndGet()
             check(displayedTable() == expected) { "The table changed. Close the editor and reopen the latest table." }
             require(edited.baseline == expected.baseline && edited.gains.size == 496 &&
                 edited.gains.all { it.isFinite() && it in kotlin.math.ln(.65)..kotlin.math.ln(1.35) })
@@ -276,16 +293,126 @@ class GrupettoCalibrationManager(private val context: Context) {
             }
         }
     }
+    /** Explicit offline operation only. No sample targets, activation gates, or live watermarks change. */
+    suspend fun prepareRefit(): CalibrationRefitPreview {
+        initialized.await()
+        return mutex.withLock {
+            check(!recordingRequested && !mutableState.value.recording) { "Pause recording before refitting saved data." }
+            val source = activeProfile ?: activationProfile(draft, savedProfile) ?: draft
+                ?: error("Record calibration data before refitting.")
+            val table = source.table ?: error("Record a usable calibration table first.")
+            val capture = draft?.capture ?: source.capture
+            check(source.matches(capture)) { "The bike baseline changed. Reopen calibration." }
+            check(verifiedBaseline?.first?.let { it == table.baseline } != false) { "The bike baseline changed. Reopen calibration." }
+            val revision = refitRevision.get()
+            val generation = activationGeneration
+            val beforeDraft = draft; val beforeSaved = savedProfile; val beforeActive = activeProfile
+            val baseline = verifiedBaseline?.first
+            val fitted = withContext(Dispatchers.Default) { refitCalibrationTable(table, capture.samples) }
+                ?: error("No original pedal measurements are available for populated cells.")
+            // The displayed active snapshot can lag the draft. A refit consumes the retained
+            // capture, so do not rewind its watermark and replay those efforts on next Record.
+            val through = maxOf(table.recordedThrough, draft?.table?.recordedThrough ?: Long.MIN_VALUE,
+                eligibleCalibrationErrorSamples(capture.baseline, capture.samples).maxOfOrNull { it.capturedAt } ?: Long.MIN_VALUE)
+            val result = fitted.copy(table = fitted.table.copy(recordedThrough = through))
+            check(revision == refitRevision.get() && generation == activationGeneration && !recordingRequested) {
+                "Calibration changed. Create a new refit preview."
+            }
+            val preview = CalibrationRefitPreview(++nextRefitId, result)
+            pendingRefit = RefitSession(preview, revision, generation, baseline,
+                beforeDraft, beforeSaved, beforeActive, capture)
+            preview
+        }
+    }
+
+    private fun refitStillCurrent(session: RefitSession, applied: Boolean): Boolean =
+        session.revision == refitRevision.get() && session.generation == activationGeneration &&
+            session.baseline == verifiedBaseline?.first && !recordingRequested && !mutableState.value.recording &&
+            if (applied) draft === refitAppliedDraft && savedProfile === refitAppliedSaved && activeProfile === refitAppliedActive
+            else draft === session.draft && savedProfile === session.saved && activeProfile === session.active
+
+    private fun publishRefitState(message: String) {
+        mutableState.update { it.copy(count = draft?.capture?.samples?.size ?: 0, table = draft?.table,
+            active = activeProfile != null, activeCount = activeProfile?.capture?.samples?.size ?: 0,
+            savedCount = compatibleSavedCount(), errors = calibrationErrorComparison(draft, activeProfile, savedProfile),
+            displayTable = displayedTable(), message = message) }
+    }
+
+    suspend fun applyRefit(preview: CalibrationRefitPreview) {
+        initialized.await()
+        mutex.withLock {
+            val session = pendingRefit?.takeIf { it.preview === preview }
+                ?: error("This refit preview is no longer current. Create a new preview.")
+            check(refitStillCurrent(session, applied = false)) { "Calibration changed. Create a new refit preview." }
+            val updated = GrupettoCalibrationProfile(session.capture, preview.result.table)
+            val saved = if (session.active != null) updated else session.saved
+            val before = CalibrationBackup(session.draft, session.saved)
+            withContext(NonCancellable) {
+                withContext(Dispatchers.IO) { store.save(CalibrationBackup(updated, saved)) }
+                val published = synchronized(activationLock) {
+                    if (!refitStillCurrent(session, applied = false)) false else {
+                        draft = updated; savedProfile = saved
+                        if (session.active != null) activeProfile = updated
+                        refitAppliedDraft = draft; refitAppliedSaved = savedProfile; refitAppliedActive = activeProfile
+                        undoRefitSession = session; pendingRefit = null
+                        publishRefitState(if (activeProfile != null) "Saved-data refit applied · Undo available" else "Refit draft saved · correction remains off")
+                        true
+                    }
+                }
+                if (!published) {
+                    restoreRefitBackup(before)
+                    error("Calibration changed while saving. Previous table kept; create a new preview.")
+                }
+            }
+        }
+    }
+
+    /** Reversible until another calibration operation changes the saved/applied snapshot. */
+    suspend fun undoRefit(preview: CalibrationRefitPreview) {
+        initialized.await()
+        mutex.withLock {
+            val session = undoRefitSession?.takeIf { it.preview === preview }
+                ?: error("This refit can no longer be undone.")
+            check(refitStillCurrent(session, applied = true)) { "Calibration changed after refitting. Undo is no longer available." }
+            val applied = CalibrationBackup(draft, savedProfile)
+            withContext(NonCancellable) {
+                withContext(Dispatchers.IO) { store.save(CalibrationBackup(session.draft, session.saved)) }
+                val restored = synchronized(activationLock) {
+                    if (!refitStillCurrent(session, applied = true)) false else {
+                        draft = session.draft; savedProfile = session.saved; activeProfile = session.active
+                        undoRefitSession = null
+                        publishRefitState("Refit undone · previous table restored")
+                        true
+                    }
+                }
+                if (!restored) {
+                    restoreRefitBackup(applied)
+                    error("Calibration changed while saving. Undo was not applied.")
+                }
+            }
+        }
+    }
+
+    private suspend fun restoreRefitBackup(backup: CalibrationBackup) {
+        try { withContext(Dispatchers.IO) { store.save(backup) } }
+        catch (e: Exception) {
+            deactivate("Saved-state recovery failed · correction off")
+            pendingRefit = null; undoRefitSession = null
+            throw IllegalStateException("Calibration changed and saved-state recovery failed. Correction is off; reload a backup before continuing.", e)
+        }
+    }
+
     private fun compatibleSavedCount() = savedProfile?.takeIf { draft == null || it.matches(draft!!.capture) }
         ?.capture?.samples?.size ?: 0
     private fun displayedTable() = (activeProfile ?: activationProfile(draft, savedProfile) ?: draft)?.table
     fun verifyBaseline(baseline: List<Int>) {
+        if (verifiedBaseline?.first != baseline) refitRevision.incrementAndGet()
         verifiedBaseline = baseline to SystemClock.elapsedRealtime()
         activeProfile?.let { profile ->
             if (profile.capture.baseline != baseline) deactivate("Board table changed · Grupetto correction disabled")
         }
     }
-    fun clearVerification() { verifiedBaseline = null; mutablePosition.value = null; mutableState.update { it.copy(verified = false) } }
+    fun clearVerification() { refitRevision.incrementAndGet(); verifiedBaseline = null; mutablePosition.value = null; mutableState.update { it.copy(verified = false) } }
     /** Null means this frame was not calibrated; never label a fallback as corrected power. */
     fun correctedPower(frame: CalibrationFrame): Float? {
         val baseline = verifiedBaseline

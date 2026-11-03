@@ -60,9 +60,9 @@ fun CalibrationPanel(state: CalibrationUiState, onEnabled: (Boolean) -> Unit, on
                     local.canActivate -> "Saved table ready to activate"
                     else -> "More ride coverage needed"
                 }, color = CaptureGreen, fontSize = 18.sp)
-                Text("${local.count} saved efforts · ${table?.cells ?: 0} measured cells", color = CaptureMuted)
+                Text("${local.count} saved efforts · ${table?.recordedCoverage?.size ?: 0} measured cells", color = CaptureMuted)
                 table?.let {
-                    Text(String.format(Locale.US, "Validation error %.1f to %.1f W", it.beforeRmse, it.afterRmse))
+                    Text(String.format(Locale.US, "Saved-effort RMSE %.1f to %.1f W", it.beforeRmse, it.afterRmse))
                 }
                 OutlinedButton(onLocalReview, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Grupetto table controls") }
                 Divider(Modifier.padding(vertical = 4.dp), color = Color(0xFF43576D))

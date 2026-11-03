@@ -25,7 +25,7 @@ class CalibrationCoverageRegressionTest {
         println("Saved low-cadence error: $before -> $after W; 140 W at AD815/60rpm -> ${fit.corrected(140.0, 815.0, 60.0)} W")
         println("All captured MAE: ${samples.map { abs(it.nativeWatts - it.pedalWatts) }.average()} -> " +
             "${samples.map { abs(fit.corrected(it.nativeWatts, it.ad, it.rpm) - it.pedalWatts) }.average()}; " +
-            "validation RMSE ${fit.beforeRmse} -> ${fit.afterRmse}; ready=${fit.ready}")
+            "saved-effort RMSE ${fit.beforeRmse} -> ${fit.afterRmse}; ready=${fit.ready}")
         assertTrue(after < before / 2)
         assertTrue(fit.ready)
     }
