@@ -102,8 +102,6 @@ class CalibrationBackupTest {
             { it.getJSONObject("draft").getJSONObject("table").put("gains", JSONArray(listOf(0.0))) },
             { it.getJSONObject("draft").getJSONObject("table").getJSONArray("confidence").put(0, 2) },
             { it.getJSONObject("draft").put("table", "invalid") },
-            { it.getJSONObject("draft").getJSONObject("table").put("manualOffsets", JSONArray(listOf(0.0))) },
-            { it.getJSONObject("draft").getJSONObject("table").put("manualOffsets", JSONArray(List(496) { 9.0 })) },
             { it.getJSONObject("draft").getJSONObject("table").put("manualCoverage", JSONArray(listOf(496))) },
             { it.getJSONObject("saved").put("frameSerial", "another-bike") },
             { it.getJSONObject("saved").getJSONObject("table").put("ready", false) },
@@ -137,7 +135,11 @@ class CalibrationBackupTest {
                 val exported = read(manager.exportBackup())
                 assertEquals(edited.gains, exported.draft!!.table!!.gains)
                 assertEquals(edited.manualCoverage, exported.draft.table!!.manualCoverage)
-                assertEquals(original.capture, exported.draft.capture)
+                assertEquals(original.capture.samples.map { it.pedalWatts },
+                    exported.draft.capture.samples.map { it.measuredPedalWatts })
+                exported.draft.capture.samples.forEach {
+                    assertEquals(edited.corrected(it.nativeWatts, it.ad, it.rpm), it.pedalWatts, 1e-9)
+                }
                 assertTrue(runCatching { manager.saveManualEdit(expected, edited) }.isFailure)
                 val restarted = GrupettoCalibrationManager(isolated)
                 val restored = read(restarted.exportBackup()).draft!!.table!!
@@ -147,6 +149,11 @@ class CalibrationBackupTest {
                 withTimeout(5000) { while (!restarted.state.value.active) delay(10) }
                 restarted.record(true, null)
                 assertTrue(runCatching { restarted.saveManualEdit(restored, edited) }.isFailure)
+                val fresh = CalibrationSample(baseline[15].toDouble(), 80.0, 200.0, 240.0,
+                    maxOf(System.currentTimeMillis(), restored.recordedThrough + 1))
+                restarted.accept(exported.draft.capture.copy(samples = exported.draft.capture.samples + fresh))
+                assertEquals(240.0, restarted.state.value.displayTable!!.corrected(200.0, fresh.ad, fresh.rpm), 1e-8)
+                assertTrue(restarted.state.value.active)
                 restarted.record(false, null)
                 val active = restarted.state.value.displayTable!!
                 val adjusted = CalibrationManualEdit.setPercent(active, setOf(0), 9.0, true)
@@ -155,12 +162,12 @@ class CalibrationBackupTest {
                 assertEquals(adjusted.gains, restarted.state.value.displayTable!!.gains)
                 val backup = read(restarted.exportBackup())
                 assertEquals(backup.draft!!.table!!.gains, backup.saved!!.table!!.gains)
-                val reset = CalibrationManualEdit.resetToRecorded(restarted.state.value.displayTable!!)
+                val reset = CalibrationManualEdit.resetCorrections(restarted.state.value.displayTable!!)
                 restarted.saveManualEdit(restarted.state.value.displayTable!!, reset)
-                assertTrue(restarted.state.value.displayTable!!.manualOffsets.isEmpty())
-                original.table!!.gains.indices.forEach { assertEquals(original.table.gains[it], restarted.state.value.displayTable!!.gains[it], 1e-12) }
-                // Editing an older active snapshot preserves the newer draft's real observations
-                // and rebases the manual layer so restart reproduces the exact edited surface.
+                assertTrue(restarted.state.value.displayTable!!.gains.all { it == 0.0 })
+                assertTrue(restarted.state.value.active)
+                // Editing an older active snapshot preserves the newer draft's raw evidence
+                // while making the edited surface authoritative across restart.
                 val sparseDraft = profile(true)
                 restarted.importBackup(CalibrationBackup(sparseDraft, original))
                 restarted.activate(true)
@@ -169,21 +176,22 @@ class CalibrationBackupTest {
                 val rebased = CalibrationManualEdit.setPercent(oldActive, setOf(247), -4.0, true)
                 restarted.saveManualEdit(oldActive, rebased)
                 val rebasedBackup = read(restarted.exportBackup())
-                assertEquals(sparseDraft.capture, rebasedBackup.draft!!.capture)
-                assertEquals(sparseDraft.table!!.confidence, rebasedBackup.draft.table!!.confidence)
+                assertEquals(sparseDraft.capture.samples.map { it.pedalWatts },
+                    rebasedBackup.draft!!.capture.samples.map { it.measuredPedalWatts })
+                assertEquals(sparseDraft.capture.samples.size, rebasedBackup.draft.table!!.sampleCount)
                 val reloaded = read(GrupettoCalibrationManager(isolated).exportBackup()).draft!!.table!!
                 rebased.gains.indices.forEach { assertEquals(rebased.gains[it], reloaded.gains[it], 1e-12) }
-                // A manually activated sparse table must not return as the fallback after restore.
+                // A sparse reset remains usable and must not resurrect the previous edited fallback.
                 restarted.importBackup(CalibrationBackup(profile(true), null))
                 val sparse = restarted.state.value.displayTable!!
                 restarted.saveManualEdit(sparse, CalibrationManualEdit.setPercent(sparse, setOf(0), 5.0, true))
                 restarted.activate(true)
                 withTimeout(5000) { while (!restarted.state.value.active) delay(10) }
                 val sparseActive = restarted.state.value.displayTable!!
-                restarted.saveManualEdit(sparseActive, CalibrationManualEdit.resetToRecorded(sparseActive))
-                assertFalse(restarted.state.value.active)
-                assertFalse(restarted.state.value.canActivate)
-                assertTrue(restarted.state.value.displayTable!!.manualOffsets.isEmpty())
+                restarted.saveManualEdit(sparseActive, CalibrationManualEdit.resetCorrections(sparseActive))
+                assertTrue(restarted.state.value.active)
+                assertTrue(restarted.state.value.canActivate)
+                assertTrue(restarted.state.value.displayTable!!.gains.all { it == 0.0 })
             }
         } finally {
             directory.deleteRecursively()

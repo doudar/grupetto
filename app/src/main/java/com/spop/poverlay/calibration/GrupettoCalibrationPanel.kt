@@ -66,10 +66,11 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
                         if (it.preview) "the preview table." else "the active table.")
                 }
                 state.table?.let { table ->
+                    if (table.manualCoverage.isNotEmpty()) Text("Shared correction includes edits; future recordings update the same table.")
                     Text(String.format(Locale.US, "Draft validation RMSE %.2f to %.2f W", table.beforeRmse, table.afterRmse))
                     if (!table.ready) Text("Draft needs more resistances and cadences.")
                 }
-                Text("Held-out validation and error scores are informational. Pulse: cyan shows your current cell, orange settles, yellow holds, green saves.")
+                Text("Held-out validation evaluates the Gaussian prior, not the final edited surface. Error scores are informational. Pulse: cyan shows your current cell, orange settles, yellow holds, green saves.")
             }
         }, confirmButton = { TextButton({ showInformation = false }) { Text("Close") } })
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {

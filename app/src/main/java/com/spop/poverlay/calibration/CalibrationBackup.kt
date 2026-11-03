@@ -18,7 +18,7 @@ internal data class CalibrationBackup(
     val saved: GrupettoCalibrationProfile?,
 ) {
     val hasData get() = draft != null || saved != null
-    fun encode(): String = JSONObject().put("format", "grupetto-calibration-backup").put("schema", 1)
+    fun encode(): String = JSONObject().put("format", "grupetto-calibration-backup").put("schema", 2)
         .put("draft", draft?.let(GrupettoCalibrationStore::encode) ?: JSONObject.NULL)
         .put("saved", saved?.let(GrupettoCalibrationStore::encode) ?: JSONObject.NULL).toString(2)
 
@@ -42,7 +42,7 @@ internal data class CalibrationBackup(
         fun decode(text: String): CalibrationBackup {
             require(text.toByteArray(Charsets.UTF_8).size <= MAX_BYTES) { "Calibration file is too large." }
             val json = JSONObject(text)
-            require(json.getString("format") == "grupetto-calibration-backup" && json.getInt("schema") == 1) {
+            require(json.getString("format") == "grupetto-calibration-backup" && json.getInt("schema") in 1..2) {
                 "Unsupported calibration file format."
             }
             fun profile(key: String): GrupettoCalibrationProfile? {

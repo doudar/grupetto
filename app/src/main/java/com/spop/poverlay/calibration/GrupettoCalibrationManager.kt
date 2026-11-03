@@ -41,11 +41,13 @@ class GrupettoCalibrationManager(private val context: Context) {
             val loaded = withContext(Dispatchers.IO) { store.load() }
             savedProfile = loaded.saved?.takeIf { it.table?.ready == true }
             activeProfile = savedProfile?.takeIf { preferences.getBoolean("active", false) }
-            // Re-evaluate old drafts, including fits previously rejected by error comparisons.
-            draft = loaded.draft?.let { profile -> profile.copy(table = withContext(Dispatchers.Default) {
-                GrupettoCalibrationFitter.fit(profile.capture.baseline, profile.capture.samples,
-                    activeProfile?.takeIf { it.matches(profile.capture) }?.table)?.let { CalibrationManualEdit.reapply(it, profile.table) }
-            }) }
+            // The migrated/saved surface is authoritative. Replaying old observations here would
+            // undo manual edits and make restart change the correction.
+            draft = loaded.draft?.let { profile ->
+                if (profile.table != null) profile else withContext(Dispatchers.Default) {
+                    updateUnifiedCalibration(profile.capture, null)
+                }
+            }
             mutableState.update { it.copy(count = draft?.capture?.samples?.size ?: 0, table = draft?.table,
                 active = activeProfile != null, activeCount = activeProfile?.capture?.samples?.size ?: 0,
                 savedCount = compatibleSavedCount(), errors = calibrationErrorComparison(draft, activeProfile, savedProfile),
@@ -90,12 +92,11 @@ class GrupettoCalibrationManager(private val context: Context) {
             val (generation, incumbent) = synchronized(activationLock) {
                 activationGeneration to activeProfile?.takeIf { it.matches(capture) }
             }
-            val table = withContext(Dispatchers.Default) {
-                GrupettoCalibrationFitter.fit(capture.baseline, capture.samples, incumbent?.table)?.let {
-                    CalibrationManualEdit.reapply(it, draft?.table ?: savedProfile?.table)
-                }
+            val previous = draft?.takeIf { it.matches(capture) } ?: savedProfile?.takeIf { it.matches(capture) }
+            val updated = withContext(Dispatchers.Default) {
+                updateUnifiedCalibration(capture, previous, incumbent?.table)
             }
-            val updated = GrupettoCalibrationProfile(capture, table)
+            val table = updated.table
             withContext(NonCancellable + Dispatchers.IO) { store.save(CalibrationBackup(updated, savedProfile)) }
             synchronized(activationLock) {
                 draft = updated
@@ -215,18 +216,15 @@ class GrupettoCalibrationManager(private val context: Context) {
                 ?: error("Record a calibration effort before editing.")
             check(verifiedBaseline?.first?.let { it == edited.baseline } != false) { "The bike baseline changed. Reopen calibration." }
             // Preserve any newer real efforts even when the user edited the active snapshot.
-            val capture = draft?.takeIf { it.matches(source.capture) }?.capture ?: source.capture
-            val fit = withContext(Dispatchers.Default) { GrupettoCalibrationFitter.fit(capture.baseline, capture.samples) }
-                ?: error("No usable recorded calibration is available.")
-            val table = if (edited.manualOffsets.isEmpty()) fit else fit.copy(
-                gains = edited.gains, ready = true, manualCoverage = edited.manualCoverage,
-                manualOffsets = edited.gains.indices.map { edited.gains[it] - fit.gains[it] }
-            ).withCalibrationCoverage(capture.samples)
-            val updated = GrupettoCalibrationProfile(capture, table)
+            val editBase = draft?.takeIf { it.matches(source.capture) } ?: source
+            val capture = editBase.capture
+            val updated = withContext(Dispatchers.Default) {
+                applyUnifiedManualEdit(editBase, edited, System.currentTimeMillis())
+            }
+            val table = updated.table!!
             val generation = synchronized(activationLock) { activationGeneration }
             val incumbent = activeProfile
-            // Restoring a sparse recorded fit must not fall back to the manual snapshot just removed.
-            val retainedSaved = savedProfile.takeUnless { edited.manualOffsets.isEmpty() && !fit.ready }
+            val retainedSaved = savedProfile
             withContext(NonCancellable) {
                 withContext(Dispatchers.IO) { store.save(CalibrationBackup(updated, retainedSaved)) }
                 draft = updated
