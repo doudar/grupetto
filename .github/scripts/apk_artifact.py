@@ -36,17 +36,19 @@ def verify(apk, tools, mode, event, debug_certificate=None):
                 "Debug fallback requires the disposable key's certificate fingerprint")
         require(debug_certificate != PRODUCTION_CERT, "Production APK must not be labelled debug fallback")
     signing = tool_output(tools, "apksigner", "verify", "--verbose", "--print-certs", apk)
-    certificates = re.findall(r"^Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]{64})$",
-                              signing, re.MULTILINE)
+    # Build-tools versions use either "Signer #1" or "V2 Signer:" prefixes.
+    signer_counts = re.findall(r"^Number of signers: (\d+)\s*$", signing, re.MULTILINE)
+    certificates = {value.lower() for value in re.findall(
+        r"^.* certificate SHA-256 digest: ([0-9a-fA-F]{64})\s*$", signing, re.MULTILINE)}
     expected = PRODUCTION_CERT if mode == "production" else debug_certificate
-    require(len(certificates) == 1 and certificates[0].lower() == expected,
+    require(signer_counts == ["1"] and certificates == {expected},
             "APK signing certificate does not match the selected signing mode")
     badging = tool_output(tools, "aapt", "dump", "badging", apk)
     package = re.search(r"^package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'", badging, re.MULTILINE)
     require(package is not None and package[1] == PACKAGE, "Unexpected APK package")
     require(int(package[2]) > 51, "APK versionCode must be greater than installed Peloton code 51")
     return {"package": package[1], "version_code": int(package[2]), "version_name": package[3],
-            "certificate_sha256": certificates[0].lower(), "signing_mode": mode,
+            "certificate_sha256": expected, "signing_mode": mode,
             "sha256": hashlib.sha256(apk.read_bytes()).hexdigest()}, signing + "\n" + badging.splitlines()[0] + "\n"
 
 

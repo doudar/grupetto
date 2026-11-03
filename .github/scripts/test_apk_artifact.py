@@ -25,7 +25,7 @@ class ArtifactTests(unittest.TestCase):
         self.directory = self.root / "ci-artifact"
 
     def tool_results(self, certificate=artifact.PRODUCTION_CERT, package=artifact.PACKAGE, code=53):
-        return [f"Signer #1 certificate SHA-256 digest: {certificate}\n",
+        return [f"Number of signers: 1\nSigner #1 certificate SHA-256 digest: {certificate}\n",
                 f"package: name='{package}' versionCode='{code}' versionName='v0.0.51'\n"]
 
     def stage(self, mode="production", event="pull_request", certificate=artifact.PRODUCTION_CERT,
@@ -80,6 +80,21 @@ class ArtifactTests(unittest.TestCase):
             with self.subTest(event=event), patch.object(artifact, "tool_output", side_effect=self.tool_results(DEBUG_CERT)):
                 with self.assertRaisesRegex(ValueError, "signing certificate"):
                     artifact.verify(self.apk, self.tools, "production", event)
+
+    def test_ci_build_tools_v2_signer_prefix_and_repeated_scheme_certificates(self):
+        for signing in (f"Number of signers: 1\nV2 Signer: certificate SHA-256 digest: {artifact.PRODUCTION_CERT}\n",
+                        f"Number of signers: 1\nV2 Signer: certificate SHA-256 digest: {artifact.PRODUCTION_CERT}\n"
+                        f"V3 Signer: certificate SHA-256 digest: {artifact.PRODUCTION_CERT}\n"):
+            results = [signing, self.tool_results()[1]]
+            with self.subTest(signing=signing), patch.object(artifact, "tool_output", side_effect=results):
+                metadata, _ = artifact.verify(self.apk, self.tools, "production", "pull_request")
+                self.assertEqual(metadata["certificate_sha256"], artifact.PRODUCTION_CERT)
+
+    def test_multiple_signers_cannot_pass_even_if_they_share_the_expected_certificate(self):
+        signing = f"Number of signers: 2\nSigner #1 certificate SHA-256 digest: {artifact.PRODUCTION_CERT}\n"
+        with patch.object(artifact, "tool_output", return_value=signing):
+            with self.assertRaisesRegex(ValueError, "signing certificate"):
+                artifact.verify(self.apk, self.tools, "production", "push")
 
     def test_no_secret_pr_fallback_is_verified_and_clearly_separate(self):
         metadata = self.stage("debug-fallback", certificate=DEBUG_CERT, debug_certificate=DEBUG_CERT)
