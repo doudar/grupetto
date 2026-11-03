@@ -38,7 +38,13 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    - name: Configure release signing
+    - name: Test release artifact contracts
+      run: python3 .github/scripts/test_apk_artifact.py
+
+    - name: Configure production signing
+      id: signing
+      # Fork code never runs this step with signing credentials.
+      if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
       env:
         SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
         KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
@@ -46,14 +52,7 @@ jobs:
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       run: |
         if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ -z "$SIGNING_KEY" ]; then
-          # Fork PRs do not receive signing secrets. Only PR builds may use the debug key.
-          echo "::notice::No signing secrets available; building with the debug keystore"
-          mkdir -p ~/.android
-          if [ ! -f ~/.android/debug.keystore ]; then
-            keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android \
-              -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
-              -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          fi
+          echo "::notice::No signing secrets available; selecting a debug-only PR artifact"
           exit 0
         fi
         # Fail closed before building a release with missing signing credentials.
@@ -72,6 +71,23 @@ jobs:
         keyAlias=$KEY_ALIAS
         keyPassword=$KEY_PASSWORD
         EOF
+        echo "mode=production" >> "$GITHUB_OUTPUT"
+
+    - name: Configure disposable debug fallback for unprivileged PR build
+      id: debug_signing
+      if: github.event_name == 'pull_request' && steps.signing.outputs.mode != 'production'
+      run: |
+        set -euo pipefail
+        echo "::notice::Debug-signed fallback: not a release or a production-signed Peloton update"
+        mkdir -p ~/.android
+        if [ ! -f ~/.android/debug.keystore ]; then
+          keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android \
+            -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+            -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+        fi
+        CERT=$(keytool -exportcert -keystore ~/.android/debug.keystore -storepass android \
+          -alias androiddebugkey | sha256sum | cut -d ' ' -f1)
+        echo "certificate=$CERT" >> "$GITHUB_OUTPUT"
 
     - name: Test release version allocation
       run: bash .github/scripts/test-release-version.sh
@@ -98,22 +114,18 @@ jobs:
     - name: Build release APK
       run: ./gradlew assembleRelease
 
-    - name: Verify preview APK for in-place Peloton update
+    - name: Verify APK signing mode and stage flat artifact
+      env:
+        SIGNING_MODE: ${{ steps.signing.outputs.mode == 'production' && 'production' || 'debug-fallback' }}
+        DEBUG_CERTIFICATE: ${{ steps.debug_signing.outputs.certificate }}
+        SOURCE_SHA: ${{ steps.version_info.outputs.SOURCE_SHA }}
       run: |
         set -euo pipefail
-        APK=app/build/outputs/apk/release/app-release.apk
         TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
-        "$TOOLS/apksigner" verify --verbose --print-certs "$APK" | tee apk-verification.txt
-        CERT=$(sed -n 's/^.* certificate SHA-256 digest: //p' apk-verification.txt | tr '[:upper:]' '[:lower:]' | sort -u)
-        test "$CERT" = "61ae87b671ea3f4d8095440d4c826da6dc938e7a90bc8114bea9bb945b53a2bb"
-        "$TOOLS/aapt" dump badging "$APK" > apk-badging.txt
-        head -1 apk-badging.txt | tee -a apk-verification.txt
-        CODE=$(sed -n "s/.*versionCode='\\([0-9]*\\)'.*/\\1/p" apk-badging.txt | head -1)
-        test "$CODE" -gt 51
-        sha256sum "$APK" | tee -a apk-verification.txt
-        echo "Source PR90: e6147d4de99d39e6158888c44db4624c12781569" | tee -a apk-verification.txt
-        echo "Source PR89: 2fbfd844865ac4c738ac87d597d9b1e28d68b971" | tee -a apk-verification.txt
-        git rev-parse HEAD | tee -a apk-verification.txt
+        python3 .github/scripts/apk_artifact.py stage --tools "$TOOLS" \
+          --apk app/build/outputs/apk/release/app-release.apk --directory ci-artifact \
+          --mode "$SIGNING_MODE" --event "$GITHUB_EVENT_NAME" --source-sha "$SOURCE_SHA" \
+          --debug-certificate "$DEBUG_CERTIFICATE"
 
     - name: List APK outputs
       run: |
@@ -121,13 +133,12 @@ jobs:
         find app/build/outputs/apk -name "*.apk" -type f || echo "No APK files found"
         echo "Directory structure:"
         ls -la app/build/outputs/apk/ || echo "APK output directory not found"
-    - name: Upload release APK as artifact
+    - name: Upload verified APK artifact
       uses: actions/upload-artifact@v4
       with:
-        name: release-apk
-        path: |
-          app/build/outputs/apk/release/app-release.apk
-          apk-verification.txt
+        name: ${{ steps.signing.outputs.mode == 'production' && 'release-apk' || 'debug-fallback-apk' }}
+        path: ci-artifact/
+        if-no-files-found: error
 
   release:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')
@@ -155,6 +166,25 @@ jobs:
         echo "Updated build.gradle versions:"
         grep -E "(versionCode|versionName)" app/build.gradle
 
+    - name: Download release APK
+      uses: actions/download-artifact@v4
+      with:
+        name: release-apk
+        path: release-artifact/
+
+    - name: Validate release input before publication
+      id: find_apk
+      env:
+        SOURCE_SHA: ${{ needs.build.outputs.SOURCE_SHA }}
+        VERSION_CODE: ${{ needs.build.outputs.NEW_VERSION_CODE }}
+        VERSION_NAME: ${{ needs.build.outputs.TAG_NAME }}
+      run: |
+        set -euo pipefail
+        TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+        python3 .github/scripts/apk_artifact.py validate-release --tools "$TOOLS" \
+          --directory release-artifact --source-sha "$SOURCE_SHA" \
+          --version-code "$VERSION_CODE" --version-name "$VERSION_NAME" --output "$GITHUB_OUTPUT"
+
     - name: Commit version updates
       run: |
         git config user.name "github-actions[bot]"
@@ -162,24 +192,6 @@ jobs:
         git add app/build.gradle
         git commit -m "Auto-update version to ${{ needs.build.outputs.TAG_NAME }} (build ${{ needs.build.outputs.NEW_VERSION_CODE }})"
         git push origin HEAD:${{ github.ref_name }} || echo "::warning::Branch advanced; release tag will retain the version commit"
-
-    - name: Download release APK
-      uses: actions/download-artifact@v4
-      with:
-        name: release-apk
-        path: ./
-
-    - name: Find and prepare APK
-      id: find_apk
-      run: |
-        # Find the APK file (could be signed or unsigned)
-        APK_FILE=$(find . -name "*.apk" -type f | head -1)
-        if [ -z "$APK_FILE" ]; then
-          echo "No APK file found!"
-          exit 1
-        fi
-        echo "Found APK: $APK_FILE"
-        echo "APK_PATH=$APK_FILE" >> $GITHUB_OUTPUT
 
     - name: Create new tag
       run: |
@@ -222,7 +234,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: app-release.apk
+        asset_path: ${{ steps.find_apk.outputs.APK_PATH }}
         asset_name: grupetto-${{ needs.build.outputs.TAG_NAME }}.apk
         asset_content_type: application/vnd.android.package-archive
 
