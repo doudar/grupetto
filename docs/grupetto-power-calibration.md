@@ -314,7 +314,7 @@ or installation. Board setup disables the separate Grupetto correction.
 
 ### Optional refit from retained original measurements
 
-While recording is paused, open **Calibration information → Refit saved data...**.
+While recording is paused, select **Calculate New Solution** above the Corrected error watt difference.
 This explicit offline operation uses all eligible retained efforts (at most 3600),
 not only each cell's rolling ten-value live weight. It does not run automatically
 between rides. The preview compares the current and fitted table's mean absolute

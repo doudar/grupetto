@@ -65,10 +65,6 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
             Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(state.message)
-                if (onRefit != null) OutlinedButton({ showInformation = false; onRefit() },
-                    enabled = !state.recording && (state.displayTable ?: state.table) != null) {
-                    Text("Refit saved data…")
-                }
                 Text("Record + Activate: each usable saved effort updates the active table automatically. " +
                     "Activate is still required the first time and after loading a backup.")
                 Text("Colors show the ${if (state.active) "active" else "preview"} correction as a percentage of raw bike watts. " +
@@ -108,7 +104,8 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
         GrupettoCoverageChart(state.displayTable ?: state.table, capture, state.recording && meterReady, livePosition)
         CaptureHoldFeedback(capture, state.recording)
         CalibrationCorrectionLegend()
-        CalibrationErrorSummary(state.errors)
+        CalibrationErrorSummary(state.errors, onRefit,
+            refitEnabled = !state.recording && (state.displayTable ?: state.table) != null)
         CalibrationTableActions(onGuide, onManualEdit, onCaptureSettings?.let { { settingsOpen = true } },
             { confirmClear = true }, manualEnabled = !state.recording && (state.displayTable ?: state.table) != null)
         if (hasPendingCalibrationFit(state.active, state.recording, state.table, state.displayTable, state.count, state.activeCount)) {
@@ -174,21 +171,29 @@ internal fun CalibrationCorrectionLegend() {
 }
 
 @Composable
-private fun CalibrationErrorSummary(errors: CalibrationErrorComparison?) {
+private fun CalibrationErrorSummary(errors: CalibrationErrorComparison?, onRefit: (() -> Unit)?, refitEnabled: Boolean) {
     fun watts(value: Double?) = value?.let { String.format(Locale.US, "%.1f W", it) } ?: "-"
-    Column {
-        Text("Average error vs pedals" + when {
-            errors?.afterWatts == null -> ""
-            errors.preview -> " · preview"
-            else -> " · active table"
-        }, fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFF9EAEC0))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Bottom) {
+        Column(Modifier.weight(1f)) {
+            Text("Average error vs pedals" + when {
+                errors?.afterWatts == null -> ""
+                errors.preview -> " · preview"
+                else -> " · active table"
+            }, fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFF9EAEC0))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Raw bike error", fontSize = 14.sp, lineHeight = 18.sp)
                 Spacer(Modifier.weight(1f))
                 Text(watts(errors?.beforeWatts), fontSize = 24.sp, lineHeight = 28.sp)
             }
-            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+        }
+        Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+            if (onRefit != null) OutlinedButton(onRefit, enabled = refitEnabled,
+                modifier = Modifier.heightIn(min = 48.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
+                Text("Calculate New Solution", fontSize = 12.sp, lineHeight = 16.sp)
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Corrected error", fontSize = 14.sp, lineHeight = 18.sp)
                 Spacer(Modifier.weight(1f))
                 val improved = errors?.afterWatts?.let { it < errors.beforeWatts }

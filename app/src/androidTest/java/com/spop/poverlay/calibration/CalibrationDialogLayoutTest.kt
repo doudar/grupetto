@@ -35,12 +35,12 @@ class CalibrationDialogLayoutTest {
         compose.setContent { MaterialTheme(typography = Typography) {
             SettingsDialog("Calibrate using power pedals", {}, compact = true) {
                 GrupettoCalibrationPanel(GrupettoCalibrationUiState(count = 235, table = table), {}, {}, {}, {},
-                    meterReady = false, onManualEdit = {}, onCaptureSettings = {}, fileControls = {
+                    meterReady = false, onManualEdit = {}, onCaptureSettings = {}, onRefit = {}, fileControls = {
                         CalibrationFileControls(true, true, { "{}" }, { error("Not used") })
                     })
             }
         } }
-        visible("Record", "Activate", "Manual editor", "Capture settings", "Guided capture", "Done")
+        visible("Record", "Activate", "Manual editor", "Capture settings", "Guided capture", "Calculate New Solution", "Done")
         noVerticalScrolling()
         compose.onNodeWithText("Fit details").assertDoesNotExist()
         visible("Clear table...", "Done")

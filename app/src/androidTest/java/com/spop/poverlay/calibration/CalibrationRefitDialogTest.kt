@@ -96,27 +96,30 @@ class CalibrationRefitDialogTest {
         compose.runOnIdle { assertEquals(0, closes) }
     }
 
-    @Test fun informationActionIsDisabledWhileRecording() {
+    @Test fun calculateActionIsVisibleAboveCorrectedErrorAndDisabledWhileRecording() {
         val recording = mutableStateOf(true)
         var opens = 0
         compose.setContent { MaterialTheme {
-            GrupettoCalibrationPanel(GrupettoCalibrationUiState(recording = recording.value, table = table),
+            GrupettoCalibrationPanel(GrupettoCalibrationUiState(recording = recording.value, table = table,
+                errors = CalibrationErrorComparison(20.0, 10.0, 5, true)),
                 {}, {}, {}, {}, onRefit = { opens++ })
         } }
-        compose.onNodeWithContentDescription("Calibration information").performClick()
-        compose.onNodeWithText("Refit saved data…").assertIsNotEnabled()
+        compose.onNodeWithText("Calculate New Solution").assertIsDisplayed().assertIsNotEnabled()
         compose.runOnIdle { recording.value = false }
-        compose.onNodeWithText("Refit saved data…").assertIsEnabled().performClick()
+        val button = compose.onNodeWithText("Calculate New Solution").fetchSemanticsNode().boundsInRoot
+        val watts = compose.onNodeWithText("10.0 W").fetchSemanticsNode().boundsInRoot
+        assertTrue("Calculate button must sit above corrected watts", button.bottom <= watts.top)
+        assertTrue("Calculate button must align with the right-side metric", button.right >= watts.left)
+        compose.onNodeWithText("Calculate New Solution").assertIsEnabled().performClick()
         compose.runOnIdle { assertEquals(1, opens) }
-        compose.onNodeWithText("Refit saved data…").assertDoesNotExist()
+        compose.onNodeWithText("Calculate New Solution").assertIsDisplayed()
     }
 
-    @Test fun informationActionIsDisabledWithoutATable() {
+    @Test fun calculateActionIsDisabledWithoutATable() {
         compose.setContent { MaterialTheme {
             GrupettoCalibrationPanel(GrupettoCalibrationUiState(), {}, {}, {}, {}, onRefit = {})
         } }
-        compose.onNodeWithContentDescription("Calibration information").performClick()
-        compose.onNodeWithText("Refit saved data…").assertIsNotEnabled()
+        compose.onNodeWithText("Calculate New Solution").assertIsDisplayed().assertIsNotEnabled()
     }
 
     @Test fun savingDisablesRepeatApplyAndDismissUntilItFinishes() {
