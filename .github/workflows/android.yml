@@ -219,6 +219,14 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
         cache: gradle
+    - name: Create disposable test-only signing key
+      run: |
+        mkdir -p ~/.android
+        if [ ! -f ~/.android/debug.keystore ]; then
+          keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android \
+            -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+            -validity 1 -dname "CN=Android Debug,O=Android,C=US"
+        fi
     - name: Test calibration persistence on virtual Android
       uses: reactivecircus/android-emulator-runner@v2
       with:
