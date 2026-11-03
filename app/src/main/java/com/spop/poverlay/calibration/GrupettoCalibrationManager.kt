@@ -39,6 +39,12 @@ class GrupettoCalibrationManager(private val context: Context) {
     private val initialized = scope.async {
         try {
             val loaded = withContext(Dispatchers.IO) { store.load() }
+            if (store.resetOnLoad) withContext(Dispatchers.IO) {
+                // Only correction state is reset. The tombstone and cutoff prevent old capture
+                // files from silently restoring the discarded table on the next Record action.
+                check(preferences.edit().putBoolean("active", false)
+                    .putLong("clearedAt", maxOf(preferences.getLong("clearedAt", 0), loaded.resetAt)).commit())
+            }
             savedProfile = loaded.saved?.takeIf { it.table?.ready == true }
             activeProfile = savedProfile?.takeIf { preferences.getBoolean("active", false) }
             // The migrated/saved surface is authoritative. Replaying old observations here would
@@ -52,7 +58,8 @@ class GrupettoCalibrationManager(private val context: Context) {
                 active = activeProfile != null, activeCount = activeProfile?.capture?.samples?.size ?: 0,
                 savedCount = compatibleSavedCount(), errors = calibrationErrorComparison(draft, activeProfile, savedProfile),
                 displayTable = displayedTable(),
-                message = if (activeProfile != null) "Active · waiting for bike verification" else "Record a ride, then activate the table") }
+                message = if (store.resetOnLoad) "Saved calibration could not be upgraded and was reset. A recovery copy was kept; record a new table."
+                    else if (activeProfile != null) "Active · waiting for bike verification" else "Record a ride, then activate the table") }
         } catch (_: Exception) { mutableState.update { it.copy(message = "Saved Grupetto table is unreadable. Clear it to start again.") } }
     }
     suspend fun record(enabled: Boolean, existing: CalibrationCapture?) {

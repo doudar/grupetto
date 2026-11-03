@@ -28,7 +28,7 @@ internal class GrupettoCalibrationStore(directory: File, name: String) {
             if (file.baseFile.exists() || File(file.baseFile.path + ".bak").exists()) throw e
             return null
         }
-        return decode(stream.bufferedReader().use { JSONObject(it.readText()) })
+        return decode(stream.use { JSONObject(boundedCalibrationText(it)) })
     }
     fun save(profile: GrupettoCalibrationProfile) {
         val stream = file.startWrite()

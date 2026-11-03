@@ -5,6 +5,8 @@ import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.ByteArrayInputStream
+import java.io.File
+import androidx.test.platform.app.InstrumentationRegistry
 import kotlin.math.ln
 
 /** Schema changes must preserve the exact saved surface, not reconstruct an older fitted layer. */
@@ -172,6 +174,207 @@ class CalibrationPersistenceMigrationTest {
         assertEquals(updated.table.gains, restarted.table!!.gains)
         assertEquals(11L, restarted.table.recordedThrough)
         assertEquals(nextCapture.samples, restarted.capture.samples)
+    }
+
+    private fun withDirectory(block: (File) -> Unit) {
+        val cache = InstrumentationRegistry.getInstrumentation().targetContext.cacheDir
+        val directory = File(cache, "calibration-migration-${System.nanoTime()}").apply { mkdirs() }
+        try { block(directory) } finally { directory.deleteRecursively() }
+    }
+
+    private fun fixture(name: String) = InstrumentationRegistry.getInstrumentation().context.assets
+        .open("calibration/$name").bufferedReader().use { it.readText() }
+
+    @Test fun authenticReleasedSmoothedBackupUpgradesWithoutChangingAppliedGains() = withDirectory { directory ->
+        val text = fixture("released-v0.0.49-v0.0.50-smoothed.json")
+        val old = JSONObject(text).getJSONObject("saved")
+        File(directory, "grupetto-calibration.json").writeText(text)
+        val store = CalibrationBackupStore(directory)
+        val migrated = store.load()
+        assertFalse(store.resetOnLoad)
+        val expectedGains = old.getJSONObject("table").getJSONArray("gains")
+            .let { values -> List(values.length()) { values.getDouble(it) } }
+        assertEquals(expectedGains, migrated.saved!!.table!!.gains)
+        val observations = old.getJSONArray("samples")
+        migrated.saved.capture.samples.forEachIndexed { index, sample ->
+            val recorded = observations.getJSONObject(index)
+            assertEquals(recorded.getDouble("pedalWatts"), sample.measuredPedalWatts, 0.0)
+            assertEquals(recorded.getLong("capturedAt"), sample.capturedAt)
+            assertEquals(migrated.saved.table.corrected(sample.nativeWatts, sample.ad, sample.rpm), sample.pedalWatts, 0.0)
+        }
+        val upgraded = JSONObject(File(directory, "grupetto-calibration.json").readText())
+        assertEquals(2, upgraded.getInt("schema"))
+        assertFalse(upgraded.getJSONObject("saved").getJSONObject("table").has("manualOffsets"))
+        assertEquals(migrated, CalibrationBackupStore(directory).load())
+    }
+
+    @Test fun authenticPreCombinedFilesUpgradeWithoutRewritingRawMeasurements() = withDirectory { directory ->
+        val draftText = fixture("pre-combined-draft.json")
+        val savedText = fixture("pre-combined-active.json")
+        File(directory, "grupetto-power-draft.json").writeText(draftText)
+        File(directory, "grupetto-power-active.json").writeText(savedText)
+        val store = CalibrationBackupStore(directory)
+        val migrated = store.load()
+        assertFalse(store.resetOnLoad)
+        val old = JSONObject(savedText)
+        val expectedGains = old.getJSONObject("table").getJSONArray("gains")
+            .let { values -> List(values.length()) { values.getDouble(it) } }
+        assertEquals(expectedGains, migrated.saved!!.table!!.gains)
+        val observations = old.getJSONArray("samples")
+        migrated.saved.capture.samples.forEachIndexed { index, sample ->
+            assertEquals(observations.getJSONObject(index).getDouble("pedalWatts"), sample.pedalWatts, 0.0)
+            assertNull(sample.recordedPedalWatts)
+        }
+        assertEquals(1, migrated.draft!!.capture.samples.size)
+        assertEquals(draftText, File(directory, "grupetto-power-draft.json").readText())
+        assertEquals(savedText, File(directory, "grupetto-power-active.json").readText())
+        assertEquals(2, JSONObject(File(directory, "grupetto-calibration.json").readText()).getInt("schema"))
+        assertEquals(migrated, CalibrationBackupStore(directory).load())
+    }
+
+    @Test fun oversizedStartupFilesAreQuarantinedBeforeParsing() {
+        listOf("grupetto-calibration.json", "grupetto-power-draft.json").forEach { name ->
+            withDirectory { directory ->
+                val contents = "x".repeat(CalibrationBackup.MAX_BYTES + 1)
+                File(directory, name).writeText(contents)
+                val store = CalibrationBackupStore(directory)
+                assertFalse(store.load().hasData)
+                assertTrue(store.resetOnLoad)
+                val recovery = directory.listFiles()!!.single { it.name.startsWith("$name.unusable-") }
+                assertEquals(contents, recovery.readText())
+                assertFalse(CalibrationBackupStore(directory).load().hasData)
+            }
+        }
+    }
+
+    @Test fun startupImmediatelyPersistsLegacyMigrationWithoutTouchingOtherFiles() = withDirectory { directory ->
+        val original = profile()
+        val stored = File(directory, "grupetto-calibration.json")
+        stored.writeText(backup(1, legacy(original), legacy(original)))
+        val unrelated = File(directory, "bike-power-calibration.json").apply { writeText("unrelated bike capture") }
+        val store = CalibrationBackupStore(directory)
+        val loaded = store.load()
+        assertFalse(store.resetOnLoad)
+        assertEquals(original.table!!.gains, loaded.saved!!.table!!.gains)
+        assertEquals(2, JSONObject(stored.readText()).getInt("schema"))
+        assertEquals(loaded, store.load())
+        assertEquals("unrelated bike capture", unrelated.readText())
+        assertFalse(directory.listFiles()!!.any { ".unusable-" in it.name })
+    }
+
+    @Test fun startupUpgradesSeparateLegacyFilesAndRetainsRecoverySources() = withDirectory { directory ->
+        val original = profile()
+        val draft = File(directory, "grupetto-power-draft.json").apply { writeText(legacy(original).toString()) }
+        val saved = File(directory, "grupetto-power-active.json").apply { writeText(legacy(original).toString()) }
+        val oldDraft = draft.readText()
+        val oldSaved = saved.readText()
+        val store = CalibrationBackupStore(directory)
+        val loaded = store.load()
+        assertFalse(store.resetOnLoad)
+        assertEquals(original.capture, loaded.draft!!.capture)
+        assertEquals(original.table!!.gains, loaded.saved!!.table!!.gains)
+        assertEquals(2, JSONObject(File(directory, "grupetto-calibration.json").readText()).getInt("schema"))
+        assertEquals(oldDraft, draft.readText())
+        assertEquals(oldSaved, saved.readText())
+        assertEquals(loaded, store.load())
+    }
+
+    @Test fun startupQuarantinesCorruptOrFutureCalibrationAndPreventsLegacyResurrection() {
+        listOf("broken json", JSONObject(backup(1, legacy(profile()), legacy(profile())))
+            .put("schema", 99).toString()).forEach { invalid ->
+            withDirectory { directory ->
+                val combined = File(directory, "grupetto-calibration.json").apply { writeText(invalid) }
+                val legacyFiles = listOf("grupetto-power-draft.json", "grupetto-power-active.json",
+                    "grupetto-power-draft.json.bak", "grupetto-power-active.json.new")
+                    .map { File(directory, it).apply { writeText(legacy(profile()).toString()) } }
+                val unrelated = File(directory, "user-settings.json").apply { writeText("keep settings") }
+                val bikeCapture = File(directory, "bike-power-calibration.json").apply { writeText("keep bike capture") }
+                val originals = (listOf(combined) + legacyFiles).associate { it.name to it.readText() }
+                val store = CalibrationBackupStore(directory)
+                assertFalse(store.load().hasData)
+                assertTrue(store.resetOnLoad)
+                assertEquals(2, JSONObject(combined.readText()).getInt("schema"))
+                assertFalse(CalibrationBackup.decode(combined.readText()).hasData)
+                originals.forEach { (name, contents) ->
+                    val copies = directory.listFiles()!!.filter { it.name.startsWith("$name.unusable-") }
+                    assertEquals("Recovery copy for $name", 1, copies.size)
+                    assertEquals(contents, copies.single().readText())
+                }
+                assertTrue(legacyFiles.none { it.exists() })
+                assertEquals("keep settings", unrelated.readText())
+                assertEquals("keep bike capture", bikeCapture.readText())
+                val restarted = CalibrationBackupStore(directory)
+                val emptyAgain = restarted.load()
+                assertFalse(emptyAgain.hasData)
+                assertTrue(emptyAgain.resetAt > 0)
+                assertTrue(restarted.resetOnLoad)
+                assertEquals(CalibrationBackup.decode(combined.readText()).resetAt, emptyAgain.resetAt)
+                // Explicit import remains strict and cannot invoke startup recovery.
+                assertTrue(runCatching { CalibrationBackup.decode(invalid) }.isFailure)
+                assertFalse(CalibrationBackup.decode(combined.readText()).hasData)
+            }
+        }
+    }
+
+    @Test fun resetMarkerSurvivesRestartUntilRealCalibrationReplacesIt() = withDirectory { directory ->
+        File(directory, "grupetto-calibration.json").writeText("corrupt")
+        val discarded = CalibrationBackupStore(directory).load()
+        assertTrue(discarded.resetAt > 0)
+        // Simulate process death before the manager can clear active/clearedAt preferences.
+        val restarted = CalibrationBackupStore(directory)
+        assertEquals(discarded.resetAt, restarted.load().resetAt)
+        assertTrue(restarted.resetOnLoad)
+        restarted.save(CalibrationBackup(profile(), profile()))
+        assertTrue(restarted.load().hasData)
+        assertFalse(restarted.resetOnLoad)
+        assertEquals(0L, restarted.load().resetAt)
+        val invalid = JSONObject(CalibrationBackup(profile(), profile()).encode()).put("resetAt", discarded.resetAt)
+        assertTrue(runCatching { CalibrationBackup.decode(invalid.toString()) }.isFailure)
+        val negative = JSONObject(CalibrationBackup(null, null).encode()).put("resetAt", -1L)
+        assertTrue(runCatching { CalibrationBackup.decode(negative.toString()) }.isFailure)
+    }
+
+    @Test fun failedMigrationWritePreservesValidLegacySnapshotWithoutQuarantine() = withDirectory { directory ->
+        val old = fixture("released-v0.0.49-v0.0.50-smoothed.json")
+        val file = File(directory, "grupetto-calibration.json").apply { writeText(old) }
+        val store = CalibrationBackupStore(directory)
+        assertTrue(file.setWritable(false, false))
+        assertTrue(directory.setWritable(false, false))
+        try {
+            assertTrue(runCatching { store.load() }.isFailure)
+            assertFalse(store.resetOnLoad)
+            assertEquals(old, file.readText())
+            assertFalse(directory.listFiles()!!.any { ".unusable-" in it.name })
+        } finally {
+            assertTrue(directory.setWritable(true, true))
+            assertTrue(file.setWritable(true, true))
+        }
+        assertTrue(store.load().hasData)
+        assertFalse(store.resetOnLoad)
+    }
+
+    @Test fun failedQuarantineCopyLeavesOriginalCalibrationIntact() = withDirectory { directory ->
+        val file = File(directory, "grupetto-calibration.json").apply { writeText("corrupt but recoverable") }
+        val store = CalibrationBackupStore(directory)
+        assertTrue(directory.setWritable(false, false))
+        try {
+            assertTrue(runCatching { store.load() }.isFailure)
+            assertFalse(store.resetOnLoad)
+            assertEquals("corrupt but recoverable", file.readText())
+        } finally { assertTrue(directory.setWritable(true, true)) }
+        assertFalse(store.load().hasData)
+        assertTrue(store.resetOnLoad)
+    }
+
+    @Test fun startupReadFailureDoesNotQuarantineOrEraseOtherData() = withDirectory { directory ->
+        // A path that is a directory produces a storage/read failure, not malformed JSON.
+        val unreadable = File(directory, "grupetto-calibration.json").apply { mkdirs() }
+        val sentinel = File(unreadable, "sentinel").apply { writeText("preserved") }
+        val store = CalibrationBackupStore(directory)
+        assertTrue(runCatching { store.load() }.isFailure)
+        assertFalse(store.resetOnLoad)
+        assertEquals("preserved", sentinel.readText())
+        assertFalse(directory.listFiles()!!.any { ".unusable-" in it.name })
     }
 
     @Test fun malformedLegacyLayersAndNewAuditFieldsAreRejected() {
