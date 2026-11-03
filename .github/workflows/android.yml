@@ -84,10 +84,10 @@ jobs:
       run: |
         # Update versionName to match the new tag
         sed -i "s/versionName \".*\"/versionName \"${{ steps.version_info.outputs.TAG_NAME }}\"/" app/build.gradle
-        
+
         # Update versionCode to incremented value
         sed -i "s/versionCode [0-9]*/versionCode ${{ steps.version_info.outputs.NEW_VERSION_CODE }}/" app/build.gradle
-        
+
         # Verify changes
         echo "Updated build.gradle versions:"
         grep -E "(versionCode|versionName)" app/build.gradle
@@ -147,10 +147,10 @@ jobs:
       run: |
         # Update versionName to match the new tag
         sed -i "s/versionName \".*\"/versionName \"${{ needs.build.outputs.TAG_NAME }}\"/" app/build.gradle
-        
+
         # Update versionCode to incremented value
         sed -i "s/versionCode [0-9]*/versionCode ${{ needs.build.outputs.NEW_VERSION_CODE }}/" app/build.gradle
-        
+
         # Verify changes
         echo "Updated build.gradle versions:"
         grep -E "(versionCode|versionName)" app/build.gradle
@@ -198,20 +198,20 @@ jobs:
         release_name: "Grupetto ${{ needs.build.outputs.TAG_NAME }}"
         body: |
           ## Grupetto Release ${{ needs.build.outputs.TAG_NAME }}
-          
+
           **Version:** ${{ needs.build.outputs.TAG_NAME }}
           **Previous Version:** ${{ needs.build.outputs.PREVIOUS_TAG }}
           **Build Code:** ${{ needs.build.outputs.NEW_VERSION_CODE }} (was ${{ needs.build.outputs.VERSION_CODE }})
           **Commit:** ${{ needs.build.outputs.SOURCE_SHA }}
-          
+
           ### Changes
           - Automated release from ${{ github.ref_name }} branch
           - Auto-incremented from ${{ needs.build.outputs.PREVIOUS_TAG }}
           - Updated app/build.gradle with new version numbers
-          
+
           ### Installation
           Download the APK file below and install on your Android device.
-          
+
           **Note:** You may need to enable "Install from unknown sources" in your device settings.
         draft: false
         prerelease: false
@@ -225,7 +225,7 @@ jobs:
         asset_path: app-release.apk
         asset_name: grupetto-${{ needs.build.outputs.TAG_NAME }}.apk
         asset_content_type: application/vnd.android.package-archive
-    
+
 
   calibration-persistence-tests:
     runs-on: ubuntu-latest
@@ -258,13 +258,13 @@ jobs:
         script: |
           adb shell wm size 1920x1080
           adb shell wm density 240
-          bash ./gradlew connectedDebugAndroidTest
+          bash -c 'set +e; bash ./gradlew connectedDebugAndroidTest; result=$?; mkdir -p app/build/reports/androidTests; adb pull /sdcard/Android/data/com.spop.poverlay/files/calibration-test-diagnostics app/build/reports/androidTests/diagnostics || true; exit "$result"'
     - name: Preserve instrumentation test reports
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: calibration-instrumentation-reports
-        path: app/build/reports/androidTests/connected
+        path: app/build/reports/androidTests
 
   calibration-upgrade-tests:
     runs-on: ubuntu-latest
