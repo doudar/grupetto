@@ -104,7 +104,7 @@ jobs:
         APK=app/build/outputs/apk/release/app-release.apk
         TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
         "$TOOLS/apksigner" verify --verbose --print-certs "$APK" | tee apk-verification.txt
-        CERT=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' apk-verification.txt | tr '[:upper:]' '[:lower:]')
+        CERT=$(sed -n 's/^.* certificate SHA-256 digest: //p' apk-verification.txt | tr '[:upper:]' '[:lower:]' | sort -u)
         test "$CERT" = "61ae87b671ea3f4d8095440d4c826da6dc938e7a90bc8114bea9bb945b53a2bb"
         "$TOOLS/aapt" dump badging "$APK" > apk-badging.txt
         head -1 apk-badging.txt | tee -a apk-verification.txt
