@@ -12,7 +12,7 @@ data class ActiveCalibrationComparison(val activeRmse: Double, val candidateRmse
         candidateRmse >= 0 && appliedRmse >= 0 && max(candidateRmse, appliedRmse) < activeRmse
 }
 
-/** A smooth, regularized log-power correction over raw resistance and cadence.
+/** A smooth log-power correction over raw resistance and cadence.
  * Zero-mean Gaussian prior returns to native power away from observations.
  * The saved 31 x 16 surface is bilinearly interpolated during riding (no solver in the callback).
  */
@@ -52,6 +52,49 @@ object GrupettoCalibrationFitter {
         val noise: Double, val samples: List<CalibrationSample>)
     private fun kernel(x: Double, rpm: Double, b: Node): Double =
         exp(-.5 * (((x - b.x) / 2.5).pow(2) + ((rpm - b.rpm) / 15).pow(2)))
+
+    /** Project a smooth residual onto the *interpolated* gain, including per-vertex limits.
+     * Clamping a normalized residual after the fact would miss the target near either limit.
+     * Only the four contributing vertices participate in the scalar solve; the resulting bump
+     * fades over the same resistance/cadence distance as the prior. No work is added to BLE callbacks.
+     */
+    private fun anchor(gains: MutableList<Double>, baseline: List<Int>, sample: CalibrationSample) {
+        val x = calibrationCoordinate(baseline, sample.ad)!!
+        val y = (sample.rpm - 45) / 5
+        val i = floor(x).toInt().coerceIn(0, 29)
+        val j = floor(y).toInt().coerceIn(0, 14)
+        val dx = x - i
+        val dy = y - j
+        val indices = intArrayOf(i * 16 + j, (i + 1) * 16 + j, i * 16 + j + 1, (i + 1) * 16 + j + 1)
+        val weights = doubleArrayOf((1 - dx) * (1 - dy), dx * (1 - dy), (1 - dx) * dy, dx * dy)
+        val low = ln(.65)
+        val high = ln(1.35)
+        val target = ln(sample.pedalWatts / sample.nativeWatts).coerceIn(low, high)
+        val bump = DoubleArray(496) { index ->
+            exp(-.5 * (((index / 16 - x) / 2.5).pow(2) + ((index % 16 - y) / 3).pow(2)))
+        }
+        fun value(delta: Double) = indices.indices.sumOf { k ->
+            weights[k] * (gains[indices[k]] + delta * bump[indices[k]]).coerceIn(low, high)
+        }
+        val residual = target - value(0.0)
+        if (abs(residual) < 1e-14) return
+        val corners = indices.indices.filter { weights[it] > 0 }
+        var left = if (residual < 0) corners.minOf { (low - gains[indices[it]]) / bump[indices[it]] } else 0.0
+        var right = if (residual > 0) corners.maxOf { (high - gains[indices[it]]) / bump[indices[it]] } else 0.0
+        // Endpoints make all contributing vertices saturate, including fractional coordinates.
+        val delta = when (target) {
+            low -> left
+            high -> right
+            else -> {
+                repeat(48) {
+                    val mid = (left + right) / 2
+                    if (value(mid) < target) left = mid else right = mid
+                }
+                (left + right) / 2
+            }
+        }
+        gains.indices.forEach { gains[it] = (gains[it] + delta * bump[it]).coerceIn(low, high) }
+    }
 
     fun fit(baseline: List<Int>, samples: List<CalibrationSample>, active: GrupettoCalibrationTable? = null): GrupettoCalibrationTable? {
         require(validCalibrationTable(baseline))
@@ -98,7 +141,12 @@ object GrupettoCalibrationFitter {
             gains += bounded(k.indices.sumOf { k[it] * alpha[it] }, support)
             confidence += support
         }
-        // Leave an entire local cell out, including its repeats; no training/validation leakage.
+        // Accepted efforts are authoritative at their actual interpolated coordinates. Apply in
+        // time order: a new effort may revise nearby older efforts, rather than being permanently
+        // diluted by their sample counts. Capture stability gates remain in CalibrationWindow.
+        usable.sortedBy { it.capturedAt }.forEach { anchor(gains, baseline, it) }
+        // Leave-cell-out errors below describe the regularized GP prior, not the anchored surface.
+        // appliedRmse, when an incumbent exists, measures the actual final surface.
         val candidateTable = GrupettoCalibrationTable(baseline, gains, confidence, usable.size, n, 0.0, 0.0, false)
         var before = 0.0
         var after = 0.0

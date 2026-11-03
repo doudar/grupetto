@@ -158,14 +158,33 @@ validation. The matrix is bounded to 128 cells by widening the local resistance
 and cadence bins when necessary; cells are never dropped by subsampling. This
 preserves isolated low-cadence measurements that the previous 64-cell cap omitted.
 
-The posterior mean is multiplied by local support and bounded to 0.65–1.35 times
-native power. A 31 × 16 table covers the full baseline and 45–120 rpm, with bilinear
+The posterior mean and local support form a smooth initial surface. Each accepted
+stable effort then anchors that surface to `log(pedal/native)` at its actual raw
+AD and cadence, in timestamp order. A bounded residual adjustment spreads over
+2.5 baseline intervals and 15 rpm. It solves against the four bilinear corners,
+including their limits, rather than averaging the new target with old neighbors.
+Thus the newest usable effort makes corrected watts equal pedal watts at that
+coordinate (within floating-point precision), even with heavily populated neighbors.
+Nearby older observations can move; contradictory efforts cannot all be exact.
+
+The 0.65–1.35 gain limits remain: targets beyond them saturate, rather than match
+pedals. Explicit manual offsets are still applied afterward and can intentionally
+override a measured target. Capture stability/settling and activation coverage
+requirements are unchanged; one effort anchors a draft but does not activate an
+otherwise unsupported table. Display averages and integer broadcasts can differ
+from the instantaneous, paired sample used for this guarantee.
+
+The 31 × 16 table covers the full baseline and 45–120 rpm, with continuous bilinear
 interpolation during the ride. Correction fades toward native power away from
 measurements; this is not evidence of accuracy at unmeasured high powers. Outside
-the baseline/cadence range, native power is used. Zero power stays zero.
+the baseline/cadence range, native power is used. Zero power stays zero. Fitting
+performs one bounded four-corner solve and one grid pass per retained effort; the
+riding callback still only interpolates the saved grid.
 
 Validation leaves an entire local cell out, including all repeats, and remains
-available as an informational score. Activation requires six efforts in six cells,
+available as an informational score for the regularized Gaussian prior. It does
+not cross-validate the subsequent anchoring adjustments; applied error uses the
+actual final grid. Activation requires six efforts in six cells,
 three resistance locations, cadences spanning at least 10 rpm, and finite fit
 values. Error improvement is no longer required, including for the first table.
 Saved drafts are re-evaluated on load under these coverage requirements.
