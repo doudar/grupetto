@@ -66,7 +66,6 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
                         if (it.preview) "the preview table." else "the active table.")
                 }
                 state.table?.let { table ->
-                    if (table.manualOffsets.isNotEmpty()) Text("Manual edits included; validation describes the recorded fit before manual edits.")
                     Text(String.format(Locale.US, "Draft validation RMSE %.2f to %.2f W", table.beforeRmse, table.afterRmse))
                     if (!table.ready) Text("Draft needs more resistances and cadences.")
                 }

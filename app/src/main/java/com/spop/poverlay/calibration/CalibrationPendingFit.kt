@@ -6,5 +6,5 @@ internal fun hasPendingCalibrationFit(active: Boolean, recording: Boolean,
     draftCount: Int, activeCount: Int): Boolean =
     active && !recording && draft?.ready == true && displayed != null &&
         (draftCount != activeCount || draft.baseline != displayed.baseline ||
-            draft.gains != displayed.gains || draft.manualOffsets != displayed.manualOffsets ||
+            draft.gains != displayed.gains ||
             draft.manualCoverage != displayed.manualCoverage)

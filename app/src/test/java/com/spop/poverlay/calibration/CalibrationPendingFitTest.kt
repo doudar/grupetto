@@ -25,7 +25,6 @@ class CalibrationPendingFitTest {
         assertFalse(pending(null)); assertFalse(pending(displayed = null))
     }
     @Test fun savedManualEditsRemainPartOfPendingState() {
-        assertTrue(pending(table.copy(manualOffsets = List(496) { .01 })))
         assertTrue(pending(table.copy(manualCoverage = setOf(5))))
     }
 }
