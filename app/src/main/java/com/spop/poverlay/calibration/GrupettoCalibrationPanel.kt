@@ -3,6 +3,8 @@ package com.spop.poverlay.calibration
 import androidx.compose.animation.core.*
 import com.spop.poverlay.ui.components.GrupettoTabs
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.*
 import androidx.compose.material.icons.Icons
@@ -37,6 +39,8 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
     var confirmClear by remember { mutableStateOf(false) }
     var showInformation by remember { mutableStateOf(false) }
     var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
+    // Older versions saved Backups as index 2 before the Fit details tab was removed.
+    val selectedTab = tab.coerceIn(0, 1)
     var settingsOpen by remember { mutableStateOf(false) }
     if (settingsOpen && onCaptureSettings != null) CalibrationSettingsDialog(captureSettings, onCaptureSettings) { settingsOpen = false }
     if (confirmClear) {
@@ -50,7 +54,8 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
     }
     if (showInformation) AlertDialog(onDismissRequest = { showInformation = false },
         title = { Text("Calibration information") }, text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(state.message)
                 Text("Record + Activate: each usable saved effort updates the active table automatically. " +
                     "Activate is still required the first time and after loading a backup.")
@@ -81,9 +86,9 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
             Switch(state.active, onActivate, enabled = state.active || state.canActivate)
             Text("Activate", fontSize = 16.sp)
         }
-        GrupettoTabs(tab, listOf("Table", "Backups"), { tab = it })
+        GrupettoTabs(selectedTab, listOf("Table", "Backups"), { tab = it })
         CaptureErrorNotice(capture)
-        if (tab == 0) {
+        if (selectedTab == 0) {
         if (!meterReady) Text("Connect a power meter to record", fontSize = 14.sp, lineHeight = 18.sp, color = Color(0xFFFBBF24))
         CalibrationMetrics(metrics, showCorrected = true)
         GrupettoCoverageChart(state.displayTable ?: state.table, capture, state.recording && meterReady, livePosition)
@@ -106,7 +111,7 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
             }, Modifier.weight(1f), fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFF6EE7B7))
         }
         }
-        if (tab == 1) {
+        if (selectedTab == 1) {
             Text("Save or share the current calibration, or load a backup.", fontSize = 14.sp)
             fileControls()
         }

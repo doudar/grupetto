@@ -1,6 +1,9 @@
 package com.spop.poverlay.calibration
 
 import androidx.compose.material.*
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.*
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -68,9 +71,27 @@ class CalibrationDialogLayoutTest {
         compose.onNodeWithText("Clear Grupetto table?").assertDoesNotExist()
         compose.runOnIdle { org.junit.Assert.assertEquals(0, clearCalls) }
         compose.onNodeWithText("Clear table...").performClick()
+        androidx.test.espresso.Espresso.pressBack()
+        compose.onNodeWithText("Clear Grupetto table?").assertDoesNotExist()
+        compose.runOnIdle { org.junit.Assert.assertEquals(0, clearCalls) }
+        compose.onNodeWithText("Clear table...").performClick()
         compose.onNodeWithText("Clear Grupetto table").performClick()
         compose.runOnIdle { org.junit.Assert.assertEquals(1, clearCalls) }
         compose.onNodeWithText("Clear Grupetto table?").assertDoesNotExist()
+    }
+
+    @Test fun compactActionsWrapAndKeepTouchTargets() {
+        compose.setContent { MaterialTheme {
+            androidx.compose.foundation.layout.Box(Modifier.width(300.dp)) {
+                CalibrationTableActions({}, {}, {}, {}, manualEnabled = true)
+            }
+        } }
+        listOf("Guided capture", "Manual editor", "Capture settings", "Clear table...").forEach {
+            compose.onNodeWithText(it).assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+        }
+        val guide = compose.onNodeWithText("Guided capture").fetchSemanticsNode().boundsInRoot
+        val clear = compose.onNodeWithText("Clear table...").fetchSemanticsNode().boundsInRoot
+        org.junit.Assert.assertTrue(clear.top >= guide.bottom)
     }
 
     @Test fun guidedRideRecoveryAndReviewActionsFitWithoutScrolling() {
