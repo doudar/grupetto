@@ -53,8 +53,8 @@ class CalibrationUpgradeVerificationTest {
                 json.getInt("schema"))
             listOf("draft", "saved").forEach { key ->
                 val profile = json.getJSONObject(key)
-                assertEquals(2, profile.getInt("schema"))
-                assertEquals("unified_gaussian_log_gain_v2", profile.getString("model"))
+                assertEquals(3, profile.getInt("schema"))
+                assertEquals("direct_cell_gain_v3", profile.getString("model"))
                 assertFalse(profile.getJSONObject("table").has("manualOffsets"))
             }
         }
@@ -72,6 +72,7 @@ class CalibrationUpgradeVerificationTest {
                 assertEquals("The exact visible old surface must survive", gains, table.gains)
                 assertEquals(confidence, table.confidence)
                 assertEquals(manualCoverage, table.manualCoverage)
+                assertEquals(List(496) { 1 }, table.cellSampleCounts)
                 assertEquals(rawSamples.length(), profile.capture.samples.size)
                 profile.capture.samples.forEachIndexed { index, sample ->
                     val original = rawSamples.getJSONObject(index)
@@ -81,7 +82,16 @@ class CalibrationUpgradeVerificationTest {
                     assertEquals(original.getLong("capturedAt"), sample.capturedAt)
                     assertEquals("Original pedal evidence must survive manual-target migration",
                         original.getDouble("pedalWatts"), sample.measuredPedalWatts, 0.0)
-                    assertEquals(table.corrected(sample.nativeWatts, sample.ad, sample.rpm), sample.pedalWatts, 0.0)
+                    val x = calibrationCoordinate(table.baseline, sample.ad)!!
+                    val y = (sample.rpm - 45) / 5
+                    val i = kotlin.math.floor(x).toInt().coerceIn(0, 29)
+                    val j = kotlin.math.floor(y).toInt().coerceIn(0, 14)
+                    fun at(a: Int, b: Int) = gains[a * 16 + b]
+                    val low = at(i, j) * (1 - (x - i)) + at(i + 1, j) * (x - i)
+                    val high = at(i, j + 1) * (1 - (x - i)) + at(i + 1, j + 1) * (x - i)
+                    val legacyTarget = sample.nativeWatts * kotlin.math.exp(
+                        (low * (1 - (y - j)) + high * (y - j)).coerceIn(kotlin.math.ln(.65), kotlin.math.ln(1.35)))
+                    assertEquals("Keep the legacy bilinear target; do not reinterpret it with new lookup", legacyTarget, sample.pedalWatts, 0.0)
                 }
                 assertTrue(profile.capture.samples.any { it.recordedPedalWatts != null })
             }
@@ -113,8 +123,14 @@ class CalibrationUpgradeVerificationTest {
                 abs(before.corrected(fresh.nativeWatts, fresh.ad, fresh.rpm) - fresh.pedalWatts) > 1.0)
             restarted.accept(capture.copy(samples = capture.samples + fresh))
             val updated = restarted.state.value.displayTable!!
-            assertEquals("A future stable recording replaces the old edit exactly", 240.0,
+            val expectedWatts = (before.corrected(200.0, fresh.ad, fresh.rpm) + 240.0) / 2
+            assertEquals("A future stable recording averages with the migrated one-value seed", expectedWatts,
                 updated.corrected(200.0, fresh.ad, fresh.rpm), 1e-8)
+            val changedCell = updated.currentCellIndex(fresh.ad, fresh.rpm)!!
+            assertEquals(2, updated.cellSampleCounts[changedCell])
+            updated.gains.indices.filter { it != changedCell }.forEach {
+                assertEquals("Recording cannot modify a neighboring migrated cell", before.gains[it], updated.gains[it], 0.0)
+            }
             assertEquals(capture.samples.size + 1, restarted.state.value.count)
             assertTrue(restarted.state.value.recording)
             assertTrue(restarted.state.value.active)
@@ -122,7 +138,7 @@ class CalibrationUpgradeVerificationTest {
             val corrected = restarted.correctedPower(CalibrationFrame(SystemClock.elapsedRealtime(),
                 fresh.ad.toInt(), fresh.rpm, fresh.nativeWatts, capture.frameSerial, 1))
             assertNotNull(corrected)
-            assertEquals(240.0, corrected!!.toDouble(), 1e-5)
+            assertEquals(expectedWatts, corrected!!.toDouble(), 1e-5)
             restarted.record(false, null)
 
             val afterRestart = GrupettoCalibrationManager(context)
