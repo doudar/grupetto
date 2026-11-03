@@ -18,7 +18,8 @@ import java.io.File
 
 class ShifterSettingsTest {
     private val compose = createComposeRule()
-    @get:Rule val rules: RuleChain = RuleChain.outerRule(compose).around(UiTestDiagnostics(compose))
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(OverlayPermissionRule())
+        .around(compose).around(UiTestDiagnostics(compose))
 
     @Test fun previewOnlyAppearsDuringPositionGestureEvenWhenCheckboxIsOff() {
         val shown = mutableStateOf(true)

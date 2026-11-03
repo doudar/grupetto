@@ -319,13 +319,31 @@ class CalibrationPersistenceMigrationTest {
     @Test fun oversizedStartupFilesAreQuarantinedBeforeParsing() {
         listOf("grupetto-calibration.json", "grupetto-power-draft.json").forEach { name ->
             withDirectory { directory ->
-                val contents = "x".repeat(CalibrationBackup.MAX_BYTES + 1)
-                File(directory, name).writeText(contents)
+                // Exercise the size guard without allocating several copies of a 4 MiB
+                // String in the API29 test process's small heap.
+                val size = CalibrationBackup.MAX_BYTES + 1
+                val block = ByteArray(8192) { 'x'.code.toByte() }
+                File(directory, name).outputStream().buffered().use { output ->
+                    var remaining = size
+                    while (remaining > 0) {
+                        val count = minOf(remaining, block.size)
+                        output.write(block, 0, count)
+                        remaining -= count
+                    }
+                }
                 val store = CalibrationBackupStore(directory)
                 assertFalse(store.load().hasData)
                 assertTrue(store.resetOnLoad)
                 val recovery = directory.listFiles()!!.single { it.name.startsWith("$name.unusable-") }
-                assertEquals(contents, recovery.readText())
+                assertEquals(size.toLong(), recovery.length())
+                recovery.inputStream().buffered().use { input ->
+                    var count = input.read(block)
+                    while (count != -1) {
+                        assertTrue("Quarantine must preserve every fixture byte",
+                            (0 until count).all { block[it] == 'x'.code.toByte() })
+                        count = input.read(block)
+                    }
+                }
                 assertFalse(CalibrationBackupStore(directory).load().hasData)
             }
         }
