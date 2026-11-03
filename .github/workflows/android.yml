@@ -264,13 +264,20 @@ jobs:
       with:
         api-level: 29
         arch: x86_64
+        # The generic 320px profile silently clamps a 1920px wm override to 640px.
+        # Use a defined profile with sufficient physical dimensions.
+        profile: pixel_2
         emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -accel auto
         emulator-boot-timeout: 1200
         disable-animations: true
         script: |
           adb shell wm size 1920x1080
           adb shell wm density 240
-          bash -c 'set +e; bash ./gradlew connectedDebugAndroidTest; result=$?; mkdir -p app/build/reports/androidTests; adb pull /sdcard/Android/data/com.spop.poverlay/files/calibration-test-diagnostics app/build/reports/androidTests/diagnostics || true; exit "$result"'
+          adb shell wm size
+          adb shell wm density
+          test "$(adb shell wm size | tr -d '\r' | tail -n 1)" = 'Override size: 1920x1080'
+          test "$(adb shell wm density | tr -d '\r' | tail -n 1)" = 'Override density: 240'
+          bash -c 'set +e; bash ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.uiDiagnostics=true; result=$?; mkdir -p app/build/reports/androidTests; adb logcat -d -b crash > app/build/reports/androidTests/emulator-crash.log || true; adb pull /data/local/tmp/grupetto-ui-test-diagnostics app/build/reports/androidTests/fixture-diagnostics || true; adb pull /sdcard/Android/data/com.spop.poverlay/files/calibration-test-diagnostics app/build/reports/androidTests/diagnostics || true; exit "$result"'
     - name: Preserve instrumentation test reports
       if: always()
       uses: actions/upload-artifact@v4

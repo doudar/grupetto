@@ -12,10 +12,12 @@ import com.spop.poverlay.ui.theme.PTONOverlayTheme
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 import java.io.File
 
 class TrainerControlsTest {
-    @get:Rule val compose = createComposeRule()
+    private val compose = createComposeRule()
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(compose).around(UiTestDiagnostics(compose))
     private val control = BikeControl(true, { 1000L }) { error("UI tests must not drive a motor") }
     private fun setup() {
         control.acceptSample(BikeSample(150f, 80f, 40, 1000))

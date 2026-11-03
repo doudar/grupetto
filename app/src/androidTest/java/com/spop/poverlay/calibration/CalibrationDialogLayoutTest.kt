@@ -13,9 +13,12 @@ import com.spop.poverlay.SettingsDialog
 import com.spop.poverlay.ui.theme.Typography
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
+import com.spop.poverlay.UiTestDiagnostics
 
 class CalibrationDialogLayoutTest {
-    @get:Rule val compose = createComposeRule()
+    private val compose = createComposeRule()
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(compose).around(UiTestDiagnostics(compose))
     private val baseline = List(31) { 1000 + it * 100 }
     private val samples = (8..16 step 2).flatMap { x -> listOf(65, 80, 95).map { rpm ->
         CalibrationSample(baseline[x].toDouble(), rpm.toDouble(), 200.0, 220.0, (x * 100 + rpm).toLong())

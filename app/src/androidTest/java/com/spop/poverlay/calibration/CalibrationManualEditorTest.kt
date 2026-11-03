@@ -22,6 +22,7 @@ import org.junit.rules.RuleChain
 import org.junit.rules.TestWatcher
 import org.junit.runner.Description
 import java.io.File
+import com.spop.poverlay.UiTestDiagnostics
 
 class CalibrationManualEditorTest {
     private val compose = createComposeRule()
@@ -34,7 +35,7 @@ class CalibrationManualEditorTest {
             }
         }
     }
-    @get:Rule val rules: RuleChain = RuleChain.outerRule(compose).around(failureDiagnostics)
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(compose).around(UiTestDiagnostics(compose)).around(failureDiagnostics)
 
     private fun captureFailure(description: Description, failure: Throwable) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
