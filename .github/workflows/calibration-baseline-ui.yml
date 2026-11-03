@@ -1,0 +1,38 @@
+name: Released v50 editor baseline
+on:
+  push:
+    branches: [test/manual-editor-v50-baseline]
+permissions:
+  contents: read
+jobs:
+  original-editor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: temurin
+        cache: gradle
+    - name: Prepare disposable debug signing
+      run: |
+        mkdir -p ~/.android
+        keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 1 -dname 'CN=Android Debug,O=Android,C=US'
+    - name: Run original release editor tests on the same virtual tablet
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: 29
+        arch: x86_64
+        emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -accel auto
+        emulator-boot-timeout: 1200
+        disable-animations: true
+        script: |
+          adb shell wm size 1920x1080
+          adb shell wm density 240
+          bash -c 'set +e; bash ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.spop.poverlay.calibration.CalibrationManualEditorTest; result=$?; adb pull /sdcard/Android/data/com.spop.poverlay/files/calibration-test-diagnostics app/build/reports/androidTests/diagnostics || true; exit "$result"'
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: released-v50-editor-baseline
+        path: app/build/reports/androidTests
