@@ -1,9 +1,14 @@
 package com.spop.poverlay.calibration
 
 import androidx.compose.animation.core.*
+import com.spop.poverlay.ui.components.GrupettoTabs
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,30 +35,53 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
     captureSettings: CalibrationCaptureSettings = CalibrationCaptureSettings(),
     onCaptureSettings: ((CalibrationCaptureSettings) -> Unit)? = null) {
     var confirmClear by remember { mutableStateOf(false) }
+    var showInformation by remember { mutableStateOf(false) }
     var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     var settingsOpen by remember { mutableStateOf(false) }
     if (settingsOpen && onCaptureSettings != null) CalibrationSettingsDialog(captureSettings, onCaptureSettings) { settingsOpen = false }
-    if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text("Clear Grupetto table?") },
-        text = { Text("Clear recorded efforts and manual edits, and turn correction off?") },
-        confirmButton = { TextButton({ confirmClear = false; onClear() }) { Text("Clear Grupetto table") } },
-        dismissButton = { TextButton({ confirmClear = false }) { Text("Keep table") } })
+    if (confirmClear) {
+        val keepFocus = remember { FocusRequester() }
+        AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text("Clear Grupetto table?") },
+            text = { Text("Delete all saved Grupetto efforts and manual edits, stop recording, and turn correction off? " +
+                "This cannot be undone without loading an exported backup. The bike's own calibration and exported backups are unchanged.") },
+            confirmButton = { TextButton({ confirmClear = false; onClear() }) { Text("Clear Grupetto table", color = MaterialTheme.colors.error) } },
+            dismissButton = { TextButton({ confirmClear = false }, Modifier.focusRequester(keepFocus)) { Text("Keep table") } })
+        LaunchedEffect(Unit) { keepFocus.requestFocus() }
+    }
+    if (showInformation) AlertDialog(onDismissRequest = { showInformation = false },
+        title = { Text("Calibration information") }, text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(state.message)
+                Text("Record + Activate: each usable saved effort updates the active table automatically. " +
+                    "Activate is still required the first time and after loading a backup.")
+                Text("Colors show the ${if (state.active) "active" else "preview"} correction as a percentage of raw bike watts. " +
+                    "Red: bike overestimated. Blue: bike underestimated. Scale saturates at -10% / +10%.")
+                state.errors?.let {
+                    Text("Average error compares the same ${it.count} saved efforts. After uses " +
+                        if (it.preview) "the preview table." else "the active table.")
+                }
+                state.table?.let { table ->
+                    if (table.manualOffsets.isNotEmpty()) Text("Manual edits included; validation describes the recorded fit before manual edits.")
+                    Text(String.format(Locale.US, "Draft validation RMSE %.2f to %.2f W", table.beforeRmse, table.afterRmse))
+                    if (!table.ready) Text("Draft needs more resistances and cadences.")
+                }
+                Text("Held-out validation and error scores are informational. Pulse: cyan shows your current cell, orange settles, yellow holds, green saves.")
+            }
+        }, confirmButton = { TextButton({ showInformation = false }) { Text("Close") } })
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Grupetto table", fontSize = 18.sp, lineHeight = 22.sp)
                 Text("${state.count} saved", fontSize = 14.sp, lineHeight = 18.sp, color = Color(0xFF6EE7B7))
             }
+            IconButton({ showInformation = true }) { Icon(Icons.Outlined.Info, contentDescription = "Calibration information") }
             Switch(state.recording, onRecord, enabled = state.recording || meterReady)
             Text("Record", fontSize = 16.sp)
             Spacer(Modifier.width(16.dp))
             Switch(state.active, onActivate, enabled = state.active || state.canActivate)
             Text("Activate", fontSize = 16.sp)
         }
-        TabRow(tab, backgroundColor = Color.Transparent) {
-            listOf("Table", "Fit details", "Backups").forEachIndexed { index, label ->
-                Tab(tab == index, { tab = index }, text = { Text(label) })
-            }
-        }
+        GrupettoTabs(tab, listOf("Table", "Backups"), { tab = it })
         CaptureErrorNotice(capture)
         if (tab == 0) {
         if (!meterReady) Text("Connect a power meter to record", fontSize = 14.sp, lineHeight = 18.sp, color = Color(0xFFFBBF24))
@@ -62,11 +90,10 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
         CaptureHoldFeedback(capture, state.recording)
         CalibrationCorrectionLegend()
         CalibrationErrorSummary(state.errors)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onGuide, Modifier.weight(1f).height(40.dp)) { Text("Guided capture", fontSize = 13.sp) }
-            if (onManualEdit != null) OutlinedButton(onManualEdit, Modifier.weight(1f).height(40.dp),
-                enabled = !state.recording && (state.displayTable ?: state.table) != null) { Text("Manual editor") }
-            if (onCaptureSettings != null) OutlinedButton({ settingsOpen = true }, Modifier.weight(1f).height(40.dp)) { Text("Capture settings", fontSize = 13.sp) }
+        CalibrationTableActions(onGuide, onManualEdit, onCaptureSettings?.let { { settingsOpen = true } },
+            { confirmClear = true }, manualEnabled = !state.recording && (state.displayTable ?: state.table) != null)
+        if (hasPendingCalibrationFit(state.active, state.recording, state.table, state.displayTable, state.count, state.activeCount)) {
+            TextButton({ onActivate(true) }) { Text("Apply latest fit") }
         }
         if (state.recording) Text("Pause recording to edit the power table manually.", fontSize = 12.sp, color = Color(0xFF9EAEC0))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -80,29 +107,34 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
         }
         }
         if (tab == 1) {
-            if (capture.error == null) Text(state.message, fontSize = 14.sp, lineHeight = 18.sp)
-            Text("Colors show the ${if (state.active) "active" else "preview"} table's correction as a percentage of raw bike watts. " +
-                "Red: bike overestimated. Blue: bike underestimated. Scale saturates at -10% / +10%.",
-                fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFF9EAEC0))
-            state.errors?.let {
-                Text("Average absolute error on the same ${it.count} saved efforts. After uses " +
-                    (if (it.preview) "the preview table." else "the active table.") + " Validation below uses held-out data.",
-                    fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFF9EAEC0))
-            }
-            state.table?.let { table ->
-                if (table.manualOffsets.isNotEmpty()) Text("Manual edits included · validation below describes the recorded fit before manual edits.",
-                    fontSize = 12.sp, color = Color(0xFFFBBF24))
-                Text(String.format(Locale.US, "Draft validation RMSE %.2f to %.2f W", table.beforeRmse, table.afterRmse), fontSize = 14.sp)
-                if (!table.ready) Text("Draft needs more resistances and cadences", fontSize = 12.sp, color = Color(0xFFFBBF24))
-                if (state.active && !state.recording && table.ready) TextButton({ onActivate(true) }) { Text("Update active table from latest fit") }
-            }
-            Text("Record + Activate: every saved effort updates the table. Error scores are informational. Pulse: cyan shows your current cell, orange settles, yellow holds, green saves.",
-                fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFF9EAEC0))
-            TextButton({ confirmClear = true }) { Text("Clear table...") }
-        }
-        if (tab == 2) {
             Text("Save or share the current calibration, or load a backup.", fontSize = 14.sp)
             fileControls()
+        }
+    }
+}
+
+/** Compact horizontal controls on a tablet; wrap without shrinking touch targets on narrow screens. */
+@Composable
+internal fun CalibrationTableActions(onGuide: () -> Unit, onManualEdit: (() -> Unit)?,
+    onCaptureSettings: (() -> Unit)?, onClear: () -> Unit, manualEnabled: Boolean) {
+    val actions = listOfNotNull(
+        Triple("Guided capture", onGuide, true),
+        onManualEdit?.let { Triple("Manual editor", it, manualEnabled) },
+        onCaptureSettings?.let { Triple("Capture settings", it, true) },
+        Triple("Clear table...", onClear, true))
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val columns = if (maxWidth >= 560.dp) 4 else if (maxWidth >= 280.dp) 2 else 1
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            actions.chunked(columns).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    row.forEach { (label, action, enabled) ->
+                        OutlinedButton(action, Modifier.weight(1f).heightIn(min = 48.dp), enabled = enabled,
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)) {
+                            Text(label, fontSize = 12.sp, lineHeight = 16.sp)
+                        }
+                    }
+                }
+            }
         }
     }
 }

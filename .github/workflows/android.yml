@@ -92,6 +92,9 @@ jobs:
         echo "Updated build.gradle versions:"
         grep -E "(versionCode|versionName)" app/build.gradle
 
+    - name: Run unit tests and compile UI tests
+      run: ./gradlew testDebugUnitTest compileDebugAndroidTestKotlin
+
     - name: Build release APK
       run: ./gradlew assembleRelease
 

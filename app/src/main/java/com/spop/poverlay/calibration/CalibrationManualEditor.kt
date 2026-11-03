@@ -1,5 +1,7 @@
 package com.spop.poverlay.calibration
 
+import com.spop.poverlay.ui.components.GrupettoTabs
+
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
@@ -185,11 +187,7 @@ private fun EditorInspector(table: GrupettoCalibrationTable, selected: Int, scop
         .background(EditorPanel, RoundedCornerShape(12.dp)).padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("${45 + selected % 16 * 5} rpm / point ${selected / 16} / ${percentLabel(percent)}", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        if (!compactInput) TabRow(tab, backgroundColor = Color.Transparent) {
-            listOf("Edit", "Scope", "Tools").forEachIndexed { index, label ->
-                Tab(tab == index, { tab = index }, modifier = Modifier.height(36.dp), text = { Text(label, fontSize = 12.sp) })
-            }
-        }
+        if (!compactInput) GrupettoTabs(tab, listOf("Edit", "Scope", "Tools"), { tab = it }, fontSize = 12.sp)
         if (tab == 1 && !compactInput) {
         Text("Apply to", fontWeight = FontWeight.Bold, fontSize = 13.sp)
         CalibrationEditScope.values().toList().chunked(2).forEach { options ->

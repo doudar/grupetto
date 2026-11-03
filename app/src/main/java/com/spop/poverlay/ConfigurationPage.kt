@@ -1,5 +1,7 @@
 package com.spop.poverlay
 
+import com.spop.poverlay.ui.components.GrupettoTabs
+
 import android.os.Build
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -297,10 +299,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
         }
         "bike" -> if (bike.connected) SettingsDialog("Bike+ / CrossTrainer", { dialog = null }) {
             var tab by remember { mutableStateOf(0) }
-            TabRow(tab, backgroundColor = Color.Transparent) {
-                Tab(tab == 0, { tab = 0 }, text = { Text("Trainer") })
-                Tab(tab == 1, { tab = 1 }, text = { Text("Shifters") })
-            }
+            GrupettoTabs(tab, listOf("Trainer", "Shifters"), { tab = it })
             Spacer(Modifier.height(8.dp))
             if (tab == 0) TrainerControls(bike, viewModel::startErg, viewModel::startSimulation,
                 viewModel::stopBikeControl, viewModel::setBikeResistance, viewModel::setBikeTuning)
@@ -419,11 +418,7 @@ private fun PowerMeterDialog(viewModel: ConfigurationViewModel, onDismiss: () ->
         }
         Text(if (viewModel.isPreview) "Model emulation: pairing is disabled" else status,
             fontSize = 12.sp, color = Color(0xFF9EAEC0))
-        TabRow(tab, backgroundColor = Color.Transparent) {
-            listOf("Discover", "Saved").forEachIndexed { index, name ->
-                Tab(tab == index, { tab = index; page = 0 }, text = { Text(name) })
-            }
-        }
+        GrupettoTabs(tab, listOf("Discover", "Saved"), { tab = it; page = 0 })
         val devices = (if (tab == 0) discovered else saved).filter { it.address != connected?.address }
         val pages = maxOf(1, (devices.size + 1) / 2)
         val current = page.coerceAtMost(pages - 1)
@@ -526,11 +521,7 @@ private fun HeartRateManagerDialog(
             }
         }
         Spacer(Modifier.height(8.dp))
-        TabRow(tab, backgroundColor = Color.Transparent) {
-            listOf("Discover", "Saved", "Zones").forEachIndexed { index, label ->
-                Tab(tab == index, { tab = index; page = 0 }, text = { Text(label) })
-            }
-        }
+        GrupettoTabs(tab, listOf("Discover", "Saved", "Zones"), { tab = it; page = 0 })
         Spacer(Modifier.height(12.dp))
         if (tab == 2) {
             Text("Zone boundaries (bpm)", fontWeight = FontWeight.SemiBold)

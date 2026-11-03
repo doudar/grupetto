@@ -25,7 +25,7 @@ class CalibrationDialogLayoutTest {
     }
     private fun visible(vararg labels: String) = labels.forEach { compose.onNodeWithText(it).assertIsDisplayed() }
 
-    @Test fun tableDetailsBackupsAndSettingsFitWithoutScrolling() {
+    @Test fun tableBackupsAndSettingsFitWithoutScrolling() {
         compose.setContent { MaterialTheme(typography = Typography) {
             SettingsDialog("Calibrate using power pedals", {}, compact = true) {
                 GrupettoCalibrationPanel(GrupettoCalibrationUiState(count = 235, table = table), {}, {}, {}, {},
@@ -36,8 +36,11 @@ class CalibrationDialogLayoutTest {
         } }
         visible("Record", "Activate", "Manual editor", "Capture settings", "Guided capture", "Done")
         noVerticalScrolling()
-        compose.onNodeWithText("Fit details").performClick()
+        compose.onNodeWithText("Fit details").assertDoesNotExist()
         visible("Clear table...", "Done")
+        compose.onNodeWithContentDescription("Calibration information").performClick()
+        visible("Calibration information", "Close")
+        compose.onNodeWithText("Close").performClick()
         noVerticalScrolling()
         compose.onNodeWithText("Backups").performClick()
         visible("Save", "Load", "Share", "Done")
@@ -51,6 +54,23 @@ class CalibrationDialogLayoutTest {
         noVerticalScrolling()
         compose.onNodeWithText("Save settings").performClick()
         visible("Manual editor", "Capture settings")
+    }
+
+    @Test fun clearRequiresExplicitConfirmationAndCancelPreservesTable() {
+        var clearCalls = 0
+        compose.setContent { MaterialTheme {
+            GrupettoCalibrationPanel(GrupettoCalibrationUiState(count = 235, table = table), {}, {}, { clearCalls++ }, {})
+        } }
+        compose.onNodeWithText("Clear table...").performClick()
+        compose.runOnIdle { org.junit.Assert.assertEquals(0, clearCalls) }
+        visible("Clear Grupetto table?", "Keep table", "Clear Grupetto table")
+        compose.onNodeWithText("Keep table").assertIsFocused().performClick()
+        compose.onNodeWithText("Clear Grupetto table?").assertDoesNotExist()
+        compose.runOnIdle { org.junit.Assert.assertEquals(0, clearCalls) }
+        compose.onNodeWithText("Clear table...").performClick()
+        compose.onNodeWithText("Clear Grupetto table").performClick()
+        compose.runOnIdle { org.junit.Assert.assertEquals(1, clearCalls) }
+        compose.onNodeWithText("Clear Grupetto table?").assertDoesNotExist()
     }
 
     @Test fun guidedRideRecoveryAndReviewActionsFitWithoutScrolling() {

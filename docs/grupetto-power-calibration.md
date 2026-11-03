@@ -22,8 +22,9 @@ or change the sensor board. Activation is explicit and persists across restarts;
 recording pauses after a process restart. With Record and Activate both on,
 each usable fit automatically replaces the active snapshot after a saved effort,
 without requiring a lower error score than the previous table or raw bike power.
-With recording off, the snapshot stays fixed; **Update active table** remains a
-manual option. Turning Activate off prevents automatic activation.
+With recording off, the snapshot stays fixed. **Apply latest fit** appears on the
+Table page only when a usable draft differs from the active snapshot (for example,
+a refit after restart or a failed automatic update). It is not a routine save step. Turning Activate off prevents automatic activation.
 Turning it off retains the last usable snapshot. If a later draft lacks coverage,
 Activate can reuse that saved snapshot for the same bike and baseline; the
 controls show which saved effort count will be used and why the draft is not ready.
@@ -42,10 +43,15 @@ progress bar and seconds-left label follow the configured effort duration.
 The live pulse does not require recording, activation, or an external meter. It disappears
 when raw bike data is stale, cadence is out of range, or the baseline differs. The table screen shows live raw bike
 watts, corrected watts, pedal watts, cadence and resistance even while recording
-is paused. Fit messages and validation details are available under **Fit details**.
-Calibration dialogs use wide, compact layouts without scrolling. The table has
-**Table**, **Fit details**, and **Backups** tabs; guided capture has Ride and Review
-views. Secondary actions use compact buttons while riding actions keep larger targets.
+is paused. Fit messages and validation details are available from the information
+button beside **Grupetto table**. There is no separate Fit details tab.
+The table has **Table** and **Backups** tabs; guided capture has Ride and Review
+views. The Table page groups **Guided capture**, **Manual editor**, **Capture settings**,
+and **Clear table...** in compact horizontal controls, wrapping on narrow screens
+while retaining 48 dp touch targets. Clear opens an explicit confirmation with
+**Keep table** initially focused. Cancel, Back, or dismissal leaves everything intact.
+Only **Clear Grupetto table** deletes saved Grupetto efforts and manual edits, stops
+recording, and disables correction; exported backups and bike calibration are unchanged.
 The table page compares **Before calibration** and **After calibration** as mean
 absolute error in watts against the pedals, on exactly the same saved paired
 efforts. After uses the actual active snapshot, not the newer draft. When correction
