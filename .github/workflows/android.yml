@@ -112,7 +112,7 @@ jobs:
         test "$CODE" -gt 51
         sha256sum "$APK" | tee -a apk-verification.txt
         echo "Source PR90: e6147d4de99d39e6158888c44db4624c12781569" | tee -a apk-verification.txt
-        echo "Source PR89: 173f3a6e8b5407204184913f49a0480540201ecd" | tee -a apk-verification.txt
+        echo "Source PR89: 2fbfd844865ac4c738ac87d597d9b1e28d68b971" | tee -a apk-verification.txt
         git rev-parse HEAD | tee -a apk-verification.txt
 
     - name: List APK outputs
