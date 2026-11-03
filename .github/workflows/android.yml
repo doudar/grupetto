@@ -112,7 +112,7 @@ jobs:
         test "$CODE" -gt 51
         sha256sum "$APK" | tee -a apk-verification.txt
         echo "Source PR90: 9cf8306f3222abf1eefc934b5d25e22ea55cdaed" | tee -a apk-verification.txt
-        echo "Source PR89: 640a0913a57b0fd965372d347da62ae3e584c81f" | tee -a apk-verification.txt
+        echo "Source PR89: 479ec9e671c77d90cef60a174d0461667cf55f7d" | tee -a apk-verification.txt
         git rev-parse HEAD | tee -a apk-verification.txt
 
     - name: List APK outputs
@@ -238,6 +238,14 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
         cache: gradle
+    - name: Create disposable test-only signing key
+      run: |
+        mkdir -p ~/.android
+        if [ ! -f ~/.android/debug.keystore ]; then
+          keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android \
+            -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+            -validity 1 -dname "CN=Android Debug,O=Android,C=US"
+        fi
     - name: Test calibration persistence on virtual Android
       uses: reactivecircus/android-emulator-runner@v2
       with:
@@ -246,7 +254,10 @@ jobs:
         emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -accel auto
         emulator-boot-timeout: 1200
         disable-animations: true
-        script: bash ./gradlew connectedDebugAndroidTest
+        script: |
+          adb shell wm size 1920x1080
+          adb shell wm density 240
+          bash ./gradlew connectedDebugAndroidTest
     - name: Preserve instrumentation test reports
       if: always()
       uses: actions/upload-artifact@v4
