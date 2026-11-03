@@ -74,7 +74,12 @@ class CalibrationDialogLayoutTest {
         compose.onNodeWithText("Clear Grupetto table?").assertDoesNotExist()
         compose.runOnIdle { org.junit.Assert.assertEquals(0, clearCalls) }
         compose.onNodeWithText("Clear table...").performClick()
-        androidx.test.espresso.Espresso.pressBack()
+        compose.onNodeWithText("Keep table").assertIsFocused()
+        // Espresso's default root may select the unfocused activity beneath this dialog.
+        // Send a real BACK event to the focused Android window instead; do not bypass dismiss.
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+            .sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        compose.waitForIdle()
         compose.onNodeWithText("Clear Grupetto table?").assertDoesNotExist()
         compose.runOnIdle { org.junit.Assert.assertEquals(0, clearCalls) }
         compose.onNodeWithText("Clear table...").performClick()

@@ -169,6 +169,8 @@ class UnifiedCalibrationTest {
         val error = calibrationErrorComparison(edited, null, null)!!
         assertEquals(20.0, error.beforeWatts, 1e-8)
         assertEquals(40.0, error.afterWatts!!, 1e-8)
+        assertEquals(20.0, edited.table!!.beforeRmse, 1e-8)
+        assertEquals(40.0, edited.table!!.afterRmse, 1e-8)
     }
 
     @Test fun localNewRecordingPreservesDistantManualShapeInsteadOfRebuildingTheWholeTable() {

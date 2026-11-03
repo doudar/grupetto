@@ -28,7 +28,17 @@ internal fun applyUnifiedManualEdit(profile: GrupettoCalibrationProfile, edited:
     val capture = profile.capture.copy(samples = samplesForCalibrationTable(profile.capture.samples, edited))
     val through = maxOf(now, edited.recordedThrough, profile.table?.recordedThrough ?: Long.MIN_VALUE,
         capture.samples.maxOfOrNull { it.capturedAt } ?: Long.MIN_VALUE)
+    val errors = eligibleCalibrationErrorSamples(capture.baseline, capture.samples)
+    val rawRmse = errors.takeIf { it.isNotEmpty() }?.let { values -> kotlin.math.sqrt(values.map {
+        val error = it.nativeWatts - it.measuredPedalWatts
+        error * error
+    }.average()) } ?: edited.beforeRmse
+    val correctedRmse = errors.takeIf { it.isNotEmpty() }?.let { values -> kotlin.math.sqrt(values.map {
+        val error = edited.corrected(it.nativeWatts, it.ad, it.rpm) - it.measuredPedalWatts
+        error * error
+    }.average()) } ?: edited.afterRmse
     val table = edited.copy(ready = true, sampleCount = capture.samples.size, recordedThrough = through,
+        beforeRmse = rawRmse, afterRmse = correctedRmse,
         activeComparison = null).withCalibrationCoverage(capture.samples)
     return GrupettoCalibrationProfile(capture, table)
 }
