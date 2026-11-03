@@ -87,7 +87,7 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
                 Text("${state.count} saved", fontSize = 14.sp, lineHeight = 18.sp, color = Color(0xFF6EE7B7))
             }
             IconButton({ showInformation = true }) { Icon(Icons.Outlined.Info, contentDescription = "Calibration information") }
-            Switch(state.recording, onRecord, enabled = state.recording || meterReady)
+            Switch(state.recording, onRecord, modifier = Modifier.semantics { contentDescription = "Record calibration" })
             Text("Record", fontSize = 16.sp)
             Spacer(Modifier.width(16.dp))
             Switch(state.active, onActivate, enabled = state.active || state.canActivate)

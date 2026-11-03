@@ -38,7 +38,7 @@ fun CalibrationPanel(state: CalibrationUiState, onEnabled: (Boolean) -> Unit, on
     Column(Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Button({ onEnabled(!state.enabled) }, Modifier.heightIn(min = 48.dp), enabled = state.enabled || meterReady) {
+            Button({ onEnabled(!state.enabled) }, Modifier.heightIn(min = 48.dp)) {
                 Text(if (state.enabled) "Pause capture" else "Start capture")
             }
             if (localCalibration != null) OutlinedButton(onLocalReview,

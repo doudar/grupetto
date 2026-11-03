@@ -5,6 +5,7 @@ import android.bluetooth.le.*
 import android.content.Context
 import android.os.ParcelUuid
 import android.os.SystemClock
+import com.spop.poverlay.sensor.shouldDiscoverSensor
 import com.spop.poverlay.sensor.heartrate.HeartRateBluetoothAccess
 import com.spop.poverlay.sensor.heartrate.HeartRateDevice
 import kotlinx.coroutines.*
@@ -40,11 +41,14 @@ class PowerMeterManager internal constructor(
     private var watcher: Job? = null
     private var nextReconnectAt = 0L
     private var scanStartedAt = 0L
+    private var preferReconnectScan = false
     private var selected = preferences.getString("selected", null)
     private val mutableDevices = MutableStateFlow<List<HeartRateDevice>>(emptyList())
     val discoveredDevices = mutableDevices.asStateFlow()
     private val mutableSaved = MutableStateFlow<List<HeartRateDevice>>(emptyList())
     val savedDevices = mutableSaved.asStateFlow()
+    private val mutableConnecting = MutableStateFlow<HeartRateDevice?>(null)
+    val connectingDevice = mutableConnecting.asStateFlow()
     private val mutableConnected = MutableStateFlow<HeartRateDevice?>(null)
     val connectedDevice = mutableConnected.asStateFlow()
     private val mutableReading = MutableStateFlow<ExternalPowerReading?>(null)
@@ -71,13 +75,18 @@ class PowerMeterManager internal constructor(
     }
     @Synchronized fun stop() {
         started = false
+        managing = false
         watcher?.cancel(); watcher = null
         stopScan()
         release()
     }
     @Synchronized fun manage(enabled: Boolean) {
+        if (managing == enabled) return
         managing = enabled
-        if (enabled) { start(); startScan() } else stopScan()
+        if (enabled) start()
+        stopScan()
+        if (shouldScan()) startScan()
+        else if (gatt == null && selected == null) mutableStatus.value = "No power meter selected"
     }
     @Synchronized internal fun checkConnection() {
         if (!started) return
@@ -95,17 +104,27 @@ class PowerMeterManager internal constructor(
         if (gatt != null && now - (lastMeasurementAt ?: connectionAt) > timeout) {
             log("Data timeout: connected=${mutableConnected.value != null}, receivedPacket=$loggedPacket, lastValidAge=${lastMeasurementAt?.let { now - it }}")
             release(); nextReconnectAt = now + 3000
+            preferReconnectScan = true
             mutableStatus.value = "Reconnecting to ${selected?.let(::savedName) ?: "power meter"}"
         }
-        if (gatt == null && !manuallyDisconnected && now >= nextReconnectAt) selected?.let {
+        if (preferReconnectScan && !access.canScan()) preferReconnectScan = false
+        if (gatt == null && scan == null && !preferReconnectScan && !manuallyDisconnected && now >= nextReconnectAt) selected?.let {
             beginConnection(HeartRateDevice(it, preferences.getString("name_$it", null)))
         }
         // Bound scan sessions; allow Android's scan throttling to settle between retries.
         if (scan != null && now - scanStartedAt > 15000) {
             stopScan(); nextReconnectAt = now + 5000
-        } else if (managing && scan == null && now >= nextReconnectAt) startScan()
+            preferReconnectScan = false
+        } else if (shouldScan() && scan == null && now >= nextReconnectAt) startScan()
+        if (!shouldScan()) stopScan()
     }
+    private fun shouldScan() = shouldDiscoverSensor(
+        running = started, pickerOpen = managing, hasSavedTarget = selected != null || mutableSaved.value.isNotEmpty(),
+        manuallyDisconnected = manuallyDisconnected, hasGatt = gatt != null
+    )
+
     @Synchronized private fun startScan() {
+        if (!shouldScan()) { stopScan(); return }
         if (scan != null || !access.canScan()) {
             if (!access.canScan()) mutableStatus.value = "Bluetooth and location permissions required"
             return
@@ -118,7 +137,8 @@ class PowerMeterManager internal constructor(
                     if (info.name?.startsWith("Grupetto", ignoreCase = true) == true) return
                     mutableDevices.value = (mutableDevices.value.filterNot { it.address == info.address } + info)
                         .sortedBy { it.name ?: it.address }
-                    if (gatt == null && !manuallyDisconnected && info.address == selected) connect(info)
+                    if (gatt == null && !manuallyDisconnected &&
+                        (info.address == selected || mutableSaved.value.any { it.address == info.address })) connect(info)
                 }
             }
             override fun onBatchScanResults(results: MutableList<ScanResult>) { results.forEach { onScanResult(0, it) } }
@@ -148,7 +168,8 @@ class PowerMeterManager internal constructor(
     }
     @Synchronized fun connect(device: HeartRateDevice) {
         start()
-        if (gatt != null && connecting?.address == device.address) return
+        // A stale picker tap must not replace the sensor already owning this type.
+        if (gatt != null) return
         manuallyDisconnected = false
         selected = device.address
         val addresses = preferences.getStringSet("saved", emptySet()).orEmpty() + device.address
@@ -159,9 +180,11 @@ class PowerMeterManager internal constructor(
     }
     private fun beginConnection(device: HeartRateDevice) {
         stopScan(); release()
+        preferReconnectScan = false
         val remote = access.remoteDevice(device.address)
         if (remote == null) { fail("${device.name ?: device.address} unavailable · retrying"); return }
         connecting = device
+        mutableConnecting.value = device
         connectionAt = clock()
         mutableStatus.value = "Connecting to ${device.name ?: device.address}"
         log("Connecting to selected power meter")
@@ -180,6 +203,7 @@ class PowerMeterManager internal constructor(
         preferences.edit().putStringSet("saved", preferences.getStringSet("saved", emptySet()).orEmpty() - address)
             .remove("name_$address").apply()
         loadSaved()
+        if (!shouldScan()) stopScan()
     }
     private fun loadSaved() {
         mutableSaved.value = preferences.getStringSet("saved", emptySet()).orEmpty()
@@ -188,6 +212,7 @@ class PowerMeterManager internal constructor(
     private fun release() {
         val old = gatt
         gatt = null; connecting = null
+        mutableConnecting.value = null
         lastMeasurementAt = null
         loggedPacket = false
         lowPowerRequested = false
@@ -199,6 +224,7 @@ class PowerMeterManager internal constructor(
         release()
         mutableStatus.value = reason
         nextReconnectAt = clock() + 3000
+        preferReconnectScan = true
     }
     private val callback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(link: BluetoothGatt, status: Int, newState: Int) {
@@ -230,6 +256,8 @@ class PowerMeterManager internal constructor(
                     lowPowerRequested = true
                     log("Low-power connection request accepted=${access.requestLowPowerConnection(link)}")
                 }
+                stopScan()
+                mutableConnecting.value = null
                 mutableConnected.value = connecting
                 mutableStatus.value = "Connected to ${connecting?.name ?: connecting?.address} · waiting for watts"
             }
@@ -253,6 +281,8 @@ class PowerMeterManager internal constructor(
         }
         if (watts == null) return
         val device = connecting ?: return
+        stopScan()
+        mutableConnecting.value = null
         mutableConnected.value = device
         val now = clock()
         lastMeasurementAt = now
