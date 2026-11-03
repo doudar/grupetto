@@ -22,8 +22,8 @@ data class GrupettoCalibrationTable(val baseline: List<Int>, val gains: List<Dou
     val activeComparison: ActiveCalibrationComparison? = null,
     // Display-only correction percentages, with observed coverage rebuilt on load.
     val correctionPercent: List<Double?> = emptyList(),
-    // Separate from ride observations: additive log-gain edits survive subsequent fits.
-    val manualOffsets: List<Double> = emptyList(),
+    // Authoritative surface has consumed observations/edits through this timestamp.
+    val recordedThrough: Long = Long.MIN_VALUE,
     val manualCoverage: Set<Int> = emptySet(),
     // Display-only, rebuilt from real efforts, never treated as measured data by the fitter.
     val recordedCoverage: Set<Int> = emptySet()) {
@@ -96,11 +96,11 @@ object GrupettoCalibrationFitter {
         gains.indices.forEach { gains[it] = (gains[it] + delta * bump[it]).coerceIn(low, high) }
     }
 
-    fun fit(baseline: List<Int>, samples: List<CalibrationSample>, active: GrupettoCalibrationTable? = null): GrupettoCalibrationTable? {
+    fun fit(baseline: List<Int>, samples: List<CalibrationSample>, active: GrupettoCalibrationTable? = null,
+        seed: GrupettoCalibrationTable? = null): GrupettoCalibrationTable? {
         require(validCalibrationTable(baseline))
         val incumbent = active?.takeIf { it.baseline == baseline }
-        val usable = samples.filter { calibrationCoordinate(baseline, it.ad) != null && it.rpm in 45.0..120.0 &&
-            it.nativeWatts in CalibrationPowerRange && it.pedalWatts in CalibrationPowerRange && it.pedalWatts / it.nativeWatts in .5..2.0 }
+        val usable = samples.filter { it.usableForCalibration(baseline) }
         if (usable.isEmpty()) return null
         // Keep every effort. Subsampling sorted cells discarded entire measured regions, including
         // isolated low-cadence efforts. Coarsen local bins only when needed to bound the solver.
@@ -144,7 +144,10 @@ object GrupettoCalibrationFitter {
         // Accepted efforts are authoritative at their actual interpolated coordinates. Apply in
         // time order: a new effort may revise nearby older efforts, rather than being permanently
         // diluted by their sample counts. Capture stability gates remain in CalibrationWindow.
-        usable.sortedBy { it.capturedAt }.forEach { anchor(gains, baseline, it) }
+        val previous = seed?.takeIf { it.baseline == baseline }
+        if (previous != null) gains.indices.forEach { gains[it] = previous.gains[it] }
+        usable.filter { previous == null || it.capturedAt > previous.recordedThrough }
+            .sortedBy { it.capturedAt }.forEach { anchor(gains, baseline, it) }
         // Leave-cell-out errors below describe the regularized GP prior, not the anchored surface.
         // appliedRmse, when an incumbent exists, measures the actual final surface.
         val candidateTable = GrupettoCalibrationTable(baseline, gains, confidence, usable.size, n, 0.0, 0.0, false)
@@ -160,12 +163,12 @@ object GrupettoCalibrationFitter {
             val support = (1 - (1 / inverseDiagonal - node.noise)).coerceIn(0.0, 1.0)
             val gain = exp(bounded(mean, support))
             node.samples.forEach {
-                before += (it.nativeWatts - it.pedalWatts).pow(2)
-                val candidateError = (it.nativeWatts * gain - it.pedalWatts).pow(2)
+                before += (it.nativeWatts - it.measuredPedalWatts).pow(2)
+                val candidateError = (it.nativeWatts * gain - it.measuredPedalWatts).pow(2)
                 after += candidateError
                 incumbent?.let { current ->
-                    val activeError = (current.corrected(it.nativeWatts, it.ad, it.rpm) - it.pedalWatts).pow(2)
-                    val tableError = (candidateTable.corrected(it.nativeWatts, it.ad, it.rpm) - it.pedalWatts).pow(2)
+                    val activeError = (current.corrected(it.nativeWatts, it.ad, it.rpm) - it.measuredPedalWatts).pow(2)
+                    val tableError = (candidateTable.corrected(it.nativeWatts, it.ad, it.rpm) - it.measuredPedalWatts).pow(2)
                     incumbentError += activeError
                     appliedError += tableError
                     val band = cadenceErrors.getOrPut((it.rpm / 5).roundToInt()) { DoubleArray(4) }
@@ -176,8 +179,8 @@ object GrupettoCalibrationFitter {
         }
         val old = sqrt(before / count)
         val new = sqrt(after / count)
-        val ready = count >= 6 && n >= 6 && nodes.map { it.x.roundToInt() }.distinct().size >= 3 &&
-            nodes.maxOf { it.rpm } - nodes.minOf { it.rpm } >= 10 && old.isFinite() && new.isFinite() &&
+        val ready = (previous?.ready == true || count >= 6 && n >= 6 && nodes.map { it.x.roundToInt() }.distinct().size >= 3 &&
+            nodes.maxOf { it.rpm } - nodes.minOf { it.rpm } >= 10) && old.isFinite() && new.isFinite() &&
             gains.all { it.isFinite() } && confidence.all { it.isFinite() }
         val comparison = incumbent?.let {
             val regressions = cadenceErrors.values.count { band ->
@@ -186,7 +189,9 @@ object GrupettoCalibrationFitter {
             }
             ActiveCalibrationComparison(sqrt(incumbentError / count), new, count, regressions, sqrt(appliedError / count))
         }
-        val result = GrupettoCalibrationTable(baseline, gains, confidence, usable.size, n, old, new, ready, comparison)
+        val result = GrupettoCalibrationTable(baseline, gains, confidence, usable.size, n, old, new, ready, comparison,
+            recordedThrough = max(previous?.recordedThrough ?: Long.MIN_VALUE, usable.maxOf { it.capturedAt }),
+            manualCoverage = previous?.manualCoverage ?: emptySet())
         return result.withCalibrationCoverage(usable)
     }
 }

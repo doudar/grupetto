@@ -27,9 +27,8 @@ internal object CalibrationManualEdit {
     private fun change(table: GrupettoCalibrationTable, gains: List<Double>, coverage: Set<Int>): GrupettoCalibrationTable {
         require(gains.size == 496 && gains.all { it.isFinite() })
         val bounded = gains.map { it.coerceIn(minimum, maximum) }
-        val offsets = bounded.indices.map { bounded[it] - table.gains[it] + table.manualOffsets.getOrElse(it) { 0.0 } }
         val manual = table.manualCoverage + coverage
-        return table.copy(gains = bounded, manualOffsets = offsets, manualCoverage = manual,
+        return table.copy(gains = bounded, manualCoverage = manual,
             activeComparison = null, ready = true,
             correctionPercent = bounded.indices.map {
                 if (it in manual || it in table.recordedCoverage) percent(bounded[it]) else null
@@ -113,17 +112,10 @@ internal object CalibrationManualEdit {
     fun soften(table: GrupettoCalibrationTable, selected: Set<Int>): GrupettoCalibrationTable = change(table,
         table.gains.mapIndexed { index, gain -> if (index in selected) ln1p(expm1(gain) * .8) else gain }, selected)
 
-    fun resetToRecorded(table: GrupettoCalibrationTable): GrupettoCalibrationTable {
-        if (table.manualOffsets.isEmpty()) return table
-        val gains = table.gains.indices.map { (table.gains[it] - table.manualOffsets[it]).coerceIn(minimum, maximum) }
-        return table.copy(gains = gains, manualOffsets = emptyList(), manualCoverage = emptySet(), activeComparison = null,
-            correctionPercent = gains.indices.map { if (it in table.recordedCoverage) percent(gains[it]) else null })
-    }
+    /** Reset the shared correction, not a hidden recorded/manual layer. Undo remains available. */
+    fun resetCorrections(table: GrupettoCalibrationTable): GrupettoCalibrationTable =
+        change(table, List(496) { 0.0 }, table.gains.indices.toSet())
 
-    fun reapply(fitted: GrupettoCalibrationTable, previous: GrupettoCalibrationTable?): GrupettoCalibrationTable {
-        if (previous == null || previous.baseline != fitted.baseline || previous.manualOffsets.isEmpty()) return fitted
-        return change(fitted, fitted.gains.indices.map { fitted.gains[it] + previous.manualOffsets[it] }, previous.manualCoverage)
-    }
 }
 
 /** Snapshots make tools, cell changes and resets equally reversible. */

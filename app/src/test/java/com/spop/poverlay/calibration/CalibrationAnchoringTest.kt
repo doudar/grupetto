@@ -111,14 +111,13 @@ class CalibrationAnchoringTest {
         assertNull(GrupettoCalibrationFitter.fit(baseline, invalid))
     }
 
-    @Test fun explicitManualOffsetsStillApplyAfterAnchoring() {
+    @Test fun newerRecordingRevisesEditedSeedWithoutPersistentOffset() {
         val sample = effort(ratio = 1.1)
-        val table = fit(listOf(sample))
-        val previous = table.copy(manualOffsets = List(496) { ln(1.05) }, manualCoverage = setOf(12 * 16 + 7))
-        val reapplied = CalibrationManualEdit.reapply(table, previous)
-        assertEquals(sample.pedalWatts * 1.05,
-            reapplied.corrected(sample.nativeWatts, sample.ad, sample.rpm), 1e-8)
-        assertTrue(reapplied.manualOffsets.isNotEmpty())
+        val original = fit(listOf(sample))
+        val edited = CalibrationManualEdit.setPercent(original, (0 until 496).toSet(), -10.0, false)
+        val fresh = sample.copy(pedalWatts = 240.0, capturedAt = 2)
+        val updated = GrupettoCalibrationFitter.fit(baseline, listOf(sample, fresh), seed = edited)!!
+        assertMatches(updated, fresh)
     }
 
     @Test fun appliedErrorDiagnosticMeasuresFinalAnchoredSurface() {

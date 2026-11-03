@@ -117,8 +117,9 @@ the whole table and remain reversible with Undo:
 - **Smooth whole table:** blends every cell halfway toward its immediate
   neighbors' average to reduce abrupt changes.
 - **Reduce all 20%:** scales every percentage correction toward zero.
-- **Restore recorded fit:** removes all manual edits, including edits saved in
-  earlier sessions, and restores the fit from the recorded efforts.
+- **Reset corrections:** sets the shared correction table to zero. Original
+  pedal observations remain available for diagnostics; Undo restores the table
+  before the reset until the edit session is saved.
 
 The inspector also retains **Smooth selection** and **Reduce corrections 20%**
 for cell, cadence-row, resistance-column, or whole-table selections. Compare mode
@@ -138,28 +139,44 @@ Changes affect riding only after **Save & apply** when already active, or after
 **Save draft** followed by **Activate** when correction is off. A changed table
 or resumed recording prevents a stale editor session from overwriting new data.
 
-Manual adjustments are stored as a separate additive log-gain layer in the
-atomic snapshot and JSON backups. Restarts and subsequent recorded fits retain
-that layer; a new fit may change the underlying recorded correction. Coverage
-from manual editing is displayed but never counted as measured ride coverage.
-Manual edits can make a sparse draft usable by explicit activation. Restoring
-an insufficient recorded fit disables correction until more coverage is collected.
-Before/After error uses the edited surface; held-out validation still describes
-the underlying recorded fit and is labeled accordingly.
+Manual tools and recordings now modify **one shared correction surface**. Saving
+an edit updates calibration targets at all saved effort coordinates to the edited
+surface. Original pedal readings are retained once as audit metadata, so the
+Before/After error display still compares against actual measured pedals, not
+edited targets. There is no additive manual offset layer to compound or reapply.
+Coverage from editing remains descriptive and never counts as measured efforts.
+Explicit manual saves (including Reset corrections) can make a sparse table usable.
+
+A subsequent accepted recording modifies that same surface with a bounded smooth
+adjustment. A new -10% observation after a manual -10% edit stays -10%, not -19%.
+No new observations means no reconstruction: restarting, pausing/resuming, and
+receiving duplicate old captures preserve the shared table exactly. A persisted
+processed-through timestamp prevents old overlapping/imported observations from
+replaying over newer edits. Capture timestamps use the device clock; readings at
+or before that boundary are historical, not new calibration updates.
+
+Schema-1 backups remain importable. Migration validates their offsets, preserves
+the exact saved gains, folds existing manual adjustments into targets once, keeps
+original readings, and discards the offsets. Draft and saved activation snapshots
+migrate independently. Schema-2 backups store the shared surface and timestamp;
+older app versions reject them instead of silently applying old offset semantics.
+Export a backup before testing this branch if you may want to return to an older
+version. The separate raw sensor-board capture store is unchanged.
 
 ### Recorded fit
 
-The model fits log(pedal watts / native watts) as a function of raw AD, mapped to
+The model fits log(calibration target watts / native watts) as a function of raw AD, mapped to
 the 31-point baseline coordinate, and cadence. A zero-mean Gaussian kernel has
 length scales of 2.5 baseline intervals and 15 rpm. Cholesky solves the regularized
-system. Local repeated efforts are aggregated; observation noise includes a
+system for an initial surface and diagnostics. Subsequent updates start from the
+current shared surface, not a fresh fit that would erase edits. Local repeated efforts are aggregated; observation noise includes a
 minimum floor and robust within-cell scatter. All usable efforts enter the fit and
 validation. The matrix is bounded to 128 cells by widening the local resistance
 and cadence bins when necessary; cells are never dropped by subsampling. This
 preserves isolated low-cadence measurements that the previous 64-cell cap omitted.
 
-The posterior mean and local support form a smooth initial surface. Each accepted
-stable effort then anchors that surface to `log(pedal/native)` at its actual raw
+The posterior mean and local support form a smooth initial surface. Each new accepted
+stable effort then anchors the current surface to `log(pedal/native)` at its actual raw
 AD and cadence, in timestamp order. A bounded residual adjustment spreads over
 2.5 baseline intervals and 15 rpm. It solves against the four bilinear corners,
 including their limits, rather than averaging the new target with old neighbors.
@@ -168,8 +185,9 @@ coordinate (within floating-point precision), even with heavily populated neighb
 Nearby older observations can move; contradictory efforts cannot all be exact.
 
 The 0.65–1.35 gain limits remain: targets beyond them saturate, rather than match
-pedals. Explicit manual offsets are still applied afterward and can intentionally
-override a measured target. Capture stability/settling and activation coverage
+pedals. No manual multiplier is applied afterward: future observations can change
+previous manual edits, and later manual edits can change previous observations.
+Capture stability/settling and initial activation coverage
 requirements are unchanged; one effort anchors a draft but does not activate an
 otherwise unsupported table. Display averages and integer broadcasts can differ
 from the instantaneous, paired sample used for this guarantee.
@@ -187,9 +205,10 @@ not cross-validate the subsequent anchoring adjustments; applied error uses the
 actual final grid. Activation requires six efforts in six cells,
 three resistance locations, cadences spanning at least 10 rpm, and finite fit
 values. Error improvement is no longer required, including for the first table.
-Saved drafts are re-evaluated on load under these coverage requirements.
+Saved unified drafts preserve their validated readiness on load. Explicit manual
+saves may authorize a sparse table; that readiness survives future recordings.
 
-With Record + Activate on, every saved effort refits the accumulated data and
+With Record + Activate on, every new saved effort updates the current surface and
 publishes the latest usable table. Equal or worse error scores do not block it.
 First activation stays explicit; Off is never silently enabled. Resuming Record
 also applies the latest usable draft immediately. Error comparisons and cadence

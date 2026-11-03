@@ -86,11 +86,11 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
                 fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFF9EAEC0))
             state.errors?.let {
                 Text("Average absolute error on the same ${it.count} saved efforts. After uses " +
-                    (if (it.preview) "the preview table." else "the active table.") + " Validation below uses held-out data.",
+                    (if (it.preview) "the preview table." else "the active table.") + " Validation below evaluates the Gaussian prior, not the final edited surface.",
                     fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFF9EAEC0))
             }
             state.table?.let { table ->
-                if (table.manualOffsets.isNotEmpty()) Text("Manual edits included · validation below describes the recorded fit before manual edits.",
+                if (table.manualCoverage.isNotEmpty()) Text("Shared correction includes edits; future recordings update the same table.",
                     fontSize = 12.sp, color = Color(0xFFFBBF24))
                 Text(String.format(Locale.US, "Draft validation RMSE %.2f to %.2f W", table.beforeRmse, table.afterRmse), fontSize = 14.sp)
                 if (!table.ready) Text("Draft needs more resistances and cadences", fontSize = 12.sp, color = Color(0xFFFBBF24))

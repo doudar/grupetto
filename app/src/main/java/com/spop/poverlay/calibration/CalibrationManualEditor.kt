@@ -128,7 +128,7 @@ internal fun CalibrationManualEditor(initial: GrupettoCalibrationTable, active: 
                     onFill = { commit(CalibrationManualEdit.fillGaps(table), "Filled every unknown cell from existing calibration. Covered values kept.") },
                     onSmooth = { commit(CalibrationManualEdit.smooth(table, table.gains.indices.toSet()), "Smoothed the whole table toward neighboring values.") },
                     onSoften = { commit(CalibrationManualEdit.soften(table, table.gains.indices.toSet()), "Reduced every correction by 20% toward zero.") },
-                    onReset = { commit(CalibrationManualEdit.resetToRecorded(table), "Removed all manual edits; recorded fit restored.") })
+                    onReset = { commit(CalibrationManualEdit.resetCorrections(table), "Reset all corrections to zero. Undo is available until saving.") })
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                     val wide = maxWidth >= 840.dp
                     val inspector: @Composable () -> Unit = {
@@ -255,7 +255,7 @@ private fun EditorQuickFixes(table: GrupettoCalibrationTable, enabled: Boolean,
                     table.correctionPercent.any { it != null } && table.correctionPercent.any { it == null }, onFill) },
                 { EditorTool("Smooth whole table", "Soften abrupt changes between neighbors.", enabled, onSmooth) },
                 { EditorTool("Reduce all 20%", "Bring every correction closer to zero.", enabled, onSoften) },
-                { EditorTool("Restore recorded fit", "Remove manual edits; keep recorded data.", enabled && table.manualOffsets.isNotEmpty(), onReset) }
+                { EditorTool("Reset corrections", "Set the shared table to zero; keep original observations.", enabled, onReset) }
             )
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 buttons.chunked(columns).forEach { row ->

@@ -207,3 +207,30 @@ jobs:
         asset_name: grupetto-${{ needs.build.outputs.TAG_NAME }}.apk
         asset_content_type: application/vnd.android.package-archive
     
+
+  calibration-persistence-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
+    - name: Test calibration persistence on virtual Android
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: 29
+        arch: x86_64
+        emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -accel auto
+        emulator-boot-timeout: 1200
+        disable-animations: true
+        script: bash ./gradlew connectedDebugAndroidTest
+    - name: Preserve instrumentation test reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: calibration-instrumentation-reports
+        path: app/build/reports/androidTests/connected

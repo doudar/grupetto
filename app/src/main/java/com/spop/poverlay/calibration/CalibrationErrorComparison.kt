@@ -13,12 +13,12 @@ internal fun calibrationErrorComparison(draft: GrupettoCalibrationProfile?, acti
     val profile = if (active != null) active else activationProfile(draft, saved) ?: draft
     val table = profile?.takeIf { it.matches(capture) }?.table?.takeIf { it.baseline == capture.baseline }
     val samples = capture.samples.filter { it.nativeWatts in CalibrationPowerRange &&
-        it.pedalWatts in CalibrationPowerRange && it.rpm in 45.0..120.0 &&
+        it.measuredPedalWatts in CalibrationPowerRange && it.rpm in 45.0..120.0 &&
         calibrationCoordinate(capture.baseline, it.ad) != null }
     if (samples.isEmpty()) return null
-    val before = samples.sumOf { abs(it.nativeWatts - it.pedalWatts) } / samples.size
+    val before = samples.sumOf { abs(it.nativeWatts - it.measuredPedalWatts) } / samples.size
     val after = table?.let { correction ->
-        (samples.sumOf { abs(correction.corrected(it.nativeWatts, it.ad, it.rpm) - it.pedalWatts) } / samples.size)
+        (samples.sumOf { abs(correction.corrected(it.nativeWatts, it.ad, it.rpm) - it.measuredPedalWatts) } / samples.size)
             .takeIf { it.isFinite() }
     }
     return CalibrationErrorComparison(before, after, samples.size, preview = active == null)

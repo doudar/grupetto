@@ -8,10 +8,19 @@ data class CalibrationFrame(val timestamp: Long, val ad: Int, val rpm: Double,
     val resistance: Int? = null)
 
 data class CalibrationSample(val ad: Double, val rpm: Double, val nativeWatts: Double,
-    val pedalWatts: Double, val capturedAt: Long)
+    val pedalWatts: Double, val capturedAt: Long,
+    // Immutable original pedal observation when the calibration target is edited. Audit only.
+    val recordedPedalWatts: Double? = null) {
+    val measuredPedalWatts: Double get() = recordedPedalWatts ?: pedalWatts
+}
 
 internal const val MinimumCalibrationWatts = 5
 internal val CalibrationPowerRange = MinimumCalibrationWatts.toDouble()..1500.0
+
+internal fun CalibrationSample.usableForCalibration(baseline: List<Int>): Boolean =
+    calibrationCoordinate(baseline, ad) != null && rpm in 45.0..120.0 &&
+        nativeWatts in CalibrationPowerRange && measuredPedalWatts in CalibrationPowerRange &&
+        pedalWatts / nativeWatts in .5..2.0
 
 data class CalibrationFit(val points: List<Int>, val supportedPoints: List<Int>,
     val conflicts: Int = 0, val validationCount: Int = 0,
