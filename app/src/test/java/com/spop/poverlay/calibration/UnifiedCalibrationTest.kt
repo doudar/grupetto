@@ -41,11 +41,11 @@ class UnifiedCalibrationTest {
         assertEquals(220.0, changed.capture.samples.single().recordedPedalWatts!!, 0.0)
     }
 
-    @Test fun futureRecordingReplacesManualValueRatherThanAddingAnOffset() {
+    @Test fun futureRecordingAveragesWithManualValueRatherThanAddingAnOffset() {
         val edited = edit(profile(), -10.0)
         val fresh = sample(time = 101, pedals = 240.0)
         val next = updateUnifiedCalibration(edited.capture.copy(samples = edited.capture.samples + fresh), edited)
-        assertAt(next.table!!, fresh)
+        assertAt(next.table!!, fresh, 210.0)
         assertTrue(next.table!!.ready)
         assertTrue(next.table!!.recordedThrough >= fresh.capturedAt)
         assertEquals(220.0, next.capture.samples.first().recordedPedalWatts!!, 0.0)
@@ -56,6 +56,7 @@ class UnifiedCalibrationTest {
         val filled = applyUnifiedManualEdit(edited, CalibrationManualEdit.fillGaps(edited.table!!), 101)
         val updated = updateUnifiedCalibration(filled.capture, filled)
         assertEquals(filled.table!!.gains, updated.table!!.gains)
+        assertEquals(filled.table!!.cellSampleCounts, updated.table!!.cellSampleCounts)
         assertEquals(filled.table!!.ready, updated.table!!.ready)
         assertEquals(filled.table!!.recordedThrough, updated.table!!.recordedThrough)
     }
@@ -77,7 +78,7 @@ class UnifiedCalibrationTest {
         assertEquals(100L, rejected.table!!.recordedThrough)
         val fresh = sample(time = 101, pedals = 240.0)
         val next = updateUnifiedCalibration(rejected.capture.copy(samples = rejected.capture.samples + fresh), rejected)
-        assertAt(next.table!!, fresh)
+        assertAt(next.table!!, fresh, 210.0)
     }
 
     @Test fun savingAnOlderEditedSnapshotCannotRewindTheProfileWatermark() {
@@ -93,7 +94,8 @@ class UnifiedCalibrationTest {
         val older = sample(time = 101, pedals = 160.0)
         val newest = sample(time = 102, pedals = 250.0)
         val next = updateUnifiedCalibration(edited.capture.copy(samples = listOf(newest, older) + edited.capture.samples), edited)
-        assertAt(next.table!!, newest)
+        assertAt(next.table!!, newest, 200 * (.9 + .8 + 1.25) / 3)
+        assertEquals(3, next.table!!.cellSampleCounts[selected])
     }
 
     @Test fun activeSnapshotIsOnlyADiagnosticComparatorNotTheSurfaceSeed() {
@@ -116,7 +118,7 @@ class UnifiedCalibrationTest {
         assertEquals(reset.table!!.gains, noNew.table!!.gains)
         val fresh = sample(time = 111, pedals = 230.0)
         val next = updateUnifiedCalibration(reset.capture.copy(samples = reset.capture.samples + fresh), reset)
-        assertAt(next.table!!, fresh)
+        assertAt(next.table!!, fresh, 215.0)
     }
 
     @Test fun editedTargetsOutsideCapturePowerRangeRemainUsableWithValidOriginalEvidence() {
@@ -130,6 +132,35 @@ class UnifiedCalibrationTest {
             assertNotNull(rebuilt)
             assertAt(rebuilt!!, target)
         }
+    }
+
+    @Test fun manualEditsPreserveTenSampleWeightAcrossRestartAndFutureRecording() {
+        val original = profile((1L..10L).map { sample(time = it, pedals = 220.0) })
+        val edited = edit(original, -10.0)
+        assertEquals(10, edited.table!!.cellSampleCounts[selected])
+        val restarted = updateUnifiedCalibration(edited.capture, edited)
+        assertEquals(edited.table!!.cellSampleCounts, restarted.table!!.cellSampleCounts)
+        val fresh = sample(time = 101, pedals = 240.0)
+        val next = updateUnifiedCalibration(restarted.capture.copy(samples = restarted.capture.samples + fresh), restarted)
+        assertAt(next.table!!, fresh, 186.0) // .9 * .9 + .1 * 1.2 = .93
+        assertEquals(10, next.table!!.cellSampleCounts[selected])
+        val replay = updateUnifiedCalibration(next.capture, next)
+        assertEquals(next.table!!.gains, replay.table!!.gains)
+        assertEquals(next.table!!.cellSampleCounts, replay.table!!.cellSampleCounts)
+    }
+
+    @Test fun editingAnEmptyCellCreatesOneSeedWeightForLaterRecording() {
+        val original = profile()
+        val cell = 20 * 16 + 9
+        val edited = applyUnifiedManualEdit(original,
+            CalibrationManualEdit.setPercent(original.table!!, setOf(cell), -20.0, false), 100)
+        assertEquals(1, edited.table!!.cellSampleCounts[cell])
+        assertEquals(1, edited.table!!.cellSampleCounts[selected])
+        val fresh = CalibrationSample(baseline[20].toDouble(), 90.0, 200.0, 240.0, 101)
+        val next = updateUnifiedCalibration(edited.capture.copy(samples = edited.capture.samples + fresh), edited)
+        assertAt(next.table!!, fresh, 200.0)
+        assertEquals(2, next.table!!.cellSampleCounts[cell])
+        assertEquals(edited.table!!.gains[selected], next.table!!.gains[selected], 0.0)
     }
 
     @Test fun displayErrorsRemainAgainstActualPedalsAfterTargetsAreEdited() {
@@ -147,7 +178,7 @@ class UnifiedCalibrationTest {
         val edited = applyUnifiedManualEdit(original, surface, 100)
         val fresh = sample(time = 101, pedals = 240.0)
         val next = updateUnifiedCalibration(edited.capture.copy(samples = edited.capture.samples + fresh), edited)
-        assertAt(next.table!!, fresh)
+        assertAt(next.table!!, fresh, 230.0)
         assertTrue(abs(next.table!!.gains[far] - edited.table!!.gains[far]) < 1e-10)
     }
 }

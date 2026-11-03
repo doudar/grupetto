@@ -77,8 +77,11 @@ class GrupettoAutoUpdateTest {
     }
 
     @Test fun worseValidationErrorDoesNotBlockAUsableFit() {
-        val alternating = samples.mapIndexed { i, sample ->
-            sample.copy(pedalWatts = sample.nativeWatts + if (i % 2 == 0) 20.0 else -20.0)
+        // At each cell, ten low-native ratios followed by one high-native ratio leave
+        // the EMA far from the watt-weighted optimum. This is descriptive, not a gate.
+        val alternating = samples.flatMap { sample ->
+            (0..10).map { i -> sample.copy(nativeWatts = if (i < 10) 100.0 else 1000.0,
+                pedalWatts = if (i < 10) 65.0 else 1350.0, capturedAt = sample.capturedAt * 100 + i) }
         }
         val capture = CalibrationCapture("bike", "pedals", 2040490, baseline, alternating)
         val fit = GrupettoCalibrationFitter.fit(baseline, alternating)!!

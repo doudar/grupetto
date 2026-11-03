@@ -11,14 +11,14 @@ class CalibrationManualEditTest {
     } }
     private fun table() = GrupettoCalibrationFitter.fit(baseline, samples)!!
 
-    @Test fun manualCellIsExactBlendsSmoothlyAndDoesNotInventEvidence() {
+    @Test fun manualCellIsExactNeverChangesNeighborsAndDoesNotInventEvidence() {
         val original = table()
         val cell = 8 * 16 + 7
         val edited = CalibrationManualEdit.setPercent(original, setOf(cell), -12.5, true)
         assertEquals(175.0, edited.corrected(200.0, baseline[8].toDouble(), 80.0), 1e-9)
-        val centerDelta = edited.gains[cell] - original.gains[cell]
-        assertEquals(centerDelta * exp(-.5 / 2.5.pow(2)), edited.gains[cell + 16] - original.gains[cell + 16], 1e-9)
-        assertEquals(centerDelta * exp(-.5 / 3.0.pow(2)), edited.gains[cell + 1] - original.gains[cell + 1], 1e-9)
+        original.gains.indices.filter { it != cell }.forEach {
+            assertEquals(original.gains[it], edited.gains[it], 0.0)
+        }
         assertEquals(original.sampleCount, edited.sampleCount)
         assertEquals(original.confidence, edited.confidence)
         assertEquals(original.cells, edited.cells)

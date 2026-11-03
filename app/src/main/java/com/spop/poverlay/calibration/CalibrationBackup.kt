@@ -96,7 +96,7 @@ internal class CalibrationBackupStore(private val directory: File) {
             val json = JSONObject(text)
             val backup = CalibrationBackup.decode(text)
             val legacy = json.getInt("schema") == 1 || listOf("draft", "saved").any { key ->
-                !json.isNull(key) && json.getJSONObject(key).getInt("schema") == 1
+                !json.isNull(key) && json.getJSONObject(key).getInt("schema") < 3
             }
             backup to legacy
         } catch (e: Exception) {

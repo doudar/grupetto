@@ -28,52 +28,36 @@ internal object CalibrationManualEdit {
         require(gains.size == 496 && gains.all { it.isFinite() })
         val bounded = gains.map { it.coerceIn(minimum, maximum) }
         val manual = table.manualCoverage + coverage
-        return table.copy(gains = bounded, manualCoverage = manual,
+        val counts = table.effectiveCellSampleCounts().mapIndexed { index, count ->
+            if (index in coverage) count.coerceAtLeast(1) else count
+        }
+        return table.copy(gains = bounded, manualCoverage = manual, cellSampleCounts = counts,
+            cells = counts.count { it > 0 }, confidence = counts.map { it / 10.0 },
             activeComparison = null, ready = true,
             correctionPercent = bounded.indices.map {
-                if (it in manual || it in table.recordedCoverage) percent(bounded[it]) else null
+                if (counts[it] > 0) percent(bounded[it]) else null
             })
     }
 
-    /** The same 2.5-resistance / 15-rpm Gaussian length scales as recorded calibration.
-     * The selected value is exact; surrounding changes taper smoothly in log-power space.
-     * Multiple selected cells share a normalized brush so a row never amplifies the edit.
-     */
+    /** Set/nudge only the explicitly selected cells. The legacy blend argument is ignored;
+     * neighbor changes require the separate, explicit Smooth or Fill gaps operation. */
+    @Suppress("UNUSED_PARAMETER")
     fun setPercent(table: GrupettoCalibrationTable, selected: Set<Int>, value: Double, blend: Boolean): GrupettoCalibrationTable {
         require(value.isFinite() && value in -35.0..35.0)
-        return paint(table, selected, blend) { ln1p(value / 100) - table.gains[it] }
+        return paint(table, selected) { ln1p(value / 100) }
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun nudge(table: GrupettoCalibrationTable, selected: Set<Int>, amount: Double, blend: Boolean): GrupettoCalibrationTable {
         require(amount.isFinite())
-        return paint(table, selected, blend) {
-            ln1p((percent(table.gains[it]) + amount).coerceIn(-35.0, 35.0) / 100) - table.gains[it]
+        return paint(table, selected) {
+            ln1p((percent(table.gains[it]) + amount).coerceIn(-35.0, 35.0) / 100)
         }
     }
 
-    private fun paint(table: GrupettoCalibrationTable, selected: Set<Int>, blend: Boolean,
-        delta: (Int) -> Double): GrupettoCalibrationTable {
+    private fun paint(table: GrupettoCalibrationTable, selected: Set<Int>, value: (Int) -> Double): GrupettoCalibrationTable {
         require(selected.isNotEmpty() && selected.all { it in 0 until 496 })
-        val changes = selected.associateWith(delta)
-        val coverage = selected.toMutableSet()
-        val gains = table.gains.mapIndexed { index, gain ->
-            if (index in selected) gain + changes.getValue(index)
-            else if (!blend) gain
-            else {
-                var total = 0.0
-                var weight = 0.0
-                var strongest = 0.0
-                changes.forEach { (source, correction) ->
-                    val dx = (index / 16 - source / 16).toDouble()
-                    val dy = (index % 16 - source % 16).toDouble()
-                    val k = exp(-.5 * ((dx / 2.5).pow(2) + (dy / 3).pow(2)))
-                    total += k * correction; weight += k; strongest = max(strongest, k)
-                    if (abs(dx) <= 2 && abs(dy) <= 2) coverage += index
-                }
-                gain + if (weight > 0) strongest * total / weight else 0.0
-            }
-        }
-        return change(table, gains, coverage)
+        return change(table, table.gains.mapIndexed { index, gain -> if (index in selected) value(index) else gain }, selected)
     }
 
     /** Inverse-distance interpolation; outside coverage this extends the nearest trend.

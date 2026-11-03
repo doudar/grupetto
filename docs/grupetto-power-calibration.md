@@ -105,12 +105,10 @@ bike watts (−35% to +35%). **Set correction** assigns the desired correction;
 resistance column, or the whole table. **Zoom in** adds numeric cell labels and
 larger touch targets; the scrollable grid retains its axis labels.
 
-**Blend into neighbors** is on by default. It tapers the change in log-power space
-using the recorded fitter's Gaussian length scales (2.5 resistance points and
-15 rpm), while hitting the selected correction exactly. Turn blending off to
-change only selected cells. Manual input uses the same ride-time interpolation
-and correction bounds as recorded calibration, without creating synthetic pedal
-efforts or claiming measured confidence.
+Set and nudge change only the selected cells. There is no automatic neighbor
+blending. Use the explicit **Smooth** or **Fill gaps** tools when desired. Manual
+input uses the same correction bounds as recordings and shares their cell values;
+it does not create synthetic pedal measurements.
 
 Four one-touch quick fixes stay visible above the table. The selection inspector
 uses **Edit**, **Scope**, and **Tools** pages without scrolling. Quick fixes affect
@@ -148,13 +146,14 @@ or resumed recording prevents a stale editor session from overwriting new data.
 Manual tools and recordings now modify **one shared correction surface**. Saving
 an edit updates calibration targets at all saved effort coordinates to the edited
 surface. Original pedal readings are retained once as audit metadata, so the
-Before/After error display still compares against actual measured pedals, not
+Raw bike/Corrected error display still compares against actual measured pedals, not
 edited targets. There is no additive manual offset layer to compound or reapply.
 Coverage from editing remains descriptive and never counts as measured efforts.
 Explicit manual saves (including Reset corrections) can make a sparse table usable.
 
-A subsequent accepted recording modifies that same surface with a bounded smooth
-adjustment. A new -10% observation after a manual -10% edit stays -10%, not -19%.
+A subsequent accepted recording averages into that same cell using its capped
+recording weight. Manual changes preserve that weight (or seed an empty cell with
+one value), so future recordings always remain able to change the edit. A new -10% observation after a manual -10% edit stays -10%, not -19%.
 No new observations means no reconstruction: restarting, pausing/resuming, and
 receiving duplicate old captures preserve the shared table exactly. A persisted
 processed-through timestamp prevents old overlapping/imported observations from
@@ -164,8 +163,14 @@ or before that boundary are historical, not new calibration updates.
 Schema-1 backups remain importable. Migration validates their offsets, preserves
 the exact saved gains, folds existing manual adjustments into targets once, keeps
 original readings, and discards the offsets. Draft and saved activation snapshots
-migrate independently. Schema-2 backups store the shared surface and timestamp;
-older app versions reject them instead of silently applying old offset semantics.
+migrate independently. Schema-3 profiles store the shared surface, processed timestamp,
+and each cell's averaging weight (0–10). Schema-1 and schema-2 surfaces migrate
+without erasing gains or recordings: every saved grid value becomes one initial
+cell value, so a subsequent recording has half the weight until the cell reaches
+ten values. This deliberately preserves legacy values rather than reconstructing
+a different table from historical samples. Under direct-cell lookup fractional
+coordinates now use the nearest grid cell, not the old interpolated surface.
+Older app versions reject schema-3 profiles rather than misinterpreting them.
 Valid old snapshots are rewritten atomically at startup, including the older
 separate draft/active files. Versions v0.0.49 and v0.0.50 use the supported schema-1
 format. If persisted calibration is malformed, oversized, or uses an unsupported
@@ -184,48 +189,51 @@ not substitute for matching the production APK signature on the actual bike.
 
 ### Recorded fit
 
-The model fits log(calibration target watts / native watts) as a function of raw AD, mapped to
-the 31-point baseline coordinate, and cadence. A zero-mean Gaussian kernel has
-length scales of 2.5 baseline intervals and 15 rpm. Cholesky solves the regularized
-system for an initial surface and diagnostics. Subsequent updates start from the
-current shared surface, not a fresh fit that would erase edits. Local repeated efforts are aggregated; observation noise includes a
-minimum floor and robust within-cell scatter. All usable efforts enter the fit and
-validation. The matrix is bounded to 128 cells by widening the local resistance
-and cadence bins when necessary; cells are never dropped by subsampling. This
-preserves isolated low-cadence measurements that the previous 64-cell cap omitted.
+Each accepted stable recording belongs to exactly one cell of the 31 × 16 table.
+Raw resistance AD maps through the bike's 31-point baseline and rounds to the
+nearest column. Cadence rounds to the nearest 5-rpm row from 45–120 rpm. Half-cell
+ties round up. No recording changes a neighboring cell.
 
-The posterior mean and local support form a smooth initial surface. Each new accepted
-stable effort then anchors the current surface to `log(pedal/native)` at its actual raw
-AD and cadence, in timestamp order. A bounded residual adjustment spreads over
-2.5 baseline intervals and 15 rpm. It solves against the four bilinear corners,
-including their limits, rather than averaging the new target with old neighbors.
-Thus the newest usable effort makes corrected watts equal pedal watts at that
-coordinate (within floating-point precision), even with heavily populated neighbors.
-Nearby older observations can move; contradictory efforts cannot all be exact.
+The cell stores the arithmetic mean of its first ten correction multipliers
+(pedal watts / raw bike watts). Every later accepted recording updates it as
+`0.9 * previous multiplier + 0.1 * new multiplier`. Values are bounded to
+0.65–1.35 before averaging and persisted as log multipliers for editor/file
+compatibility. The averaging weight saturates at ten and survives restart and
+backup import, even when older capture history is trimmed. The first recording
+in an empty cell therefore matches pedal watts exactly within the safety limits.
+Subsequent differing recordings intentionally average; the newest one does not
+replace the previous nine.
 
-The 0.65–1.35 gain limits remain: targets beyond them saturate, rather than match
-pedals. No manual multiplier is applied afterward: future observations can change
-previous manual edits, and later manual edits can change previous observations.
-Capture stability/settling and initial activation coverage
-requirements are unchanged; one effort anchors a draft but does not activate an
-otherwise unsupported table. Display averages and integer broadcasts can differ
-from the instantaneous, paired sample used for this guarantee.
+During a ride, lookup uses the current rounded cell if populated; otherwise it
+uses the closest populated cell. Distance is squared Euclidean distance in grid
+steps: one resistance column and one 5-rpm row each count as one step. Equal
+distances select lower resistance, then lower cadence. This is a deterministic
+fallback, not interpolation, and can introduce a step when crossing between
+cells. There is no fading to native power within the table domain. Outside the
+baseline/cadence range, with no filled cells, or at zero power, power is unchanged.
+Lookup directly returns a populated current cell; fallback uses one bounded,
+allocation-free scan of at most 496 cells. Sensor callbacks perform no fitting or
+deferred cache construction.
 
-The 31 × 16 table covers the full baseline and 45–120 rpm, with continuous bilinear
-interpolation during the ride. Correction fades toward native power away from
-measurements; this is not evidence of accuracy at unmeasured high powers. Outside
-the baseline/cadence range, native power is used. Zero power stays zero. Fitting
-performs one bounded four-corner solve and one grid pass per retained effort; the
-riding callback still only interpolates the saved grid.
+The current table cell pulses whenever fresh bike telemetry is available, even
+with Record off. When lookup falls back to another populated cell, that source
+cell has a pulsing green border. Fallback does not mark an empty current cell as
+measured or fill it automatically.
 
-Validation leaves an entire local cell out, including all repeats, and remains
-available as an informational score for the regularized Gaussian prior. It does
-not cross-validate the subsequent anchoring adjustments; applied error uses the
-actual final grid. Activation requires six efforts in six cells,
-three resistance locations, cadences spanning at least 10 rpm, and finite fit
-values. Error improvement is no longer required, including for the first table.
-Saved unified drafts preserve their validated readiness on load. Explicit manual
-saves may authorize a sparse table; that readiness survives future recordings.
+Capture stability/settling and initial activation coverage requirements are
+unchanged: six efforts in six cells, three resistance locations and cadences
+spanning at least 10 rpm. One effort creates a draft, not automatic activation.
+Explicit manual saves can make a sparse table usable, and that readiness survives
+future recordings. Display averages and rounded broadcasts can differ from the
+instantaneous paired recording.
+
+**Raw bike error** and **Corrected error** are mean absolute differences from the
+original pedal measurements over saved efforts, using the current active table
+(or the activation preview when off). They are descriptive retrospective errors,
+not live power or a guarantee that a new recording will improve all old samples.
+Manual edits, changing equipment behavior and conflicting recordings can make the
+corrected value worse. Diagnostics also show saved-effort RMSE; no held-out Gaussian
+validation score remains. Neither error metric gates activation or updates.
 
 With Record + Activate on, every new saved effort updates the current surface and
 publishes the latest usable table. Equal or worse error scores do not block it.

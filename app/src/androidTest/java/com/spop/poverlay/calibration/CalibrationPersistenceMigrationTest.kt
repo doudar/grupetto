@@ -22,7 +22,7 @@ class CalibrationPersistenceMigrationTest {
         val table = GrupettoCalibrationTable(baseline,
             List(496) { if (it == 10 * 16 + 7) ln(1.3) else ln(1.05) },
             List(496) { .7 }, samples.size, 3, 15.0, 4.0, true,
-            recordedThrough = samples.maxOf { it.capturedAt }).withCalibrationCoverage(samples)
+            recordedThrough = samples.maxOf { it.capturedAt }, cellSampleCounts = List(496) { 1 }).withCalibrationCoverage(samples)
         return GrupettoCalibrationProfile(CalibrationCapture("bike", "meter", 2040490L, baseline, samples), table)
     }
 
@@ -32,6 +32,8 @@ class CalibrationPersistenceMigrationTest {
             put("model", "regularized_gaussian_log_gain_v1")
             getJSONObject("table").apply {
                 remove("recordedThrough")
+                remove("cellSampleCounts")
+                put("cells", 3) // Legacy cells counted coarse observation buckets, not populated grid cells.
                 if (offsets != null) put("manualOffsets", JSONArray(offsets))
             }
         }
@@ -40,15 +42,15 @@ class CalibrationPersistenceMigrationTest {
         .put("format", "grupetto-calibration-backup").put("schema", schema)
         .put("draft", draft ?: JSONObject.NULL).put("saved", saved ?: JSONObject.NULL).toString()
 
-    @Test fun schemaTwoRoundTripPreservesUnifiedGainsTargetsAndOriginalMeasurements() {
+    @Test fun schemaThreeRoundTripPreservesUnifiedGainsTargetsAndOriginalMeasurements() {
         val original = profile()
         var edited = CalibrationManualEdit.setPercent(original.table!!, setOf(167), -15.0, true)
         repeat(4) { edited = CalibrationManualEdit.smooth(edited, (0 until 496).toSet()) }
         val updated = samplesForCalibrationTable(samples, edited)
         val unified = original.copy(capture = original.capture.copy(samples = updated), table = edited)
         val encoded = GrupettoCalibrationStore.encode(unified)
-        assertEquals(2, encoded.getInt("schema"))
-        assertEquals("unified_gaussian_log_gain_v2", encoded.getString("model"))
+        assertEquals(3, encoded.getInt("schema"))
+        assertEquals("direct_cell_gain_v3", encoded.getString("model"))
         assertFalse(encoded.getJSONObject("table").has("manualOffsets"))
         assertEquals(edited.recordedThrough, encoded.getJSONObject("table").getLong("recordedThrough"))
         val restored = GrupettoCalibrationStore.decode(JSONObject(encoded.toString()))
@@ -79,7 +81,7 @@ class CalibrationPersistenceMigrationTest {
         assertEquals(smoothed.gains, migrated.table!!.gains)
         assertEquals(smoothed.confidence, migrated.table.confidence)
         assertEquals(smoothed.manualCoverage, migrated.table.manualCoverage)
-        assertEquals(smoothed.cells, migrated.table.cells)
+        assertEquals(496, migrated.table.cells)
         assertEquals(smoothed.beforeRmse, migrated.table.beforeRmse, 0.0)
         assertEquals(smoothed.afterRmse, migrated.table.afterRmse, 0.0)
         assertEquals(smoothed.ready, migrated.table.ready)
@@ -87,7 +89,7 @@ class CalibrationPersistenceMigrationTest {
         assertTrue(migrated.table.recordedThrough >= samples.maxOf { it.capturedAt })
         assertEquals(samples.size, migrated.capture.samples.size)
         migrated.capture.samples.zip(samples).forEach { (updated, recorded) ->
-            assertEquals(smoothed.corrected(recorded.nativeWatts, recorded.ad, recorded.rpm), updated.pedalWatts, 0.0)
+            assertEquals(legacyCorrected(smoothed, recorded), updated.pedalWatts, 0.0)
             assertEquals(recorded.pedalWatts, updated.recordedPedalWatts!!, 0.0)
             assertEquals(recorded.copy(pedalWatts = updated.pedalWatts, recordedPedalWatts = recorded.pedalWatts), updated)
         }
@@ -126,8 +128,8 @@ class CalibrationPersistenceMigrationTest {
             assertEquals(original.table!!.gains, restored.saved!!.table!!.gains)
             val encoded = JSONObject(restored.encode())
             assertEquals(2, encoded.getInt("schema"))
-            assertEquals(2, encoded.getJSONObject("draft").getInt("schema"))
-            assertEquals(2, encoded.getJSONObject("saved").getInt("schema"))
+            assertEquals(3, encoded.getJSONObject("draft").getInt("schema"))
+            assertEquals(3, encoded.getJSONObject("saved").getInt("schema"))
             assertFalse(encoded.getJSONObject("saved").getJSONObject("table").has("manualOffsets"))
             assertEquals(restored, CalibrationBackup.decode(encoded.toString()))
         }
@@ -168,12 +170,94 @@ class CalibrationPersistenceMigrationTest {
         val next = recorded.copy(pedalWatts = 180.0, capturedAt = 11L)
         val nextCapture = restored.capture.copy(samples = restored.capture.samples + next)
         val updated = updateUnifiedCalibration(nextCapture, restored)
-        assertEquals(180.0, updated.table!!.corrected(next.nativeWatts, next.ad, next.rpm), 1e-8)
+        assertEquals(200.0, updated.table!!.corrected(next.nativeWatts, next.ad, next.rpm), 1e-8)
         assertEquals(11L, updated.table.recordedThrough)
         val restarted = GrupettoCalibrationStore.decode(GrupettoCalibrationStore.encode(updated))
         assertEquals(updated.table.gains, restarted.table!!.gains)
         assertEquals(11L, restarted.table.recordedThrough)
         assertEquals(nextCapture.samples, restarted.capture.samples)
+    }
+
+    // Independent frozen legacy lookup: migration must not accidentally use new nearest lookup.
+    private fun legacyCorrected(table: GrupettoCalibrationTable, sample: CalibrationSample): Double {
+        val x = calibrationCoordinate(baseline, sample.ad)!!
+        val y = (sample.rpm - 45) / 5
+        val i = kotlin.math.floor(x).toInt().coerceIn(0, 29)
+        val j = kotlin.math.floor(y).toInt().coerceIn(0, 14)
+        fun at(a: Int, b: Int) = table.gains[a * 16 + b]
+        val low = at(i, j) * (1 - (x - i)) + at(i + 1, j) * (x - i)
+        val high = at(i, j + 1) * (1 - (x - i)) + at(i + 1, j + 1) * (x - i)
+        return sample.nativeWatts * kotlin.math.exp((low * (1 - (y - j)) + high * (y - j))
+            .coerceIn(ln(.65), ln(1.35)))
+    }
+
+    private fun schemaTwo(profile: GrupettoCalibrationProfile): JSONObject =
+        GrupettoCalibrationStore.encode(profile).apply {
+            put("schema", 2).put("model", "unified_gaussian_log_gain_v2")
+            getJSONObject("table").remove("cellSampleCounts")
+        }
+
+    @Test fun schemaTwoMigrationPreservesSurfaceHistoryAndAllowsNextSampleToContributeHalf() = withDirectory { directory ->
+        val original = profile()
+        val old = schemaTwo(original)
+        File(directory, "grupetto-calibration.json").writeText(backup(2, old, old))
+        val store = CalibrationBackupStore(directory)
+        val migrated = store.load()
+        assertFalse(store.resetOnLoad)
+        val table = migrated.draft!!.table!!
+        assertEquals(original.capture, migrated.draft.capture)
+        assertEquals(original.table!!.gains, table.gains)
+        assertEquals(original.table.recordedThrough, table.recordedThrough)
+        assertEquals(List(496) { 1 }, table.cellSampleCounts)
+        assertEquals(496, table.cells)
+        assertEquals(496, table.correctionPercent.count { it != null })
+        assertEquals(3, JSONObject(File(directory, "grupetto-calibration.json").readText())
+            .getJSONObject("draft").getInt("schema"))
+        assertEquals(migrated, CalibrationBackupStore(directory).load())
+        val fresh = CalibrationSample(2000.0, 80.0, 200.0, 180.0, table.recordedThrough + 1)
+        val next = updateUnifiedCalibration(migrated.draft.capture.copy(samples = samples + fresh), migrated.draft)
+        assertEquals(220.0, next.table!!.corrected(200.0, 2000.0, 80.0), 1e-8) // mean of 1.3 and .9
+        assertEquals(2, next.table.cellSampleCounts[167])
+        assertTrue(table.gains.indices.filter { it != 167 }.all { table.gains[it] == next.table.gains[it] })
+        val imported = CalibrationBackup.decode(CalibrationBackup(next, next).encode())
+        store.save(imported)
+        assertEquals(imported, CalibrationBackupStore(directory).load())
+    }
+
+    @Test fun schemaThreePreservesSaturatedCountAndTenthWeightAcrossRestart() = withDirectory { directory ->
+        val original = profile().let { it.copy(table = it.table!!.copy(
+            cellSampleCounts = List(496) { index -> if (index == 167) 10 else 0 },
+            gains = List(496) { index -> if (index == 167) ln(1.1) else 0.0 }, cells = 1)) }
+        val store = GrupettoCalibrationStore(directory, "direct.json")
+        store.save(original)
+        val restored = store.load()!!
+        assertEquals(original.table!!.cellSampleCounts, restored.table!!.cellSampleCounts)
+        assertEquals(original.capture, restored.capture)
+        val fresh = CalibrationSample(2000.0, 80.0, 200.0, 180.0, 4000L)
+        val next = updateUnifiedCalibration(restored.capture.copy(samples = samples + fresh), restored)
+        assertEquals(216.0, next.table!!.corrected(200.0, 2000.0, 80.0), 1e-8)
+        assertEquals(10, next.table.cellSampleCounts[167])
+        store.save(next)
+        assertEquals(next.table.cellSampleCounts, store.load()!!.table!!.cellSampleCounts)
+    }
+
+    @Test fun schemaThreeRejectsMalformedCountsAndCellBounds() {
+        val mutations: List<(JSONObject) -> Unit> = listOf(
+            { it.remove("cellSampleCounts") },
+            { it.put("cellSampleCounts", JSONArray(List(495) { 1 })) },
+            { it.put("cellSampleCounts", JSONArray(List(497) { 1 })) },
+            { it.getJSONArray("cellSampleCounts").put(0, -1) },
+            { it.getJSONArray("cellSampleCounts").put(0, 11) },
+            { it.getJSONArray("cellSampleCounts").put(0, 1.5) },
+            { it.getJSONArray("cellSampleCounts").put(0, "NaN") },
+            { it.put("cells", -1) },
+            { it.put("cells", 497) },
+        )
+        mutations.forEachIndexed { index, mutation ->
+            val json = GrupettoCalibrationStore.encode(profile())
+            mutation(json.getJSONObject("table"))
+            assertTrue("Malformed direct counts $index accepted", runCatching { GrupettoCalibrationStore.decode(json) }.isFailure)
+        }
     }
 
     private fun withDirectory(block: (File) -> Unit) {
@@ -200,7 +284,7 @@ class CalibrationPersistenceMigrationTest {
             val recorded = observations.getJSONObject(index)
             assertEquals(recorded.getDouble("pedalWatts"), sample.measuredPedalWatts, 0.0)
             assertEquals(recorded.getLong("capturedAt"), sample.capturedAt)
-            assertEquals(migrated.saved.table!!.corrected(sample.nativeWatts, sample.ad, sample.rpm), sample.pedalWatts, 0.0)
+            assertEquals(legacyCorrected(migrated.saved.table!!, sample), sample.pedalWatts, 0.0)
         }
         val upgraded = JSONObject(File(directory, "grupetto-calibration.json").readText())
         assertEquals(2, upgraded.getInt("schema"))

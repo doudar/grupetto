@@ -73,6 +73,7 @@ class CalibrationBackupTest {
         assertEquals(backup.saved!!.capture, restored.saved!!.capture)
         assertEquals(backup.saved.table!!.gains, restored.saved.table!!.gains)
         assertEquals(backup.saved.table.confidence, restored.saved.table.confidence)
+        assertEquals(backup.saved.table.cellSampleCounts, restored.saved.table.cellSampleCounts)
         assertFalse(restored.draft.table!!.ready)
         assertEquals(restored.saved, activationProfile(restored.draft, restored.saved))
         assertEquals(496, restored.saved.table.correctionPercent.size)
@@ -152,7 +153,12 @@ class CalibrationBackupTest {
                 val fresh = CalibrationSample(baseline[15].toDouble(), 80.0, 200.0, 240.0,
                     maxOf(System.currentTimeMillis(), restored.recordedThrough + 1))
                 restarted.accept(exported.draft.capture.copy(samples = exported.draft.capture.samples + fresh))
-                assertEquals(240.0, restarted.state.value.displayTable!!.corrected(200.0, fresh.ad, fresh.rpm), 1e-8)
+                val cell = restored.currentCellIndex(fresh.ad, fresh.rpm)!!
+                val weight = (restored.cellSampleCounts[cell] + 1).coerceAtMost(10)
+                val previousWatts = restored.corrected(200.0, fresh.ad, fresh.rpm)
+                assertEquals(previousWatts + (240.0 - previousWatts) / weight,
+                    restarted.state.value.displayTable!!.corrected(200.0, fresh.ad, fresh.rpm), 1e-8)
+                assertEquals(weight, restarted.state.value.displayTable!!.cellSampleCounts[cell])
                 assertTrue(restarted.state.value.active)
                 restarted.record(false, null)
                 val active = restarted.state.value.displayTable!!

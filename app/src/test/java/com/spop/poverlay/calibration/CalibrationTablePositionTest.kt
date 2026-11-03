@@ -20,4 +20,42 @@ class CalibrationTablePositionTest {
         }
         assertNull(liveTableCell(CalibrationTablePosition(frame, baseline), baseline.map { it + 1 }, 1000))
     }
+
+    private fun table(filled: Set<Int>) = GrupettoCalibrationTable(baseline,
+        List(496) { .1 }, List(496) { if (it in filled) 1.0 else 0.0 },
+        filled.size, filled.size, 0.0, 0.0, true, recordedCoverage = filled,
+        cellSampleCounts = List(496) { if (it in filled) 1 else 0 })
+
+    @Test fun pausedCurrentCellAndNearestFallbackAreHighlightedSeparately() {
+        val table = table(setOf(9 * 16 + 7))
+        val result = liveTableHighlights(CalibrationTablePosition(frame, baseline), table, 1000)!!
+        assertEquals(10 to 7, result.current)
+        assertEquals(9 to 7, result.fallback)
+        val source = table.lookupCellIndex(frame.ad.toDouble(), frame.rpm)!!
+        assertEquals(source / 16 to source % 16, result.fallback)
+    }
+
+    @Test fun filledCurrentCellDoesNotGetASeparateFallbackBorder() {
+        val result = liveTableHighlights(CalibrationTablePosition(frame, baseline),
+            table(setOf(10 * 16 + 7, 9 * 16 + 7)), 1000)!!
+        assertEquals(10 to 7, result.current)
+        assertNull(result.fallback)
+    }
+
+    @Test fun currentCellStillHighlightsWithoutAnySavedData() {
+        val position = CalibrationTablePosition(frame, baseline)
+        listOf(null, table(emptySet())).forEach {
+            val result = liveTableHighlights(position, it, 1000)!!
+            assertEquals(10 to 7, result.current)
+            assertNull(result.fallback)
+        }
+    }
+
+    @Test fun staleOrDifferentBikePositionsClearBothHighlights() {
+        val position = CalibrationTablePosition(frame, baseline)
+        val table = table(setOf(9 * 16 + 7))
+        assertNull(liveTableHighlights(position, table, 3001))
+        assertNull(liveTableHighlights(position, table.copy(baseline = baseline.map { it + 1 }), 1000))
+        assertNull(liveTableHighlights(null, table, 1000))
+    }
 }

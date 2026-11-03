@@ -18,17 +18,14 @@ internal fun correctionColor(percent: Double?): Color {
         else lerp(CorrectionZeroColor, CorrectionUnderColor, fraction)
 }
 
-/** The fitted gain supplies the exact correction percentage; nearby efforts mark observed coverage. */
+/** Only populated cells are colored. Lookup fallback does not invent observed coverage. */
 internal fun calibrationCorrectionPercent(table: GrupettoCalibrationTable, samples: List<CalibrationSample>,
     includeManual: Boolean = true): List<Double?> {
-    data class Reference(val x: Double, val rpm: Double)
-    val references = samples.filter { it.nativeWatts in CalibrationPowerRange && it.rpm in 45.0..120.0 }
-        .mapNotNull { sample -> calibrationCoordinate(table.baseline, sample.ad)?.let { Reference(it, sample.rpm) } }
-        .distinct()
+    val counts = table.effectiveCellSampleCounts()
+    val recorded = samples.filter { it.usableForCalibration(table.baseline) }
+        .mapNotNull { calibrationCellIndex(table.baseline, it.ad, it.rpm) }.toSet()
     return List(496) { index ->
-        val x = (index / 16).toDouble()
-        val rpm = 45.0 + index % 16 * 5
-        if ((includeManual && index in table.manualCoverage) || references.any { abs(it.x - x) <= 2 && abs(it.rpm - rpm) <= 10 })
+        if (counts[index] > 0 && (includeManual || index in recorded))
             100 * (exp(table.gains[index]) - 1) else null
     }
 }

@@ -135,7 +135,7 @@ class CalibrationManualEditorTest {
         return GrupettoCalibrationFitter.fit(baseline, samples)!!
     }
 
-    @Test fun signedInputValidationBlendingUndoRedoAndExplicitSave() {
+    @Test fun signedInputValidationExactCellsUndoRedoAndExplicitSave() {
         val original = table()
         var saved: GrupettoCalibrationTable? = null
         var closed = false
@@ -162,6 +162,9 @@ class CalibrationManualEditorTest {
         assertTrue(closed)
         assertEquals(-12.5, CalibrationManualEdit.percent(saved!!.gains[15 * 16 + 7]), 1e-9)
         assertEquals(original.sampleCount, saved!!.sampleCount)
+        original.gains.indices.filter { it != 15 * 16 + 7 }.forEach {
+            assertEquals("Unselected cell $it must stay unchanged", original.gains[it], saved!!.gains[it], 0.0)
+        }
     }
 
     @Test fun quickFixesAreVisibleWithoutScrollingAndDiscardStaysLocal() {
@@ -241,7 +244,8 @@ class CalibrationManualEditorTest {
         } }
         listOf("Correction (%)", "Set correction", "-1%", "+1%").forEach { compose.onNodeWithText(it).assertIsDisplayed() }
         compose.onNodeWithText("Scope").performClick()
-        listOf("Cell", "Cadence row", "Resistance column", "Whole table", "Blend into neighbors").forEach {
+        compose.onNodeWithText("Blend into neighbors").assertDoesNotExist()
+        listOf("Cell", "Cadence row", "Resistance column", "Whole table").forEach {
             compose.onNodeWithText(it).assertIsDisplayed()
         }
         compose.onNodeWithText("Tools").performClick()

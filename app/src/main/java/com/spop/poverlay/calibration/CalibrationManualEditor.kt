@@ -53,7 +53,6 @@ internal fun CalibrationManualEditor(initial: GrupettoCalibrationTable, active: 
     var table by remember { mutableStateOf(history.current) }
     var selected by rememberSaveable { mutableIntStateOf(15 * 16 + 7) }
     var editScope by rememberSaveable { mutableStateOf(CalibrationEditScope.Cell) }
-    var blend by rememberSaveable { mutableStateOf(true) }
     var zoom by rememberSaveable { mutableStateOf(false) }
     var compare by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
@@ -134,10 +133,10 @@ internal fun CalibrationManualEditor(initial: GrupettoCalibrationTable, active: 
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                     val wide = maxWidth >= 840.dp
                     val inspector: @Composable () -> Unit = {
-                        EditorInspector(table, selected, editScope, { editScope = it }, blend, { blend = it }, editable, compactInput = keyboardOpen,
+                        EditorInspector(table, selected, editScope, { editScope = it }, editable, compactInput = keyboardOpen,
                             onInputFocus = { inputFocused = it },
-                            onSet = { value -> commit(CalibrationManualEdit.setPercent(table, selection, value, blend), "Set ${selection.size} selected cell(s) to ${percentLabel(value)}${if (blend) " with blending" else ""}.") },
-                            onNudge = { amount -> commit(CalibrationManualEdit.nudge(table, selection, amount, blend), "Adjusted selection by ${percentLabel(amount)} percentage points.") },
+                            onSet = { value -> commit(CalibrationManualEdit.setPercent(table, selection, value, false), "Set ${selection.size} selected cell(s) to ${percentLabel(value)}.") },
+                            onNudge = { amount -> commit(CalibrationManualEdit.nudge(table, selection, amount, false), "Adjusted selection by ${percentLabel(amount)} percentage points.") },
                             onSmooth = { commit(CalibrationManualEdit.smooth(table, selection), "Smoothed ${selection.size} cell(s) toward their neighbors.") },
                             onSoften = { commit(CalibrationManualEdit.soften(table, selection), "Reduced selected corrections by 20% toward zero.") },
                             onRevert = { commit(initial, "Restored the table from when this editor opened.") }, dirty = dirty)
@@ -168,7 +167,7 @@ internal fun CalibrationManualEditor(initial: GrupettoCalibrationTable, active: 
 
 @Composable
 private fun EditorInspector(table: GrupettoCalibrationTable, selected: Int, scope: CalibrationEditScope,
-    onScope: (CalibrationEditScope) -> Unit, blend: Boolean, onBlend: (Boolean) -> Unit, enabled: Boolean,
+    onScope: (CalibrationEditScope) -> Unit, enabled: Boolean,
     compactInput: Boolean,
     onInputFocus: (Boolean) -> Unit,
     onSet: (Double) -> Unit, onNudge: (Double) -> Unit, onSmooth: () -> Unit,
@@ -202,11 +201,7 @@ private fun EditorInspector(table: GrupettoCalibrationTable, selected: Int, scop
                 }
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(blend, onBlend, enabled = enabled, colors = SwitchDefaults.colors(checkedThumbColor = EditorAccent))
-            Text("Blend into neighbors", fontSize = 14.sp)
-        }
-        Text("Blends over 2.5 resistance points and 15 rpm. Turn off for exact cells only.", fontSize = 11.sp, color = EditorMuted)
+        Text("Changes affect only the selected cells. Use Smooth explicitly to average neighboring values.", fontSize = 11.sp, color = EditorMuted)
         Text("Raw resistance AD ${table.baseline[selected / 16]}", color = EditorMuted, fontSize = 12.sp)
         }
         if (tab == 0 || compactInput) {
@@ -228,7 +223,7 @@ private fun EditorInspector(table: GrupettoCalibrationTable, selected: Int, scop
             OutlinedButton({ onNudge(-1.0) }, enabled = enabled, modifier = Modifier.weight(1f)) { Text("-1%") }
             OutlinedButton({ onNudge(1.0) }, enabled = enabled, modifier = Modifier.weight(1f)) { Text("+1%") }
         }
-        Text("${scope.label} / ${if (blend) "Blending on" else "Exact cells only"}", fontSize = 11.sp, color = EditorMuted)
+        Text("${scope.label} / Exact cells only", fontSize = 11.sp, color = EditorMuted)
         }
         if (tab == 2 && !compactInput) {
         Text("Selection tools", fontWeight = FontWeight.Bold, fontSize = 16.sp)
@@ -322,7 +317,7 @@ private fun EditorGrid(table: GrupettoCalibrationTable, selection: Set<Int>, sel
                                         if (index == selected) EditorAccent else Color.White, RoundedCornerShape(3.dp)) else Modifier)
                                     .selectable(index in selection, onClick = { onSelect(index) })
                                     .semantics { contentDescription = "Point $x, ${45 + y * 5} rpm, " +
-                                        (value?.let(::percentLabel) ?: "no nearby data") + if (manual) ", manual" else "" },
+                                        (value?.let(::percentLabel) ?: "no saved cell data") + if (manual) ", manual" else "" },
                                     contentAlignment = Alignment.Center) {
                                     if (zoom) Text(value?.let(::percentLabel) ?: "--", fontSize = 12.sp,
                                         color = if (value != null && abs(value) < 5) Color(0xFF101827) else Color.White)

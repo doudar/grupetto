@@ -69,15 +69,16 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
                 Text("Colors show the ${if (state.active) "active" else "preview"} correction as a percentage of raw bike watts. " +
                     "Red: bike overestimated. Blue: bike underestimated. Scale saturates at -10% / +10%.")
                 state.errors?.let {
-                    Text("Average error compares the same ${it.count} saved efforts. After uses " +
+                    Text("Average absolute error compares the same ${it.count} saved pedal measurements, not live wattage. Corrected error uses " +
                         if (it.preview) "the preview table." else "the active table.")
+                    Text("Corrected error can increase when edits or the current table fit past efforts less well.")
                 }
                 state.table?.let { table ->
                     if (table.manualCoverage.isNotEmpty()) Text("Shared correction includes edits; future recordings update the same table.")
-                    Text(String.format(Locale.US, "Draft validation RMSE %.2f to %.2f W", table.beforeRmse, table.afterRmse))
+                    Text(String.format(Locale.US, "Saved-effort RMSE %.2f to %.2f W", table.beforeRmse, table.afterRmse))
                     if (!table.ready) Text("Draft needs more resistances and cadences.")
                 }
-                Text("Held-out validation evaluates the Gaussian prior, not the final edited surface. Error scores are informational. Pulse: cyan shows your current cell, orange settles, yellow holds, green saves.")
+                Text("Error scores describe the saved efforts and are informational. Pulse: cyan shows your current cell even when not recording; orange settles, yellow holds, green saves. A separate pulsing green border marks the nearest filled cell used when your current cell has no data.")
             }
         }, confirmButton = { TextButton({ showInformation = false }) { Text("Close") } })
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -162,7 +163,7 @@ internal fun CalibrationCorrectionLegend() {
             Text("0%", fontSize = 11.sp, lineHeight = 15.sp)
             Text("+10% · bike low", fontSize = 11.sp, lineHeight = 15.sp)
         }
-        Text("Correction · gray: no nearby data", fontSize = 11.sp, lineHeight = 14.sp, color = Color(0xFF9EAEC0))
+        Text("Correction · gray: no saved cell data", fontSize = 11.sp, lineHeight = 14.sp, color = Color(0xFF9EAEC0))
     }
 }
 
@@ -177,12 +178,12 @@ private fun CalibrationErrorSummary(errors: CalibrationErrorComparison?) {
         }, fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFF9EAEC0))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                Text("Before calibration", fontSize = 14.sp, lineHeight = 18.sp)
+                Text("Raw bike error", fontSize = 14.sp, lineHeight = 18.sp)
                 Spacer(Modifier.weight(1f))
                 Text(watts(errors?.beforeWatts), fontSize = 24.sp, lineHeight = 28.sp)
             }
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                Text("After calibration", fontSize = 14.sp, lineHeight = 18.sp)
+                Text("Corrected error", fontSize = 14.sp, lineHeight = 18.sp)
                 Spacer(Modifier.weight(1f))
                 val improved = errors?.afterWatts?.let { it < errors.beforeWatts }
                 Text(watts(errors?.afterWatts), fontSize = 24.sp, lineHeight = 28.sp,
@@ -193,20 +194,26 @@ private fun CalibrationErrorSummary(errors: CalibrationErrorComparison?) {
 }
 
 @Composable
-private fun GrupettoCoverageChart(table: GrupettoCalibrationTable?, capture: CalibrationUiState, recording: Boolean,
-    livePosition: CalibrationTablePosition?) {
+internal fun GrupettoCoverageChart(table: GrupettoCalibrationTable?, capture: CalibrationUiState, recording: Boolean,
+    livePosition: CalibrationTablePosition?, now: Long = android.os.SystemClock.elapsedRealtime()) {
     val recordingCell = recordingCell(capture, recording)
-    val cell = liveTableCell(livePosition, table?.baseline, android.os.SystemClock.elapsedRealtime()) ?: recordingCell
+    val highlights = liveTableHighlights(livePosition, table, now)
+        ?: recordingCell?.let {
+            liveTableHighlights(capture.frame?.let { CalibrationTablePosition(it, capture.baseline) }, table, now)
+        }
+    val cell = highlights?.current
+    val fallbackCell = highlights?.fallback
     val pulse = if (cell != null) {
-        val transition = rememberInfiniteTransition(label = "Recording cell")
-        transition.animateFloat(.25f, 1f, infiniteRepeatable(tween(650), RepeatMode.Reverse), label = "Recording pulse").value
+        val transition = rememberInfiniteTransition(label = "Current and fallback cells")
+        transition.animateFloat(.25f, 1f, infiniteRepeatable(tween(650), RepeatMode.Reverse), label = "Table cell pulse").value
     } else 0f
     val progressColor = if (cell != null && cell == recordingCell) captureProgressColor(capture.progress) else Color(0xFF22D3EE)
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("120\nrpm\n\n45", fontSize = 11.sp, lineHeight = 18.sp, modifier = Modifier.width(32.dp))
         Canvas(Modifier.weight(1f).height(80.dp).semantics {
             contentDescription = "Correction percentage: red -10% for bike overestimation, neutral 0%, blue +10% for bike underestimation; gray unknown. Resistance left to right, cadence bottom to top" +
-                (cell?.let { "; ${if (it == recordingCell) "recording" else "current"} resistance cell ${it.first}, ${45 + it.second * 5} rpm" } ?: "")
+                (cell?.let { "; ${if (it == recordingCell) "recording" else "current"} resistance cell ${it.first}, ${45 + it.second * 5} rpm" } ?: "") +
+                (fallbackCell?.let { "; green pulsing border: fallback resistance cell ${it.first}, ${45 + it.second * 5} rpm" } ?: "")
         }) {
             val w = size.width / 31
             val h = size.height / 16
@@ -221,6 +228,12 @@ private fun GrupettoCoverageChart(table: GrupettoCalibrationTable?, capture: Cal
                     drawRect(progressColor.copy(alpha = .55f + pulse * .45f), origin, block,
                         style = Stroke((1f + pulse).dp.toPx()))
                 }
+            }
+            // Draw after the grid so adjacent cell fills cannot cover the source-cell border.
+            fallbackCell?.let { (x, y) ->
+                drawRect(Color(0xFF4ADE80).copy(alpha = .45f + pulse * .55f),
+                    Offset(x * w, (15 - y) * h), Size(w - 1, h - 1),
+                    style = Stroke((1f + pulse).dp.toPx()))
             }
         }
     }

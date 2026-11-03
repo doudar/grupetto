@@ -2,7 +2,7 @@ package com.spop.poverlay.calibration
 
 import kotlin.math.abs
 
-/** Descriptive mean absolute error on paired saved efforts, separate from held-out fit validation. */
+/** Descriptive mean absolute error on original paired saved efforts, not live or held-out accuracy. */
 data class CalibrationErrorComparison(val beforeWatts: Double, val afterWatts: Double?,
     val count: Int, val preview: Boolean)
 
