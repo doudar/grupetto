@@ -545,7 +545,10 @@ class BikeControl(
         if (spinUpSamples.size < SPIN_UP_STEADY_SAMPLES || now - oldest.first < SPIN_UP_STEADY_MS - SPIN_UP_STEADY_SLACK_MS) return
         val low = spinUpSamples.minOf { it.second }
         val high = spinUpSamples.maxOf { it.second }
-        if (low < MODEL_MIN_CADENCE || high - low > SPIN_UP_STEADY_RPM) return
+        // The allowed range scales with the time the window actually spans, so sparse samples (a window of only
+        // 2 s) cannot pass a climb that is too steep over SPIN_UP_STEADY_MS (independent review).
+        val span = (now - oldest.first).coerceAtMost(SPIN_UP_STEADY_MS)
+        if (low < MODEL_MIN_CADENCE || high - low > SPIN_UP_STEADY_RPM * span / SPIN_UP_STEADY_MS) return
         spinUpDone = true
         val mean = spinUpSamples.map { it.second }.average().toFloat()
         cadenceAverage = mean
@@ -649,6 +652,9 @@ class BikeControl(
         const val MODEL_MIN_CADENCE = 50f
         // A drop's remembered cadence may sit at most this far below the current average. 8 rpm left
         // drops after 99-102 rpm efforts a level light (riders settle to 88-89 rpm): 10-15 W dips on Nov 2-3.
+        // Trade-off: a stale slow memory (a 60 rpm warm-up, then a 95 rpm effort) is now sized for 80 rpm
+        // instead of 87, about two levels heavy for the settle hold (never more than the current level);
+        // feedback trims it afterwards. The two cases cannot be told apart at the drop.
         const val DROP_CADENCE_ALLOWANCE = 15f
         // A reading this far back against the ramp direction is a knob move, not echo lag: the echo
         // trails but never reverses (0 reversals in 26 ramps on the Oct 31 rides). One level back
