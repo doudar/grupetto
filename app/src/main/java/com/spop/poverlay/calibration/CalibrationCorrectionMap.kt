@@ -32,6 +32,8 @@ internal fun calibrationCorrectionPercent(table: GrupettoCalibrationTable, sampl
 
 internal fun GrupettoCalibrationTable.withCalibrationCoverage(samples: List<CalibrationSample>): GrupettoCalibrationTable {
     val measured = calibrationCorrectionPercent(this, samples, includeManual = false)
-    return copy(correctionPercent = calibrationCorrectionPercent(this, samples),
+    return copy(streamSeconds = samples.count { it.observation != null },
+        legacyEffortCount = samples.count { it.observation == null },
+        correctionPercent = calibrationCorrectionPercent(this, samples),
         recordedCoverage = measured.indices.filterTo(mutableSetOf()) { measured[it] != null })
 }

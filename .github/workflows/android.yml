@@ -41,6 +41,9 @@ jobs:
     - name: Test release artifact contracts
       run: python3 .github/scripts/test_apk_artifact.py
 
+    - name: Test emulator fixture safety
+      run: python3 .github/scripts/test_emulator_fixture.py
+
     - name: Configure production signing
       id: signing
       # Fork code never runs this step with signing credentials.
@@ -259,6 +262,12 @@ jobs:
             -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
             -validity 1 -dname "CN=Android Debug,O=Android,C=US"
         fi
+    - name: Enable hosted-runner KVM
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+        test -r /dev/kvm && test -w /dev/kvm
     - name: Test calibration persistence on virtual Android
       uses: reactivecircus/android-emulator-runner@v2
       with:
@@ -267,16 +276,12 @@ jobs:
         # The generic 320px profile silently clamps a 1920px wm override to 640px.
         # Use a defined profile with sufficient physical dimensions.
         profile: pixel_2
-        emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -accel auto
+        emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -accel on
         emulator-boot-timeout: 1200
+        disable-linux-hw-accel: false
         disable-animations: true
         script: |
-          adb shell wm size 1920x1080
-          adb shell wm density 240
-          adb shell wm size
-          adb shell wm density
-          test "$(adb shell wm size | tr -d '\r' | tail -n 1)" = 'Override size: 1920x1080'
-          test "$(adb shell wm density | tr -d '\r' | tail -n 1)" = 'Override density: 240'
+          bash .github/scripts/prepare-calibration-emulator.sh --landscape
           bash -c 'set +e; bash ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.uiDiagnostics=true; result=$?; mkdir -p app/build/reports/androidTests; adb logcat -d -b crash > app/build/reports/androidTests/emulator-crash.log || true; adb pull /data/local/tmp/grupetto-ui-test-diagnostics app/build/reports/androidTests/fixture-diagnostics || true; adb pull /sdcard/Android/data/com.spop.poverlay/files/calibration-test-diagnostics app/build/reports/androidTests/diagnostics || true; exit "$result"'
     - name: Preserve instrumentation test reports
       if: always()
@@ -301,15 +306,24 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
         cache: gradle
+    - name: Enable hosted-runner KVM
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+        test -r /dev/kvm && test -w /dev/kvm
     - name: Upgrade a real released install on virtual Android
       uses: reactivecircus/android-emulator-runner@v2
       with:
         api-level: 29
         arch: x86_64
-        emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -accel auto
+        emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -accel on
         emulator-boot-timeout: 1200
+        disable-linux-hw-accel: false
         disable-animations: true
-        script: bash .github/scripts/test-calibration-upgrade.sh ${{ matrix.legacy-tag }}
+        script: |
+          CALIBRATION_SETUP_REPORTS=app/build/reports/calibration-upgrade bash .github/scripts/prepare-calibration-emulator.sh
+          bash .github/scripts/test-calibration-upgrade.sh ${{ matrix.legacy-tag }}
     - name: Preserve old-to-new upgrade evidence
       if: always()
       uses: actions/upload-artifact@v4

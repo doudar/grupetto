@@ -1,7 +1,8 @@
 # Pedal-referenced bike calibration capture
 
 > Updated implementation: see [Grupetto power calibration](grupetto-power-calibration.md)
-> for the 8-second guided/background collector, independent Record/Clear/Activate
+> and [streaming calibration](streaming-calibration.md) for the current two-second
+> stable gate, 100-second cell buckets, independent Record/Clear/Activate
 > power table, and experimental guided sensor-board writer. The sections below
 > retain the original implementation and hardware-investigation history.
 

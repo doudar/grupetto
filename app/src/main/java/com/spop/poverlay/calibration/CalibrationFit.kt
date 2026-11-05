@@ -10,7 +10,8 @@ data class CalibrationFrame(val timestamp: Long, val ad: Int, val rpm: Double,
 data class CalibrationSample(val ad: Double, val rpm: Double, val nativeWatts: Double,
     val pedalWatts: Double, val capturedAt: Long,
     // Immutable original pedal observation when the calibration target is edited. Audit only.
-    val recordedPedalWatts: Double? = null) {
+    val recordedPedalWatts: Double? = null,
+    val observation: CalibrationObservation? = null) {
     val measuredPedalWatts: Double get() = recordedPedalWatts ?: pedalWatts
 }
 
@@ -20,7 +21,9 @@ internal val CalibrationPowerRange = MinimumCalibrationWatts.toDouble()..1500.0
 internal fun CalibrationSample.usableForCalibration(baseline: List<Int>): Boolean =
     calibrationCoordinate(baseline, ad) != null && rpm in 45.0..120.0 &&
         nativeWatts in CalibrationPowerRange && measuredPedalWatts in CalibrationPowerRange &&
-        pedalWatts / nativeWatts in .5..2.0
+        pedalWatts / nativeWatts in .5..2.0 && (observation?.let {
+            it.nativeAt >= 0 && it.pedalAt >= 0 && abs(it.nativeAt - it.pedalAt) <= 1500 && it.durationMillis == 1000
+        } != false)
 
 data class CalibrationFit(val points: List<Int>, val supportedPoints: List<Int>,
     val conflicts: Int = 0, val validationCount: Int = 0,
@@ -38,11 +41,13 @@ enum class CapturePhase(val cue: String) {
     Waiting("Connect pedals"), Pedal("Pedal comfortably"), Settling("Keep the knob still"),
     LowPower("Keep both meters at ${MinimumCalibrationWatts} W+"),
     Holding("Hold this pace"), CadenceChanged("Smooth your cadence"),
+    Collecting("Collecting paired observations"), Outlier("Checking a possible outlier"),
     ResistanceChanged("Keep the knob still"), PowerChanged("Let power settle"), Saved("Effort saved"),
 }
 
 data class CaptureProgress(val phase: CapturePhase = CapturePhase.Waiting, val seconds: Int = 0,
-    val totalSeconds: Int = 8, val settleSeconds: Int = 3) {
+    val totalSeconds: Int = 8, val settleSeconds: Int = 3,
+    val streaming: Boolean = false, val cell: Int? = null, val bucketSeconds: Int = 0) {
     val fraction get() = (seconds / totalSeconds.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
     val remaining get() = (totalSeconds - seconds).coerceAtLeast(0)
     val settleRemaining get() = (settleSeconds - seconds).coerceAtLeast(0)
@@ -142,7 +147,7 @@ object CalibrationFitter {
 
     fun fit(baseline: List<Int>, samples: List<CalibrationSample>): CalibrationFit {
         require(validCalibrationTable(baseline))
-        val usable = samples.filter { it.ad.isFinite() && it.rpm in 45.0..120.0 &&
+        val usable = samples.filter { it.observation == null && it.ad.isFinite() && it.rpm in 45.0..120.0 &&
             it.nativeWatts in 30.0..1500.0 && it.pedalWatts in 30.0..1500.0 &&
             it.ad >= baseline.first() && it.ad <= baseline.last() }
         // Split within each local cell, so validation repeats are never used to fit that cell.

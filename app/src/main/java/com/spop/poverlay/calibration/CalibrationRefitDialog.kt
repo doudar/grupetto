@@ -43,7 +43,7 @@ internal fun CalibrationRefitDialog(recording: Boolean,
                 if (recording) Text("Pause recording before previewing, applying, or undoing a refit.", color = MaterialTheme.colors.error)
                 if (busy) Text("Working...")
                 preview?.result?.let { result ->
-                    Text("${result.before.count} retained saved efforts (up to 3600)")
+                    Text("${result.before.count} retained observations and legacy effort aggregates")
                     RefitMetric("Mean absolute error", result.before.meanAbsoluteError, result.after.meanAbsoluteError)
                     RefitMetric("Signed bias", result.before.meanSignedError, result.after.meanSignedError)
                     RefitMetric("RMSE", result.before.rmse, result.after.rmse)

@@ -53,12 +53,11 @@ class CalibrationDialogLayoutTest {
         noVerticalScrolling()
         compose.onNodeWithText("Table").performClick()
         compose.onNodeWithText("Capture settings").performClick()
-        visible("Seconds", "Percent", "Restore defaults", "Cancel", "Save settings")
+        compose.onNodeWithTag("stream-capture-settings-title").assertIsDisplayed()
+        visible("Close")
+        compose.onNodeWithText("Settle for 2 seconds with the knob unchanged and cadence inside one 5-rpm cell band.").assertIsDisplayed()
         noVerticalScrolling()
-        compose.onNodeWithText("Seconds").performTextReplacement("5")
-        visible("Save settings", "Cancel")
-        noVerticalScrolling()
-        compose.onNodeWithText("Save settings").performClick()
+        compose.onNodeWithText("Close").performClick()
         visible("Manual editor", "Capture settings")
     }
 

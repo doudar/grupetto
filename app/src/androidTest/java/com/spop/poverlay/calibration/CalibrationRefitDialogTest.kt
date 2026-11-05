@@ -23,7 +23,7 @@ class CalibrationRefitDialogTest {
             CalibrationRefitDialog(false, { prepares++; preview }, { applies++ }, {}, { closes++ })
         } }
         compose.onNodeWithText("Apply refit").assertIsEnabled()
-        compose.onNodeWithText("5 retained saved efforts (up to 3600)").assertExists()
+        compose.onNodeWithText("5 retained observations and legacy effort aggregates").assertExists()
         compose.onNodeWithText("Mean absolute error: 20.0 to 10.0 W").assertExists()
         compose.onNodeWithText("Cancel").performClick()
         compose.runOnIdle { assertEquals(1, prepares); assertEquals(0, applies); assertEquals(1, closes) }

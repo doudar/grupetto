@@ -68,7 +68,7 @@ class BikeCalibrationManager(
             withContext(Dispatchers.IO) { runCatching { store.load() } }.fold(onSuccess = {
                 capture = it
                 if (it != null) mutableState.value = CalibrationUiState(sampleCount = it.samples.size,
-                    fit = withContext(Dispatchers.Default) { CalibrationFitter.fit(it.baseline, it.samples) },
+                    fit = withContext(Dispatchers.Default) { CalibrationFitter.fit(it.baseline, it.samples.filter { s -> s.observation == null }) },
                     status = "Capture paused", baseline = it.baseline, recent = it.samples.takeLast(30))
             }, onFailure = {
                 storageHealthy = false
@@ -114,9 +114,26 @@ class BikeCalibrationManager(
                 val baseline = withContext(Dispatchers.IO) { connection.readTable() }
                 Timber.tag("CalibrationCapture").i("Subscribed to bike; read %d baseline points", baseline.size)
                 var window = CalibrationWindow(baseline, mutableSettings.value)
+                val stream = grupettoCalibration?.let { CalibrationStream(baseline, capture?.samples.orEmpty()) }
+                var dirty = false
+                var lastFlush = 0L
+                var bucketCounts = withContext(Dispatchers.Default) { capture?.samples.orEmpty().filter { it.observation != null }
+                    .groupingBy { calibrationCellIndex(baseline, it.ad, it.rpm) }.eachCount() }
+                var guideCells = emptyList<CalibrationTarget>()
+                var nextGuideRefresh = 0L
+                suspend fun flush() {
+                    val pending = capture ?: return
+                    if (!dirty) return
+                    withContext(NonCancellable) {
+                        val fit = if (stream == null) withContext(Dispatchers.Default) { CalibrationFitter.fit(baseline, pending.samples) } else CalibrationFit(baseline, emptyList())
+                        withContext(Dispatchers.IO) { store.save(pending, fit) }
+                        grupettoCalibration?.accept(pending)
+                        dirty = false; lastFlush = SystemClock.elapsedRealtime()
+                    }
+                }
                 guide = null
                 var nextTableRead = 0L
-                while (isActive) {
+                try { while (isActive) {
                     val now = SystemClock.elapsedRealtime()
                     connection.failure?.let { error(it) }
                     if (now >= nextTableRead) {
@@ -128,12 +145,13 @@ class BikeCalibrationManager(
                     val frame = connection.frame
                     val pedal = readings.value
                     if (window.settings != mutableSettings.value) window = CalibrationWindow(baseline, mutableSettings.value)
-                    if (resetWindow) { window.reset(); resetWindow = false }
+                    if (resetWindow) { window.reset(); stream?.reset(); resetWindow = false; nextGuideRefresh = 0L }
                     if (frame == null || now - frame.timestamp !in 0..1000 ||
                         pedal == null || now - pedal.timestamp !in 0..1500) {
-                        window.reset()
+                        window.reset(); stream?.reset()
+                        if (dirty) flush()
                         mutableState.value = mutableState.value.copy(status = "Waiting for bike + pedals",
-                            frame = null, pedalWatts = null, progress = window.progress)
+                            frame = null, pedalWatts = null, progress = stream?.progress ?: window.progress)
                     } else {
                         check(frame.powerSource == 1) { "Bike is not using sensor-board power. No tablet override will be changed." }
                         val identity = CalibrationCapture(frame.frameSerial, pedal.address, version, baseline, emptyList())
@@ -150,15 +168,45 @@ class BikeCalibrationManager(
                         mutableState.value = mutableState.value.captureIdentityVerified()
                         capture = current
                         if (guide == null) guide = CalibrationGuide(baseline, frame.ad)
-                        val cells = guide!!.cells(current.samples)
+                        if (stream == null || now >= nextGuideRefresh) {
+                            guideCells = withContext(Dispatchers.Default) { guide!!.cells(current.samples, streaming = stream != null) }
+                            nextGuideRefresh = now + 5000
+                        }
+                        val cells = guideCells
                         val oldTarget = guide!!.target(cells)
                         mutableState.value = mutableState.value.copy(frame = frame, pedalWatts = pedal.watts,
                             baseline = baseline, targets = cells, target = oldTarget)
-                        check(current.samples.size < 3600) { "Capture is full. Review or clear the saved data." }
+                        if (stream == null) check(current.samples.size < 3600) { "Capture is full. Review or clear the saved data." }
                         if (mutableState.value.resting) {
-                            window.reset()
-                            mutableState.value = mutableState.value.copy(status = "Recover · resume when ready", progress = window.progress)
+                            window.reset(); stream?.reset()
+                            if (dirty) flush()
+                            mutableState.value = mutableState.value.copy(status = "Recover · resume when ready", progress = stream?.progress ?: window.progress)
                             delay(1000)
+                            continue
+                        }
+                        if (stream != null) {
+                            val accepted = stream.add(frame, pedal.watts, pedal.timestamp, pedal.address, now, System.currentTimeMillis())
+                            if (accepted.isNotEmpty()) {
+                                // Once admitted, finish staging this batch even if Pause arrives
+                                // during background retention; finally then flushes every accepted pair.
+                                withContext(NonCancellable) {
+                                val retained = withContext(Dispatchers.Default) {
+                                    retainCalibrationObservations(baseline, current.samples + accepted)
+                                }
+                                bucketCounts = withContext(Dispatchers.Default) { retained.filter { it.observation != null }
+                                    .groupingBy { calibrationCellIndex(baseline, it.ad, it.rpm) }.eachCount() }
+                                capture = current.copy(samples = retained)
+                                dirty = true
+                                }
+                            }
+                            val samples = capture!!.samples
+                            val bucket = bucketCounts[stream.progress.cell] ?: 0
+                            mutableState.value = mutableState.value.copy(sampleCount = samples.size,
+                                status = stream.progress.phase.cue, recent = samples.takeLast(30),
+                                progress = stream.progress.copy(bucketSeconds = bucket),
+                                savedAt = if (accepted.isNotEmpty()) now else mutableState.value.savedAt)
+                            if (dirty && (lastFlush == 0L || now - lastFlush >= 5000)) flush()
+                            delay(250)
                             continue
                         }
                         val sample = window.add(frame, pedal.watts, pedal.timestamp, pedal.address, now, System.currentTimeMillis())
@@ -180,10 +228,10 @@ class BikeCalibrationManager(
                                     target = guide!!.target(newCells), resting = mutableState.value.mode == CalibrationMode.Guided && finishedTarget)
                             }
                         } else mutableState.value = mutableState.value.copy(status = window.progress.phase.cue,
-                            progress = window.progress)
+                            progress = stream?.progress ?: window.progress)
                     }
-                    delay(1000)
-                }
+                    delay(if (stream == null) 1000 else 250)
+                } } finally { flush() }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

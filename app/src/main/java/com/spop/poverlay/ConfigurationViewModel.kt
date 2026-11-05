@@ -168,6 +168,8 @@ class ConfigurationViewModel(
         viewModelScope.launch {
             val saved = calibration.savedCapture()
             if (boardSetupRunning() || enabled && !requireCalibrationMeter()) return@launch
+            // Flush the last stream batch before disabling its table consumer.
+            if (!enabled) { calibration.stop(); return@launch }
             grupettoCalibration.record(enabled, saved)
             if (enabled && grupettoCalibration.state.value.recording && !calibration.state.value.enabled) setCalibrationEnabled(true)
             else if (!enabled) setCalibrationEnabled(false)

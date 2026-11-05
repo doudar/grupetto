@@ -110,12 +110,12 @@ fun CalibrationPanel(state: CalibrationUiState, onEnabled: (Boolean) -> Unit, on
                         }
                     }
                 } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    CaptureRing(state.progress, state.enabled)
+                    if (!state.progress.streaming) CaptureRing(state.progress, state.enabled)
                     Column(Modifier.weight(1f)) {
                         Text(cue, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = CaptureGreen)
                         Text(when {
                             !state.enabled -> if (state.sampleCount == 0) "Warm up · zero pedals in their app" else state.status
-                            state.mode == CalibrationMode.Guided && target != null -> "${target.rpm} rpm / anywhere in green / hold ${state.progress.totalSeconds} sec"
+                            state.mode == CalibrationMode.Guided && target != null -> if (state.progress.streaming) "${target.rpm} rpm / steady knob / collect continuously" else "${target.rpm} rpm / anywhere in green / hold ${state.progress.totalSeconds} sec"
                             else -> "Ride normally · steady moments save automatically"
                         }, fontSize = 14.sp, color = CaptureMuted)
                         if (state.mode == CalibrationMode.Guided && target != null && state.frame != null) {
@@ -133,7 +133,7 @@ fun CalibrationPanel(state: CalibrationUiState, onEnabled: (Boolean) -> Unit, on
                                 val selected = cell.point == target?.point && cell.rpm == target?.rpm
                                 Box(Modifier.weight(1f).height(48.dp)
                                     .background(if (selected) Color(0xFF263B50) else Color.Transparent, RoundedCornerShape(8.dp))
-                                    .clickable { onTarget(cell) }.semantics { contentDescription = "Resistance band ${cell.point}, ${cell.rpm} rpm, ${min(3, cell.repeats)} of 3 saved, " +
+                                    .clickable { onTarget(cell) }.semantics { contentDescription = "Resistance band ${cell.point}, ${cell.rpm} rpm, ${min(cell.required, cell.repeats)} of ${cell.required} ${if (state.progress.streaming) "seconds" else "saved"}, " +
                                         (cell.approximateWatts?.let { "approximately $it watts" } ?: "learning watts") },
                                     contentAlignment = Alignment.Center) {
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -142,7 +142,7 @@ fun CalibrationPanel(state: CalibrationUiState, onEnabled: (Boolean) -> Unit, on
                                         Canvas(Modifier.width(60.dp).height(18.dp)) {
                                             repeat(3) { effort ->
                                                 val center = Offset((effort * 20 + 10).dp.toPx(), size.height / 2)
-                                                if (effort < cell.repeats) drawCircle(CaptureGreen, 4.dp.toPx(), center)
+                                                if (effort < (cell.repeats * 3 / cell.required)) drawCircle(CaptureGreen, 4.dp.toPx(), center)
                                                 else drawCircle(CaptureGreen, 4.dp.toPx(), center, style = Stroke(1.5.dp.toPx()))
                                             }
                                         }
@@ -166,6 +166,7 @@ fun CalibrationPanel(state: CalibrationUiState, onEnabled: (Boolean) -> Unit, on
                 CaptureChart(state.recent)
                 Button(onBackground, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Table view") }
             }
+            if (state.progress.streaming) CalibrationStreamBucket(state, localCalibration?.recording == true)
             Text(if (localCalibration?.recording == true) "Recording Grupetto calibration · rest anytime" else "${state.progress.totalSeconds}-second efforts · rest anytime", color = CaptureMuted, fontSize = 12.sp)
         }
     }

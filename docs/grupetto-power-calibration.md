@@ -1,5 +1,9 @@
 # Grupetto power calibration
 
+The current collector uses [stable-gated streaming calibration](streaming-calibration.md):
+two-second settling, distinct paired seconds, per-cell 100-second retention and schema 4.
+The linked specification defines the current gate, outlier recovery and persistence format.
+
 External Sensors → **Calibration** opens the table with **Record**, **Activate** and
 **Clear** controls. The main screen and notification Show actions always open this
 table. Free riding records directly here; there is no separate Free ride screen.
@@ -20,7 +24,7 @@ then bike watts. The raw BIKE number in capture remains uncorrected.
 Clearing this option does not clear the board-fit capture
 or change the sensor board. Activation is explicit and persists across restarts;
 recording pauses after a process restart. With Record and Activate both on,
-each usable fit automatically replaces the active snapshot after a saved effort,
+each persisted stream batch automatically replaces the active snapshot,
 without requiring a lower error score than the previous table or raw bike power.
 With recording off, the snapshot stays fixed. **Apply latest fit** appears on the
 Table page only when a usable draft differs from the active snapshot (for example,
@@ -151,9 +155,9 @@ edited targets. There is no additive manual offset layer to compound or reapply.
 Coverage from editing remains descriptive and never counts as measured efforts.
 Explicit manual saves (including Reset corrections) can make a sparse table usable.
 
-A subsequent accepted recording averages into that same cell using its capped
-recording weight. Manual changes preserve that weight (or seed an empty cell with
-one value), so future recordings always remain able to change the edit. A new -10% observation after a manual -10% edit stays -10%, not -19%.
+Subsequent paired observations update that same cell using a robust weighted-median
+estimate over its retained stream at the current established level. Unchanged old targets
+cannot immediately reconstruct over an edit; future real observations remain able to change it.
 No new observations means no reconstruction: restarting, pausing/resuming, and
 receiving duplicate old captures preserve the shared table exactly. A persisted
 processed-through timestamp prevents old overlapping/imported observations from
@@ -163,14 +167,12 @@ or before that boundary are historical, not new calibration updates.
 Schema-1 backups remain importable. Migration validates their offsets, preserves
 the exact saved gains, folds existing manual adjustments into targets once, keeps
 original readings, and discards the offsets. Draft and saved activation snapshots
-migrate independently. Schema-3 profiles store the shared surface, processed timestamp,
-and each cell's averaging weight (0–10). Schema-1 and schema-2 surfaces migrate
-without erasing gains or recordings: every saved grid value becomes one initial
-cell value, so a subsequent recording has half the weight until the cell reaches
-ten values. This deliberately preserves legacy values rather than reconstructing
-a different table from historical samples. Under direct-cell lookup fractional
-coordinates now use the nearest grid cell, not the old interpolated surface.
-Older app versions reject schema-3 profiles rather than misinterpreting them.
+migrate independently. Schema-4 profiles preserve existing gains and keep legacy
+efforts as explicit aggregates, without inventing raw stream seconds. New observations
+use compact timestamped tuples; the first new stream in a cell estimates that cell from
+real paired observations. Older app versions reject schema 4. A fsynced recovery copy
+retains each old source before migration. Fractional coordinates still use the nearest
+grid cell, not the old interpolated surface.
 Valid old snapshots are rewritten atomically at startup, including the older
 separate draft/active files. Versions v0.0.49 and v0.0.50 use the supported schema-1
 format. If persisted calibration is malformed, oversized, or uses an unsupported
@@ -194,15 +196,13 @@ Raw resistance AD maps through the bike's 31-point baseline and rounds to the
 nearest column. Cadence rounds to the nearest 5-rpm row from 45–120 rpm. Half-cell
 ties round up. No recording changes a neighboring cell.
 
-The cell stores the arithmetic mean of its first ten correction multipliers
-(pedal watts / raw bike watts). Every later accepted recording updates it as
-`0.9 * previous multiplier + 0.1 * new multiplier`. Values are bounded to
-0.65–1.35 before averaging and persisted as log multipliers for editor/file
-compatibility. The averaging weight saturates at ten and survives restart and
-backup import, even when older capture history is trimmed. The first recording
-in an empty cell therefore matches pedal watts exactly within the safety limits.
-Subsequent differing recordings intentionally average; the newest one does not
-replace the previous nine.
+Each cell retains up to 100 accepted paired seconds across visits. Its live correction
+is the native-watt-weighted median of editable pedal/native ratios at its current
+established level, bounded to 0.65-1.35. Isolated ratio glitches are quarantined;
+three internally consistent shifted observations establish a new level instead of
+being rejected forever against an older gain. See the stream specification for exact
+thresholds. The old first-ten/tenth-weight average remains only for legacy aggregated
+inputs; it is no longer the live recording algorithm.
 
 During a ride, lookup uses the current rounded cell if populated; otherwise it
 uses the closest populated cell. Distance is squared Euclidean distance in grid
@@ -276,19 +276,12 @@ Both meters may read as low as 5 W, including easy spinning around 12–15 W.
 Zero/below-5 W readings reset the window with an explicit low-power cue. Capture,
 the Grupetto fit and saved-data loading share this power range.
 
-**Capture settings** on the calibration table edits settle time (0–15 seconds) and
-maximum resistance movement (1–100% of one local baseline interval, minimum three
-raw AD units). Defaults are three seconds and 10%. Settings persist across restarts;
-changing them restarts only the in-progress hold and keeps all saved efforts.
-With defaults, eight distinct paired readings spanning seven elapsed seconds form
-an effort; the first three seconds settle, leaving five readings. Every setting
-still requires at least five settled readings. Cadence spread may reach 8 rpm.
-Power can have one isolated outlier, but the remaining spread and the
-first-to-last settled medians must stay within max(20 W, 12%) at normal power.
-Below 40 W the absolute allowance scales down to half the median, with a 5 W floor,
-so low-power ramps are not mistaken for steady efforts. Stale packets,
-disconnects, sustained ramps and resistance transitions are rejected. Shorter
-windows trade some delay rejection for achievable human efforts.
+**Capture settings** explains the fixed two-second stream gate and per-cell 100-second
+bucket. Knob movement, a cadence-band change, stale readings or disconnection reset
+settling. Both packet timestamps must advance and observations are accepted at most once
+per second. The bottom bucket shows waiting, settling, collecting, possible-outlier or
+paused state. Finite fill/cell-crossfade motion changes only the pixels, never the fitted
+values. Legacy configurable effort windows remain separate from tablet streaming.
 
 ## Experimental sensor-board workflow
 
@@ -316,8 +309,9 @@ or installation. Board setup disables the separate Grupetto correction.
 ### Optional refit from retained original measurements
 
 While recording is paused, select **Calculate New Solution** above the Corrected error watt difference.
-This explicit offline operation uses all eligible retained efforts (at most 3600),
-not only each cell's rolling ten-value live weight. It does not run automatically
+This explicit offline operation uses all eligible retained observations and legacy aggregates
+(up to 100 stream seconds per cell plus 3600 legacy aggregates), including earlier retained
+levels. Review its preview before replacing the current live level. It does not run automatically
 between rides. The preview compares the current and fitted table's mean absolute
 error, signed bias (corrected minus pedals), RMSE, fitted cells and bound hits.
 **Apply refit** changes the shared table only after confirmation; **Cancel** leaves
@@ -338,8 +332,8 @@ although their nearest-cell fallback output can change when its source is refitt
 Refit leaves original observations and edited targets untouched. It preserves the
 processed-history boundary (advancing only to cover retained data it consumes)
 and each cell's live count, raising it to the smaller of ten and its fit-evidence
-count if larger. Subsequent live recording therefore still uses the same
-first-ten average / tenth-weight update, not a permanent offline override.
+count if larger. Subsequent streaming updates use the current-level weighted median
+in the same shared table; the refit is not a permanent offline override.
 Record, Clear, imports, edits, activation or baseline changes invalidate stale
 previews. Fitting runs off the UI thread; disk save completes before publication.
 

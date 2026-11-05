@@ -47,23 +47,23 @@ internal class GrupettoCalibrationStore(directory: File, name: String) {
     companion object {
         internal fun decode(json: JSONObject): GrupettoCalibrationProfile {
             val schema = json.getInt("schema")
-            check(schema in 1..3)
+            check(schema in 1..4)
             check(json.getString("model") == when (schema) {
                 1 -> "regularized_gaussian_log_gain_v1"
                 2 -> "unified_gaussian_log_gain_v2"
-                else -> "direct_cell_gain_v3"
+                3 -> "direct_cell_gain_v3"
+                else -> "stable_cell_stream_v4"
             })
             val baseline = json.getJSONArray("baseline").let { a -> List(a.length()) { a.getInt(it) } }
             check(validCalibrationTable(baseline))
             val samples = json.getJSONArray("samples").let { a ->
-                check(a.length() <= 3600)
-                List(a.length()) { i -> a.getJSONObject(i).let {
-                    check(schema >= 2 || !it.has("recordedPedalWatts"))
-                    CalibrationSample(it.getDouble("ad"), it.getDouble("rpm"), it.getDouble("nativeWatts"),
-                        it.getDouble("pedalWatts"), it.getLong("capturedAt"),
-                        recordedPedalWatts = if (it.has("recordedPedalWatts")) it.getDouble("recordedPedalWatts") else null)
-                } }
+                check(a.length() <= MaxCalibrationSamples)
+                List(a.length()) { i ->
+                    if (schema == 1) check(!a.getJSONObject(i).has("recordedPedalWatts"))
+                    decodeStoredCalibrationSample(a, i, schema >= 4)
+                }
             }
+            validateObservationRetention(baseline, samples)
             val capture = CalibrationCapture(json.getString("frameSerial"), json.getString("meterAddress"), json.getLong("serviceVersion"), baseline, samples)
             check(capture.frameSerial.isNotBlank() && capture.meterAddress.isNotBlank() && capture.serviceVersion == 2040490L)
             check(samples.all { calibrationCoordinate(baseline, it.ad) != null && it.rpm in 45.0..120.0 &&
@@ -85,7 +85,7 @@ internal class GrupettoCalibrationStore(directory: File, name: String) {
                 check(recordedThrough >= (samples.filter { it.usableForCalibration(baseline) }
                     .maxOfOrNull { it.capturedAt } ?: Long.MIN_VALUE))
                 val cells = t.getInt("cells")
-                check(cells in 0..if (schema == 3) 496 else 128)
+                check(cells in 0..if (schema >= 3) 496 else 128)
                 val counts = if (schema < 3) List(496) { 1 } else t.getJSONArray("cellSampleCounts").let { a ->
                     check(a.length() == 496)
                     List(496) { index ->
@@ -140,15 +140,10 @@ internal class GrupettoCalibrationStore(directory: File, name: String) {
         }
         internal fun encode(profile: GrupettoCalibrationProfile): JSONObject {
             val capture = profile.capture
-            val json = JSONObject().put("schema", 3).put("model", "direct_cell_gain_v3")
+            val json = JSONObject().put("schema", 4).put("model", "stable_cell_stream_v4")
                 .put("frameSerial", capture.frameSerial).put("meterAddress", capture.meterAddress)
                 .put("serviceVersion", capture.serviceVersion).put("baseline", JSONArray(capture.baseline))
-                .put("samples", JSONArray().also { a -> capture.samples.forEach {
-                    val sample = JSONObject().put("ad", it.ad).put("rpm", it.rpm).put("nativeWatts", it.nativeWatts)
-                        .put("pedalWatts", it.pedalWatts).put("capturedAt", it.capturedAt)
-                    it.recordedPedalWatts?.let { watts -> sample.put("recordedPedalWatts", watts) }
-                    a.put(sample)
-                } })
+                .put("samples", JSONArray().also { a -> capture.samples.forEach { a.put(encodeStoredCalibrationSample(it)) } })
             profile.table?.let {
                 json.put("table", JSONObject().put("gains", JSONArray(it.gains)).put("confidence", JSONArray(it.confidence))
                     .put("cellSampleCounts", JSONArray(it.effectiveCellSampleCounts()))

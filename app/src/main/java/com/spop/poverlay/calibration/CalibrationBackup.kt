@@ -17,7 +17,7 @@ internal fun boundedCalibrationText(input: InputStream): String {
         val count = input.read(buffer)
         if (count < 0) break
         require(output.size() + count <= CalibrationBackup.MAX_BYTES) {
-            "Calibration file is too large (maximum 4 MB)."
+            "Calibration file is too large (maximum 32 MB)."
         }
         output.write(buffer, 0, count)
     }
@@ -41,10 +41,10 @@ internal data class CalibrationBackup(
     fun encode(): String = JSONObject().put("format", "grupetto-calibration-backup").put("schema", 2)
         .put("draft", draft?.let(GrupettoCalibrationStore::encode) ?: JSONObject.NULL)
         .put("saved", saved?.let(GrupettoCalibrationStore::encode) ?: JSONObject.NULL)
-        .also { if (resetAt > 0) it.put("resetAt", resetAt) }.toString(2)
+        .also { if (resetAt > 0) it.put("resetAt", resetAt) }.toString()
 
     companion object {
-        const val MAX_BYTES = 4 * 1024 * 1024
+        const val MAX_BYTES = 32 * 1024 * 1024
 
         fun read(input: InputStream): CalibrationBackup {
             return decode(boundedCalibrationText(input)).also {
@@ -96,7 +96,7 @@ internal class CalibrationBackupStore(private val directory: File) {
             val json = JSONObject(text)
             val backup = CalibrationBackup.decode(text)
             val legacy = json.getInt("schema") == 1 || listOf("draft", "saved").any { key ->
-                !json.isNull(key) && json.getJSONObject(key).getInt("schema") < 3
+                !json.isNull(key) && json.getJSONObject(key).getInt("schema") < 4
             }
             backup to legacy
         } catch (e: Exception) {
@@ -105,7 +105,10 @@ internal class CalibrationBackupStore(private val directory: File) {
         }
         // Keep this write outside the format-error catch. A failed upgrade must preserve the
         // valid old snapshot via AtomicFile, rather than misclassifying it as corrupt.
-        if (legacy) save(backup)
+        if (legacy) {
+            preserveCalibrationMigrationSource(file.baseFile)
+            save(backup)
+        }
         resetOnLoad = backup.resetAt > 0
         return backup
     }

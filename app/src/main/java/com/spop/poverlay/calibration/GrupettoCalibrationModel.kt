@@ -20,7 +20,8 @@ data class GrupettoCalibrationTable(val baseline: List<Int>, val gains: List<Dou
     val manualCoverage: Set<Int> = emptySet(),
     val recordedCoverage: Set<Int> = emptySet(),
     // Capped averaging weight, not an audit count. Zero means this cell has no correction yet.
-    val cellSampleCounts: List<Int> = emptyList()) {
+    val cellSampleCounts: List<Int> = emptyList(),
+    val streamSeconds: Int = 0, val legacyEffortCount: Int = 0) {
     /** Empty counts only occur in legacy/programmatic tables. Their saved surface is a seed,
      * never a large invented recording count. Newly fitted tables always carry explicit counts. */
     internal fun effectiveCellSampleCounts(): List<Int> = if (cellSampleCounts.size == 496) cellSampleCounts
@@ -89,6 +90,7 @@ object GrupettoCalibrationFitter {
             .sortedBy { it.capturedAt }.forEach { sample ->
                 val cell = calibrationCellIndex(baseline, sample.ad, sample.rpm)!!
                 val measurement = (sample.pedalWatts / sample.nativeWatts).coerceIn(.65, 1.35)
+                if (sample.observation != null) return@forEach
                 val count = counts[cell]
                 val nextCount = (count + 1).coerceAtMost(10)
                 val mean = if (count == 0) measurement
@@ -96,6 +98,15 @@ object GrupettoCalibrationFitter {
                 gains[cell] = ln(mean.coerceIn(.65, 1.35))
                 counts[cell] = nextCount
             }
+        usable.filter { it.observation != null }.groupBy {
+            calibrationCellIndex(baseline, it.ad, it.rpm)!!
+        }.forEach { (cell, observations) ->
+            // No new observation means a manual edit remains authoritative, including restart.
+            if (previous == null || observations.any { it.capturedAt > previous.recordedThrough }) {
+                gains[cell] = ln(streamCellGain(observations.sortedBy { it.capturedAt }.takeLast(CalibrationCellSeconds), exp(gains[cell])))
+                counts[cell] = observations.size.coerceAtMost(10)
+            }
+        }
         val ready = counts.any { it > 0 }
         var result = GrupettoCalibrationTable(baseline, gains, counts.map { it / 10.0 }, usable.size,
             counts.count { it > 0 }, 0.0, 0.0, ready,

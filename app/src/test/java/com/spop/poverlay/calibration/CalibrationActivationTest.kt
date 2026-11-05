@@ -45,7 +45,7 @@ class CalibrationActivationTest {
     @Test fun invalidPointOrUnpopulatedOrMalformedTableCannotActivate() {
         val invalid = listOf(sample.copy(nativeWatts = 0.0), sample.copy(pedalWatts = 4.0),
             sample.copy(rpm = 0.0), sample.copy(ad = Double.NaN), sample.copy(pedalWatts = 450.0))
-        invalid.forEach { effort ->
+        (invalid + sample.copy(observation = CalibrationObservation(0, 0, 100000))).forEach { effort ->
             val bad = profile(listOf(effort))
             assertFalse(bad.canActivate)
             assertFalse(bad.withActivationReadiness().table!!.canActivate)

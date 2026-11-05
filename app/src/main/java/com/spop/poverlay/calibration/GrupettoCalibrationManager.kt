@@ -83,7 +83,7 @@ class GrupettoCalibrationManager(private val context: Context) {
         mutex.withLock {
             recordingSince = if (enabled) System.currentTimeMillis() else Long.MAX_VALUE
             mutableState.update { it.copy(recording = enabled, message = if (enabled)
-                if (activeProfile != null) "Recording · every saved effort updates the table" else "Recording · guide or free ride"
+                if (activeProfile != null) "Recording · paired observations update this cell" else "Recording · guide or free ride"
                 else "Recording paused") }
             if (enabled) {
                 val capture = draft?.capture ?: savedProfile?.capture ?: existing?.takeIf { preferences.getLong("clearedAt", 0) == 0L }
@@ -104,7 +104,7 @@ class GrupettoCalibrationManager(private val context: Context) {
                 mutableState.update { it.copy(recording = false, message = message) }
                 error(message)
             }
-            val samples = ((previous?.samples ?: emptyList()) + fresh).distinctBy { it.capturedAt }.takeLast(3600)
+            val samples = retainCalibrationObservations(capture.baseline, (previous?.samples ?: emptyList()) + fresh)
             fitAndSave(capture.copy(samples = samples))
             check(mutableState.value.recording) { mutableState.value.message }
         }
