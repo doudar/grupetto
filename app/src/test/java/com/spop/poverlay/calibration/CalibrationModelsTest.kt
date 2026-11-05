@@ -20,22 +20,22 @@ class CalibrationModelsTest {
         assertEquals(496, table.gains.size)
         assertTrue(table.confidence.all { it in 0.0..1.0 })
     }
-    @Test fun sparseAndAlreadyAccurateDataCannotActivateAnUnsupportedModel() {
+    @Test fun onePointAndAlreadyAccurateDataCanActivateTheDirectCellModel() {
         val sample = CalibrationSample(2000.0, 80.0, 200.0, 220.0, 1)
-        assertFalse(GrupettoCalibrationFitter.fit(baseline, listOf(sample))!!.ready)
-        assertFalse(GrupettoCalibrationFitter.fit(baseline, List(20) { sample.copy(pedalWatts = 200.0, capturedAt = it.toLong()) })!!.ready)
+        assertTrue(GrupettoCalibrationFitter.fit(baseline, listOf(sample))!!.canActivate)
+        assertTrue(GrupettoCalibrationFitter.fit(baseline, List(20) { sample.copy(pedalWatts = 200.0, capturedAt = it.toLong()) })!!.canActivate)
     }
-    @Test fun activationStillRequiresSixCellsThreeResistanceColumnsAndTenRpmSpan() {
+    @Test fun activationDoesNotRequireAdditionalCellsResistanceColumnsOrCadenceSpan() {
         fun points(xs: List<Int>, rpms: List<Int>) = xs.flatMap { x -> rpms.map { rpm ->
             CalibrationSample(baseline[x].toDouble(), rpm.toDouble(), 200.0, 220.0, (x * 100 + rpm).toLong())
         } }
         val enough = points(listOf(8, 12, 16), listOf(75, 85))
         assertTrue(GrupettoCalibrationFitter.fit(baseline, enough)!!.ready)
-        assertFalse(GrupettoCalibrationFitter.fit(baseline, enough.take(5))!!.ready)
-        assertFalse(GrupettoCalibrationFitter.fit(baseline, points(listOf(8, 12), listOf(65, 75, 85)))!!.ready)
-        assertFalse(GrupettoCalibrationFitter.fit(baseline, points(listOf(8, 12, 16), listOf(75, 80)))!!.ready)
+        assertTrue(GrupettoCalibrationFitter.fit(baseline, enough.take(1))!!.canActivate)
+        assertTrue(GrupettoCalibrationFitter.fit(baseline, points(listOf(8, 12), listOf(65, 75, 85)))!!.canActivate)
+        assertTrue(GrupettoCalibrationFitter.fit(baseline, points(listOf(8, 12, 16), listOf(75, 80)))!!.canActivate)
         val repeated = List(12) { enough[it % 5].copy(capturedAt = it.toLong()) }
-        assertFalse(GrupettoCalibrationFitter.fit(baseline, repeated)!!.ready)
+        assertTrue(GrupettoCalibrationFitter.fit(baseline, repeated)!!.canActivate)
     }
 
     @Test fun guidedTargetsAcceptOffCenterShiftsWithoutChangingMeasurements() {

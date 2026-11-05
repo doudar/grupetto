@@ -74,8 +74,8 @@ class CalibrationBackupTest {
         assertEquals(backup.saved.table!!.gains, restored.saved.table!!.gains)
         assertEquals(backup.saved.table.confidence, restored.saved.table.confidence)
         assertEquals(backup.saved.table.cellSampleCounts, restored.saved.table.cellSampleCounts)
-        assertFalse(restored.draft.table!!.ready)
-        assertEquals(restored.saved, activationProfile(restored.draft, restored.saved))
+        assertTrue(restored.draft.table!!.canActivate)
+        assertEquals(restored.draft, activationProfile(restored.draft, restored.saved))
         assertEquals(496, restored.saved.table.correctionPercent.size)
         assertFalse(JSONObject(backup.encode()).has("active"))
     }
@@ -83,7 +83,7 @@ class CalibrationBackupTest {
     @Test fun unfinishedDraftAndSavedOnlyBackupsRoundTrip() {
         val draft = read(CalibrationBackup(profile(true), null).encode())
         assertNull(draft.saved)
-        assertFalse(draft.draft!!.table!!.ready)
+        assertTrue(draft.draft!!.table!!.canActivate)
         val saved = read(CalibrationBackup(null, profile()).encode())
         assertNull(saved.draft)
         assertTrue(saved.saved!!.table!!.ready)
@@ -105,7 +105,7 @@ class CalibrationBackupTest {
             { it.getJSONObject("draft").put("table", "invalid") },
             { it.getJSONObject("draft").getJSONObject("table").put("manualCoverage", JSONArray(listOf(496))) },
             { it.getJSONObject("saved").put("frameSerial", "another-bike") },
-            { it.getJSONObject("saved").getJSONObject("table").put("ready", false) },
+            { it.getJSONObject("saved").put("samples", JSONArray()) },
         )
         mutations.forEachIndexed { i, mutate ->
             val json = JSONObject(valid).also(mutate)
@@ -114,6 +114,16 @@ class CalibrationBackupTest {
         assertTrue(runCatching { read("not json") }.isFailure)
         assertTrue(runCatching { read(CalibrationBackup(null, null).encode()) }.isFailure)
         assertTrue(runCatching { ByteArrayInputStream(ByteArray(CalibrationBackup.MAX_BYTES + 1)).use(CalibrationBackup::read) }.isFailure)
+    }
+
+    @Test fun onePointSavedBackupUpgradesOldReadinessWithoutChangingEvidence() {
+        val original = profile(true).let { it.copy(table = it.table!!.copy(ready = false)) }
+        val restored = read(CalibrationBackup(original, original).encode())
+        val restoredTable = restored.saved!!.table!!
+        assertTrue(restoredTable.canActivate)
+        assertEquals(original.capture, restored.saved.capture)
+        assertEquals(original.table!!.gains, restoredTable.gains)
+        assertEquals(original.table.cellSampleCounts, restoredTable.cellSampleCounts)
     }
 
     @Test fun manualEditsRoundTripRestartRefitAndRejectStaleSaves() = runBlocking {

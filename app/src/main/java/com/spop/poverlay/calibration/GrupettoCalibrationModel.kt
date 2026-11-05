@@ -26,6 +26,17 @@ data class GrupettoCalibrationTable(val baseline: List<Int>, val gains: List<Dou
     internal fun effectiveCellSampleCounts(): List<Int> = if (cellSampleCounts.size == 496) cellSampleCounts
         else List(496) { 1 }
 
+    /** Direct-cell lookup needs one populated cell, not the former coverage threshold.
+     * Do not trust an old serialized ready bit to enable an empty or malformed table.
+     */
+    val canActivate get() = ready && hasUsableCells
+
+    internal val hasUsableCells get() = sampleCount > 0 && cells in 1..496 && validCalibrationTable(baseline) &&
+        gains.size == 496 && gains.all { it.isFinite() && it in ln(.65)..ln(1.35) } &&
+        confidence.size == 496 && confidence.all { it.isFinite() && it in 0.0..1.0 } &&
+        (cellSampleCounts.isEmpty() || cellSampleCounts.size == 496 && cellSampleCounts.all { it in 0..10 }) &&
+        effectiveCellSampleCounts().any { it > 0 }
+
     fun currentCellIndex(ad: Double, rpm: Double): Int? = calibrationCellIndex(baseline, ad, rpm)
 
     // Distance is squared Euclidean grid distance: one resistance column and one 5-rpm
@@ -85,9 +96,7 @@ object GrupettoCalibrationFitter {
                 gains[cell] = ln(mean.coerceIn(.65, 1.35))
                 counts[cell] = nextCount
             }
-        val observed = usable.map { calibrationCellIndex(baseline, it.ad, it.rpm)!! }.toSet()
-        val ready = previous?.ready == true || usable.size >= 6 && observed.size >= 6 &&
-            observed.map { it / 16 }.distinct().size >= 3 && usable.maxOf { it.rpm } - usable.minOf { it.rpm } >= 10
+        val ready = counts.any { it > 0 }
         var result = GrupettoCalibrationTable(baseline, gains, counts.map { it / 10.0 }, usable.size,
             counts.count { it > 0 }, 0.0, 0.0, ready,
             recordedThrough = max(previous?.recordedThrough ?: Long.MIN_VALUE, usable.maxOf { it.capturedAt }),

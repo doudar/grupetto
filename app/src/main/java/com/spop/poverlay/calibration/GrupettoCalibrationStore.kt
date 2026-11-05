@@ -10,16 +10,23 @@ internal data class GrupettoCalibrationProfile(val capture: CalibrationCapture, 
     fun matches(other: CalibrationCapture) = capture.frameSerial == other.frameSerial &&
         capture.serviceVersion == other.serviceVersion &&
         capture.baseline == other.baseline
+
+    val canActivate get() = table?.hasUsableCells == true && table.baseline == capture.baseline &&
+        capture.frameSerial.isNotBlank() && capture.meterAddress.isNotBlank() && capture.serviceVersion == 2040490L &&
+        capture.samples.any { it.usableForCalibration(capture.baseline) }
+
+    // Upgrade sparse drafts without replaying recordings or changing their saved gains.
+    fun withActivationReadiness() = copy(table = table?.copy(ready = canActivate))
 }
 
-/** Turning correction off retains the last usable snapshot, even if the next draft lacks coverage. */
+/** Turning correction off retains the last usable snapshot if the next draft has no usable cell. */
 internal fun activationProfile(draft: GrupettoCalibrationProfile?, saved: GrupettoCalibrationProfile?): GrupettoCalibrationProfile? =
-    draft?.takeIf { it.table?.ready == true }
-        ?: saved?.takeIf { it.table?.ready == true && (draft == null || it.matches(draft.capture)) }
+    draft?.takeIf { it.canActivate }
+        ?: saved?.takeIf { it.canActivate && (draft == null || it.matches(draft.capture)) }
 
 /** Once activated, each usable new fit replaces the snapshot regardless of comparative error. */
 internal fun automaticCalibrationProfile(draft: GrupettoCalibrationProfile, active: GrupettoCalibrationProfile?): GrupettoCalibrationProfile? =
-    draft.takeIf { it.table?.ready == true && active?.matches(it.capture) == true }
+    draft.takeIf { it.canActivate && active?.matches(it.capture) == true }
 
 internal class GrupettoCalibrationStore(directory: File, name: String) {
     private val file = AtomicFile(File(directory, name))
@@ -117,6 +124,7 @@ internal class GrupettoCalibrationStore(directory: File, name: String) {
                     pedalWatts = target, recordedPedalWatts = sample.measuredPedalWatts)
             } else samples
             return GrupettoCalibrationProfile(capture.copy(samples = migrated), table?.withCalibrationCoverage(migrated))
+                .withActivationReadiness()
         }
         /** Schema-one manual targets used the old bilinear log surface, not nearest lookup. */
         private fun legacyCorrected(table: GrupettoCalibrationTable, sample: CalibrationSample): Double {

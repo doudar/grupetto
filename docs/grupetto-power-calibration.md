@@ -25,7 +25,7 @@ without requiring a lower error score than the previous table or raw bike power.
 With recording off, the snapshot stays fixed. **Apply latest fit** appears on the
 Table page only when a usable draft differs from the active snapshot (for example,
 a refit after restart or a failed automatic update). It is not a routine save step. Turning Activate off prevents automatic activation.
-Turning it off retains the last usable snapshot. If a later draft lacks coverage,
+Turning it off retains the last usable snapshot. If a later draft has no usable cell,
 Activate can reuse that saved snapshot for the same bike and baseline; the
 controls show which saved effort count will be used and why the draft is not ready.
 Record and Start capture require a connected meter with fresh readings. A dropout
@@ -220,11 +220,12 @@ with Record off. When lookup falls back to another populated cell, that source
 cell has a pulsing green border. Fallback does not mark an empty current cell as
 measured or fill it automatically.
 
-Capture stability/settling and initial activation coverage requirements are
-unchanged: six efforts in six cells, three resistance locations and cadences
-spanning at least 10 rpm. One effort creates a draft, not automatic activation.
-Explicit manual saves can make a sparse table usable, and that readiness survives
-future recordings. Display averages and rounded broadcasts can differ from the
+Capture stability, settling and valid-data requirements are unchanged. One valid
+recorded effort in one populated cell is enough to enable **Activate**; empty or
+invalid-only data cannot activate correction. Empty cells use nearest-filled lookup,
+so additional resistances and cadences improve coverage but do not gate activation.
+First activation remains explicit, and older one-point drafts become eligible without
+replaying recordings or changing saved gains. Display averages and rounded broadcasts can differ from the
 instantaneous paired recording.
 
 **Raw bike error** and **Corrected error** are mean absolute differences from the

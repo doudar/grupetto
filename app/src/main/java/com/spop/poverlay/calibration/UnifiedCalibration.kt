@@ -17,7 +17,7 @@ internal fun updateUnifiedCalibration(capture: CalibrationCapture, previous: Gru
     val table = if (prior != null && capture.samples.none { it.capturedAt > prior.recordedThrough && it.usableForCalibration(capture.baseline) }) {
         prior.copy(sampleCount = capture.samples.size, activeComparison = null).withCalibrationCoverage(capture.samples)
     } else GrupettoCalibrationFitter.fit(capture.baseline, capture.samples, active, seed = prior)
-    return GrupettoCalibrationProfile(capture, table)
+    return GrupettoCalibrationProfile(capture, table).withActivationReadiness()
 }
 
 /** Saving an edit changes the recordings and shared surface once. No offset survives to reapply. */
@@ -40,5 +40,5 @@ internal fun applyUnifiedManualEdit(profile: GrupettoCalibrationProfile, edited:
     val table = edited.copy(ready = true, sampleCount = capture.samples.size, recordedThrough = through,
         beforeRmse = rawRmse, afterRmse = correctedRmse,
         activeComparison = null).withCalibrationCoverage(capture.samples)
-    return GrupettoCalibrationProfile(capture, table)
+    return GrupettoCalibrationProfile(capture, table).withActivationReadiness()
 }

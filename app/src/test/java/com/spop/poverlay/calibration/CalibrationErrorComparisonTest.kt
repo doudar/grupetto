@@ -27,7 +27,7 @@ class CalibrationErrorComparisonTest {
         val preview = calibrationErrorComparison(draft, null, saved)!!
         assertEquals(25.0, preview.afterWatts!!, .0001)
         assertTrue(preview.preview)
-        val unfinished = draft.copy(table = draft.table!!.copy(ready = false))
+        val unfinished = draft.copy(table = draft.table!!.copy(cells = 0, sampleCount = 0, ready = false))
         assertEquals(15.0, calibrationErrorComparison(unfinished, null, saved)!!.afterWatts!!, .0001)
         assertEquals(25.0, calibrationErrorComparison(unfinished, null, null)!!.afterWatts!!, .0001)
     }

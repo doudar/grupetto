@@ -56,9 +56,9 @@ fun CalibrationPanel(state: CalibrationUiState, onEnabled: (Boolean) -> Unit, on
                 Text(when {
                     local.active && local.recording -> "Recording · auto-update on"
                     local.active -> "Table activated"
-                    table?.ready == true -> "Draft ready to activate"
+                    table?.canActivate == true -> "Draft ready to activate"
                     local.canActivate -> "Saved table ready to activate"
-                    else -> "More ride coverage needed"
+                    else -> "Record at least one valid effort to activate"
                 }, color = CaptureGreen, fontSize = 18.sp)
                 Text("${local.count} saved efforts · ${table?.recordedCoverage?.size ?: 0} measured cells", color = CaptureMuted)
                 table?.let {

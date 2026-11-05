@@ -4,7 +4,7 @@ package com.spop.poverlay.calibration
 internal fun hasPendingCalibrationFit(active: Boolean, recording: Boolean,
     draft: GrupettoCalibrationTable?, displayed: GrupettoCalibrationTable?,
     draftCount: Int, activeCount: Int): Boolean =
-    active && !recording && draft?.ready == true && displayed != null &&
+    active && !recording && draft?.canActivate == true && displayed != null &&
         (draftCount != activeCount || draft.baseline != displayed.baseline ||
             draft.gains != displayed.gains ||
             draft.manualCoverage != displayed.manualCoverage)

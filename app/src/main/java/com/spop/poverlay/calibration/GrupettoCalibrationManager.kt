@@ -14,7 +14,7 @@ data class GrupettoCalibrationUiState(val recording: Boolean = false, val active
     val activeCount: Int = 0, val savedCount: Int = 0, val errors: CalibrationErrorComparison? = null,
     val displayTable: GrupettoCalibrationTable? = null,
     val message: String = "Correct bike power inside Grupetto") {
-    val canActivate get() = table?.ready == true || savedCount > 0
+    val canActivate get() = table?.canActivate == true || savedCount > 0
 }
 
 /** Frozen preview token. Only the manager holding its matching snapshot can apply or undo it. */
@@ -60,7 +60,7 @@ class GrupettoCalibrationManager(private val context: Context) {
                 check(preferences.edit().putBoolean("active", false)
                     .putLong("clearedAt", maxOf(preferences.getLong("clearedAt", 0), loaded.resetAt)).commit())
             }
-            savedProfile = loaded.saved?.takeIf { it.table?.ready == true }
+            savedProfile = loaded.saved?.takeIf { it.canActivate }
             activeProfile = savedProfile?.takeIf { preferences.getBoolean("active", false) }
             // The migrated/saved surface is authoritative. Replaying old observations here would
             // undo manual edits and make restart change the correction.
@@ -74,7 +74,7 @@ class GrupettoCalibrationManager(private val context: Context) {
                 savedCount = compatibleSavedCount(), errors = calibrationErrorComparison(draft, activeProfile, savedProfile),
                 displayTable = displayedTable(),
                 message = if (store.resetOnLoad) "Saved calibration could not be upgraded and was reset. A recovery copy was kept; record a new table."
-                    else if (activeProfile != null) "Active · waiting for bike verification" else "Record a ride, then activate the table") }
+                    else if (activeProfile != null) "Active · waiting for bike verification" else "Record a valid effort, then activate the table") }
         } catch (_: Exception) { mutableState.update { it.copy(message = "Saved Grupetto table is unreadable. Clear it to start again.") } }
     }
     suspend fun record(enabled: Boolean, existing: CalibrationCapture?) {
@@ -124,9 +124,9 @@ class GrupettoCalibrationManager(private val context: Context) {
                 draft = updated
                 mutableState.update { it.copy(count = capture.samples.size, table = table, savedCount = compatibleSavedCount(),
                 errors = calibrationErrorComparison(draft, activeProfile, savedProfile), displayTable = displayedTable(),
-                message = if (incumbent != null && table?.ready == true) "Draft saved · applying latest fit"
-                    else if (activeProfile != null) "Recording · more coverage needed for the latest fit"
-                    else if (table?.ready == true) "Draft ready · activate when ready" else "Collect more nearby resistances and two cadences") }
+                message = if (incumbent != null && updated.canActivate) "Draft saved · applying latest fit"
+                    else if (activeProfile != null) "Recording · no usable point in the latest fit"
+                    else if (updated.canActivate) "Draft ready · activate when ready" else "Record at least one valid effort to activate") }
             }
             if (automaticCalibrationProfile(updated, incumbent) != null) {
                 try {
@@ -145,7 +145,7 @@ class GrupettoCalibrationManager(private val context: Context) {
             mutex.withLock {
                 val profile = activationProfile(draft, savedProfile)
                 if (profile == null) {
-                    mutableState.update { it.copy(message = "More resistances and cadences needed · keep recording") }
+                    mutableState.update { it.copy(message = "Record at least one valid effort to activate") }
                     return@withLock
                 }
                 if (verifiedBaseline?.first?.let { it != profile.capture.baseline } == true) {
@@ -163,6 +163,7 @@ class GrupettoCalibrationManager(private val context: Context) {
      */
     private suspend fun publishActive(profile: GrupettoCalibrationProfile, previous: GrupettoCalibrationProfile?,
         generation: Int, automatic: Boolean) = withContext(NonCancellable) {
+        check(profile.canActivate) { "Record at least one valid effort to activate" }
         val previousSaved = savedProfile
         fun allowed() = generation == activationGeneration && (!automatic ||
             (recordingRequested && mutableState.value.recording && activeProfile === previous))
@@ -256,15 +257,17 @@ class GrupettoCalibrationManager(private val context: Context) {
                 mutableState.update { it.copy(table = table, count = capture.samples.size,
                     savedCount = compatibleSavedCount(), errors = calibrationErrorComparison(draft, activeProfile, savedProfile),
                     displayTable = displayedTable(), message = "Manual changes saved · activate when ready") }
-                if (incumbent != null && table.ready) {
+                if (incumbent != null && updated.canActivate) {
                     try { publishActive(updated, incumbent, generation, automatic = false) }
                     catch (e: Exception) { throw IllegalStateException("Edits saved as a draft; active update failed. Close and activate the draft to retry.", e) }
-                } else if (incumbent != null) deactivate("Recorded fit needs more coverage · correction off")
+                } else if (incumbent != null) deactivate("No valid recorded point · correction off")
             }
         }
     }
     internal suspend fun importBackup(backup: CalibrationBackup): CalibrationLoadResult {
         require(backup.hasData) { "This file contains no calibration data." }
+        require(backup.saved == null || backup.saved.canActivate) { "Saved activation table needs a valid recorded effort." }
+        val normalized = backup.copy(draft = backup.draft?.withActivationReadiness(), saved = backup.saved?.withActivationReadiness())
         initialized.await()
         return mutex.withLock {
             check(!recordingRequested && !mutableState.value.recording) { "Pause recording before loading a table." }
@@ -276,12 +279,12 @@ class GrupettoCalibrationManager(private val context: Context) {
                 deactivate("Loading calibration table")
                 withContext(Dispatchers.IO) {
                     check(preferences.edit().putBoolean("active", false).commit()) { "Could not disable correction." }
-                    store.save(backup)
+                    store.save(normalized)
                 }
                 synchronized(activationLock) {
                     ++activationGeneration
-                    draft = backup.draft
-                    savedProfile = backup.saved
+                    draft = normalized.draft
+                    savedProfile = normalized.saved
                     activeProfile = null
                     recordingSince = Long.MAX_VALUE
                     mutableState.value = GrupettoCalibrationUiState(count = draft?.capture?.samples?.size ?: 0,
@@ -402,7 +405,7 @@ class GrupettoCalibrationManager(private val context: Context) {
         }
     }
 
-    private fun compatibleSavedCount() = savedProfile?.takeIf { draft == null || it.matches(draft!!.capture) }
+    private fun compatibleSavedCount() = savedProfile?.takeIf { it.canActivate && (draft == null || it.matches(draft!!.capture)) }
         ?.capture?.samples?.size ?: 0
     private fun displayedTable() = (activeProfile ?: activationProfile(draft, savedProfile) ?: draft)?.table
     fun verifyBaseline(baseline: List<Int>) {

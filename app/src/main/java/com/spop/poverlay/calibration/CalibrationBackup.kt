@@ -65,7 +65,7 @@ internal data class CalibrationBackup(
             }
             val draft = profile("draft")
             val saved = profile("saved")
-            require(saved == null || saved.table?.ready == true) { "Saved activation table is not ready." }
+            require(saved == null || saved.canActivate) { "Saved activation table needs a valid recorded effort." }
             require(draft == null || saved == null || saved.matches(draft.capture)) {
                 "Draft and saved table belong to different calibrations."
             }
@@ -115,7 +115,7 @@ internal class CalibrationBackupStore(private val directory: File) {
             CalibrationBackup(
                 GrupettoCalibrationStore(directory, "grupetto-power-draft.json").load(),
                 GrupettoCalibrationStore(directory, "grupetto-power-active.json").load()).also {
-                require(it.saved == null || it.saved.table?.ready == true)
+                require(it.saved == null || it.saved.canActivate)
                 require(it.draft == null || it.saved == null || it.saved.matches(it.draft.capture))
             }
         } catch (e: Exception) {

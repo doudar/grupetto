@@ -21,7 +21,7 @@ class CalibrationPendingFitTest {
     @Test fun automaticRecordingDoesNotShowManualUpdate() { assertFalse(pending(recording = true, count = 31)) }
     @Test fun activationRemainsExplicitForInactiveDrafts() { assertFalse(pending(active = false, count = 31)) }
     @Test fun unreadyAndMissingTablesCannotOfferUpdate() {
-        assertFalse(pending(table.copy(ready = false), count = 31))
+        assertFalse(pending(table.copy(sampleCount = 0, ready = true), count = 31))
         assertFalse(pending(null)); assertFalse(pending(displayed = null))
     }
     @Test fun savedManualEditsRemainPartOfPendingState() {
