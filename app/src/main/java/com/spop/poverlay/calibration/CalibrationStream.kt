@@ -21,32 +21,43 @@ internal fun retainCalibrationObservations(baseline: List<Int>, samples: List<Ca
     return (legacy + stream).sortedBy { it.capturedAt }
 }
 
-/** Stable-gated stream, independent of the fitted gain. The first real point can activate.
- * Subsequent ratio deviations > max(0.03, 4 * recent MAD) are quarantined. Three consecutive
- * ratios within 0.03 establish a new level, retaining their original measurements/timestamps.
- * This rejects isolated glitches without permanently anchoring learning to an old correction.
- */
-internal class CalibrationStream(private val baseline: List<Int>, history: List<CalibrationSample> = emptyList()) {
+/** Adjustable stable gate; admission windows never change the actual sample's fitting cell.
+ * Outlier comparisons use recent measured ratios, not the old fitted table gain. */
+internal class CalibrationStream(private val baseline: List<Int>, history: List<CalibrationSample> = emptyList(),
+    settings: CalibrationStreamSettings = CalibrationStreamSettings()) {
+    var settings = settings
+        private set
     private val recent = history.filter { it.observation != null }.groupBy {
         calibrationCellIndex(baseline, it.ad, it.rpm)
     }.mapValues { (_, values) -> values.takeLast(5).map { it.measuredPedalWatts / it.nativeWatts }.toMutableList() }.toMutableMap()
-    private val pending = mutableListOf<CalibrationSample>()
+    private val pendingByCell = mutableMapOf<Int, MutableList<CalibrationSample>>()
+    private val pendingLastAt = mutableMapOf<Int, Long>()
     private var cell: Int? = null
     private var anchorAd = 0
-    private var resistance: Int? = null
+    private var anchorRpm = 0.0
     private var meter: String? = null
     private var stableSince = 0L
+    private var settleReason: String? = null
     private var lastNative = Long.MIN_VALUE
     private var lastPedal = Long.MIN_VALUE
     private var lastAcceptedAt = Long.MIN_VALUE
     private var lastPollAt: Long? = null
-    var progress = CaptureProgress(streaming = true, totalSeconds = 2, settleSeconds = 2)
+    private val latestRecordedPair = history.filter { it.observation != null }.maxByOrNull { it.capturedAt }
+    private var historicalMarksSeeded = false
+    private fun progress(phase: CapturePhase = CapturePhase.Waiting) = CaptureProgress(phase,
+        totalSeconds = settings.settleSeconds, settleSeconds = settings.settleSeconds, streaming = true)
+    var progress = progress()
         private set
 
+    fun updateSettings(value: CalibrationStreamSettings) {
+        if (settings == value) return
+        settings = value
+        reset()
+    }
     fun reset(phase: CapturePhase = CapturePhase.Waiting) {
-        cell = null; meter = null; pending.clear(); lastPollAt = null
-        progress = CaptureProgress(phase, totalSeconds = 2, settleSeconds = 2, streaming = true)
-        // Packet high-water marks survive a pause/reset: a cached packet is not new evidence.
+        cell = null; meter = null; pendingByCell.clear(); pendingLastAt.clear(); lastPollAt = null; settleReason = null
+        progress = progress(phase)
+        // Keep packet high-water marks and recent per-cell evidence through settings/pause resets.
     }
 
     fun add(frame: CalibrationFrame, pedal: Int, pedalAt: Long, address: String,
@@ -62,34 +73,55 @@ internal class CalibrationStream(private val baseline: List<Int>, history: List<
                 CapturePhase.LowPower else CapturePhase.Waiting)
             return emptyList()
         }
-        val interval = (index / 16).coerceAtMost(29)
-        val tolerance = max(2.0, (baseline[interval + 1] - baseline[interval]) * .02)
-        if (cell != index || meter != address || resistance != frame.resistance || abs(frame.ad - anchorAd) > tolerance) {
-            val phase = if (cell != null && cell!! % 16 != index % 16) CapturePhase.CadenceChanged else CapturePhase.Settling
-            cell = index; meter = address; anchorAd = frame.ad; resistance = frame.resistance
-            stableSince = now; pending.clear()
-            progress = CaptureProgress(phase, totalSeconds = 2, settleSeconds = 2, streaming = true, cell = index)
+        if (!historicalMarksSeeded) {
+            historicalMarksSeeded = true
+            // A fast Record off/on with zero settling must not count the last cached pair again.
+            // Older visits/boots are not packet high-water marks for this live connection.
+            latestRecordedPair?.takeIf { capturedAt - it.capturedAt in 0..5000 }?.observation?.let {
+                lastNative = it.nativeAt; lastPedal = it.pedalAt
+            }
         }
+        val anchorInterval = calibrationCoordinate(baseline, anchorAd.toDouble())?.toInt()?.coerceIn(0, 29) ?: 0
+        val tolerance = max(2.0, (baseline[anchorInterval + 1] - baseline[anchorInterval]) * settings.resistanceWindowPercent / 100.0)
+        val cadenceChanged = cell != null && abs(frame.rpm - anchorRpm) > settings.cadenceWindowRpm
+        val resistanceChanged = cell != null && abs(frame.ad - anchorAd) > tolerance
+        if (cell == null || meter != address || cadenceChanged || resistanceChanged) {
+            settleReason = when {
+                cadenceChanged -> "Cadence outside window"
+                resistanceChanged -> "Resistance outside window"
+                else -> null
+            }
+            meter = address; anchorAd = frame.ad; anchorRpm = frame.rpm
+            stableSince = now; pendingByCell.clear(); pendingLastAt.clear()
+            progress = progress(CapturePhase.Settling)
+        } // A row crossing within the hold keeps separate recent confirmations for each cell.
+        cell = index
+        progress = progress.copy(cell = index)
         val elapsed = now - stableSince
         if (elapsed < 0) { reset(); return emptyList() }
-        if (elapsed < 2000) {
-            progress = progress.copy(phase = CapturePhase.Settling, seconds = (elapsed / 1000).toInt())
+        if (elapsed < settings.settleSeconds * 1000L) {
+            progress = progress.copy(phase = CapturePhase.Settling, seconds = (elapsed / 1000).toInt(), detail = settleReason)
             return emptyList()
         }
         if (frame.timestamp <= lastNative || pedalAt <= lastPedal ||
             lastAcceptedAt != Long.MIN_VALUE && now - lastAcceptedAt < 1000) return emptyList()
         lastNative = frame.timestamp; lastPedal = pedalAt; lastAcceptedAt = now
         val ratios = recent.getOrPut(index) { mutableListOf() }
+        val pending = pendingByCell.getOrPut(index) { mutableListOf() }
+        if (pendingLastAt[index]?.let { now - it > 5000 } == true) pending.clear()
+        pendingLastAt[index] = now
         val ratio = sample.measuredPedalWatts / sample.nativeWatts
+        val floor = settings.outlierTolerancePercent / 100.0
         val center = ratios.takeIf { it.isNotEmpty() }?.let(::median)
-        val threshold = center?.let { max(.03, 4 * median(ratios.map { r -> abs(r - it) })) } ?: .03
-        val accepted = if (center == null || abs(ratio - center) <= threshold) {
+        val threshold = center?.let { max(floor, settings.outlierNoiseMultiplier * median(ratios.map { r -> abs(r - it) })) } ?: floor
+        val accepted = if (!settings.outlierRejection || center == null || abs(ratio - center) <= threshold + 1e-9) {
             pending.clear(); listOf(sample)
         } else {
-            if (pending.isNotEmpty() && abs(ratio - median(pending.map { it.measuredPedalWatts / it.nativeWatts })) > .03) pending.clear()
+            if (pending.isNotEmpty() && abs(ratio - median(pending.map { it.measuredPedalWatts / it.nativeWatts })) > floor + 1e-9) pending.clear()
             pending += sample
-            if (pending.size < 3) {
-                progress = progress.copy(phase = CapturePhase.Outlier, seconds = 2)
+            if (pending.size < settings.newLevelReadings) {
+                progress = progress.copy(phase = CapturePhase.Outlier, seconds = settings.settleSeconds,
+                    detail = "Checking shifted ratio: ${pending.size}/${settings.newLevelReadings}")
                 return emptyList()
             }
             ratios.clear()
@@ -98,23 +130,26 @@ internal class CalibrationStream(private val baseline: List<Int>, history: List<
         }
         ratios += accepted.map { it.measuredPedalWatts / it.nativeWatts }
         while (ratios.size > 5) ratios.removeAt(0)
-        progress = progress.copy(phase = CapturePhase.Collecting, seconds = 2)
+        progress = progress.copy(phase = CapturePhase.Collecting, seconds = settings.settleSeconds, detail = null)
         return accepted
     }
 }
 
 /** Weighted median minimizes absolute watt error (same objective as Calculate New Solution).
  * Only the latest established level contributes; no neighboring cell is read or changed. */
-internal fun streamCellGain(samples: List<CalibrationSample>, old: Double): Double {
+internal fun streamCellGain(samples: List<CalibrationSample>, old: Double,
+    cadenceReference: PelotonCadenceReference? = null): Double {
     val start = samples.indexOfLast { it.observation?.startsNewLevel == true }.coerceAtLeast(0)
-    val values = samples.drop(start).sortedBy { it.pedalWatts / it.nativeWatts }
+    val values = samples.drop(start).map { calibrationCalculationPair(it, cadenceReference) }
+        .sortedBy { it.pedalWatts / it.nativeWatts }
     val half = values.sumOf { it.nativeWatts } / 2
     var cumulative = 0.0
     for ((i, sample) in values.withIndex()) {
         cumulative += sample.nativeWatts
-        if (cumulative >= half) {
+        val atHalf = abs(cumulative - half) <= max(1e-9, half * 1e-12)
+        if (cumulative >= half || atHalf) {
             val lower = sample.pedalWatts / sample.nativeWatts
-            val upper = if (cumulative == half && i < values.lastIndex) values[i + 1].pedalWatts / values[i + 1].nativeWatts else lower
+            val upper = if (atHalf && i < values.lastIndex) values[i + 1].pedalWatts / values[i + 1].nativeWatts else lower
             return old.coerceIn(lower, upper).coerceIn(.65, 1.35)
         }
     }

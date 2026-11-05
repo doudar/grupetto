@@ -1,7 +1,8 @@
 # Grupetto power calibration
 
 The current collector uses [stable-gated streaming calibration](streaming-calibration.md):
-two-second settling, distinct paired seconds, per-cell 100-second retention and schema 4.
+adjustable settling with a default±5-rpm window, distinct paired seconds, per-cell
+100-second retention and schema 4.
 The linked specification defines the current gate, outlier recovery and persistence format.
 
 External Sensors → **Calibration** opens the table with **Record**, **Activate** and
@@ -276,10 +277,11 @@ Both meters may read as low as 5 W, including easy spinning around 12–15 W.
 Zero/below-5 W readings reset the window with an explicit low-power cue. Capture,
 the Grupetto fit and saved-data loading share this power range.
 
-**Capture settings** explains the fixed two-second stream gate and per-cell 100-second
-bucket. Knob movement, a cadence-band change, stale readings or disconnection reset
-settling. Both packet timestamps must advance and observations are accepted at most once
-per second. The bottom bucket shows waiting, settling, collecting, possible-outlier or
+**Capture settings** edits settle time, cadence/resistance windows and ratio-based
+outlier rejection. Defaults are 2 seconds and±5 rpm. Crossing a 5-rpm storage boundary
+inside the capture window does not reset settling; each pair stays in its actual cell.
+Leaving the configured windows, stale readings or disconnection resets settling. Both packet timestamps must advance and observations are accepted at most once
+per second. The bucket below the chart legend shows waiting, settling, collecting, possible-outlier or
 paused state. Finite fill/cell-crossfade motion changes only the pixels, never the fitted
 values. Legacy configurable effort windows remain separate from tablet streaming.
 
@@ -346,3 +348,12 @@ For example, native 195 W, target 191.69 W and recorded 177 W mean a 177 W pedal
 observation with a later 191.69 W calibration target, not two simultaneous pedal
 readings. Displayed errors and optional refit always use `recordedPedalWatts` when
 present, otherwise `pedalWatts`. Live recording uses newly captured pedal readings.
+
+### Cadence-normalized calibration inputs
+
+Known bike identities use extracted Rexon/Tonic cadence references to express each paired
+measurement at its fitting row's RPM before fitting, including optional refits.97rpm in a
+95-rpm cell is normalized down. Both native and pedal calculation inputs use that same
+reference cadence; the ratio is preserved while absolute-watt fit weights become comparable
+at the row center. Raw stored observations, PEDALS display and live meter/ERG input remain
+unchanged. See streaming-calibration.md for the formula, limits and provenance.

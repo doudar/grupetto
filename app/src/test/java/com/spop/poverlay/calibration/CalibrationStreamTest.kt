@@ -30,15 +30,15 @@ class CalibrationStreamTest {
         assertEquals(1, add(stream, 5250).size)
     }
 
-    @Test fun cadenceBandAndResistanceChangesRestartSettlingWithoutLosingPriorCellData() {
+    @Test fun cadenceWindowAndRawResistanceChangesRestartSettlingWithoutLosingPriorCellData() {
         val stream = CalibrationStream(baseline)
         add(stream, 0); add(stream, 1000); val a = add(stream, 2000)
-        assertTrue(add(stream, 3000, rpm = 83.0).isEmpty())
-        assertTrue(add(stream, 4000, rpm = 83.0).isEmpty())
-        assertEquals(1, add(stream, 5000, rpm = 83.0).size)
-        assertTrue(add(stream, 6000, rpm = 83.0, resistance = 41).isEmpty())
-        assertTrue(add(stream, 7000, rpm = 83.0, resistance = 41).isEmpty())
-        assertEquals(1, add(stream, 8000, rpm = 83.0, resistance = 41).size)
+        assertTrue(add(stream, 3000, rpm = 86.0).isEmpty())
+        assertTrue(add(stream, 4000, rpm = 86.0).isEmpty())
+        assertEquals(1, add(stream, 5000, rpm = 86.0).size)
+        assertTrue(add(stream, 6000, rpm = 86.0, ad = 2003).isEmpty())
+        assertTrue(add(stream, 7000, rpm = 86.0, ad = 2003).isEmpty())
+        assertEquals(1, add(stream, 8000, rpm = 86.0, ad = 2003).size)
         assertEquals(1, a.size)
     }
 

@@ -135,7 +135,8 @@ class CalibrationStreamUiTest {
             sample.copy(ad = baseline[cell / 16].toDouble(), rpm = 45.0 + cell % 16 * 5,
                 capturedAt = 1000000 + time, observation = CalibrationObservation(time, time))
         } }
-        val full = profile(points)
+        val full = updateUnifiedCalibration(CalibrationCapture("R00000000000000", "meter", 2040490L,
+            baseline, points), null) // Exercise reference normalization at maximum capacity too.
         val text = CalibrationBackup(full, full).encode()
         assertTrue(text.toByteArray().size < CalibrationBackup.MAX_BYTES)
         val decoded = CalibrationBackup.decode(text)
@@ -159,6 +160,11 @@ class CalibrationStreamUiTest {
             }
         } }
         compose.onNodeWithContentDescription("Cell 11, 80 rpm: 63 of 100 accepted seconds. Collecting paired observations").assertIsDisplayed()
+        val bucket = compose.onNodeWithContentDescription("Cell 11, 80 rpm: 63 of 100 accepted seconds. Collecting paired observations").fetchSemanticsNode().boundsInRoot
+        val legend = compose.onNodeWithText("gray: no saved cell data", substring = true).fetchSemanticsNode().boundsInRoot
+        val errors = compose.onNodeWithText("Average error vs pedals", substring = true).fetchSemanticsNode().boundsInRoot
+        assertTrue(bucket.top >= legend.bottom)
+        assertTrue(bucket.bottom <= errors.top)
         listOf("Record", "Activate", "Capture settings", "Guided capture", "Calculate New Solution", "Done")
             .forEach { compose.onNodeWithText(it).assertIsDisplayed() }
         val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -167,6 +173,23 @@ class CalibrationStreamUiTest {
             screenshot.compress(Bitmap.CompressFormat.PNG, 100, it)
         }
         screenshot.recycle()
+    }
+
+    @Test fun cadenceNormalizationNeverReplacesDisplayedPedalWatts() {
+        val original = sample.copy(ad = 3000.0, rpm = 97.0, nativeWatts = 500.0, pedalWatts = 550.0,
+            observation = CalibrationObservation(0, 0))
+        val reference = PelotonCadenceReference(baseline, PelotonCadenceReference.Model.Rexon)
+        val normalized = reference.normalize(original)!!
+        assertTrue(normalized.pedalWatts < 550.0)
+        val table = GrupettoCalibrationFitter.fit(baseline, listOf(original), cadenceReference = reference)!!
+        compose.setContent { MaterialTheme {
+            GrupettoCalibrationPanel(GrupettoCalibrationUiState(count = 1, table = table), {}, {}, {}, {},
+                meterReady = true, metrics = CalibrationLiveMetrics(bikeWatts = 500.0, pedalWatts = original.pedalWatts,
+                    rpm = original.rpm, resistance = 65.0, correctedWatts = 550.0))
+        } }
+        compose.onAllNodesWithText("550").assertCountEquals(2) // Raw pedals and correctly calibrated bike.
+        compose.onNodeWithText(normalized.pedalWatts.toInt().toString()).assertDoesNotExist()
+        assertEquals(550.0, original.pedalWatts, 0.0)
     }
 
     @Test fun bucketReportsTrueCellSecondsDuringFillCrossfadeOutlierWaitingAndPause() {

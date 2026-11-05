@@ -37,7 +37,7 @@ internal fun CalibrationRefitDialog(recording: Boolean,
         text = {
             Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Optional: fit each populated cell to its original saved pedal measurements, minimizing average absolute error within the -35% to +35% correction limits.")
+                Text("Optional: fit each populated cell to its original saved pedal measurements within the -35% to +35% correction limits. Where a factory cadence reference is available, fitting uses paired inputs normalized to that cell's RPM. Displayed errors still use original watts.")
                 Text("Apply replaces recorded or manual values only in populated cells with original pedal evidence. Other stored cells are unchanged. Empty-cell fallback corrections may change.")
                 Text("An active table changes live compensation when applied. An inactive table stays inactive. Saved measurements are retained; the fit may still have nonzero error.", fontSize = 12.sp)
                 if (recording) Text("Pause recording before previewing, applying, or undoing a refit.", color = MaterialTheme.colors.error)

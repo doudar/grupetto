@@ -79,7 +79,7 @@ internal fun calibrationCellIndex(baseline: List<Int>, ad: Double, rpm: Double):
 
 object GrupettoCalibrationFitter {
     fun fit(baseline: List<Int>, samples: List<CalibrationSample>, active: GrupettoCalibrationTable? = null,
-        seed: GrupettoCalibrationTable? = null): GrupettoCalibrationTable? {
+        seed: GrupettoCalibrationTable? = null, cadenceReference: PelotonCadenceReference? = null): GrupettoCalibrationTable? {
         require(validCalibrationTable(baseline))
         val usable = samples.filter { it.usableForCalibration(baseline) }
         if (usable.isEmpty()) return null
@@ -103,7 +103,7 @@ object GrupettoCalibrationFitter {
         }.forEach { (cell, observations) ->
             // No new observation means a manual edit remains authoritative, including restart.
             if (previous == null || observations.any { it.capturedAt > previous.recordedThrough }) {
-                gains[cell] = ln(streamCellGain(observations.sortedBy { it.capturedAt }.takeLast(CalibrationCellSeconds), exp(gains[cell])))
+                gains[cell] = ln(streamCellGain(observations.sortedBy { it.capturedAt }.takeLast(CalibrationCellSeconds), exp(gains[cell]), cadenceReference))
                 counts[cell] = observations.size.coerceAtMost(10)
             }
         }

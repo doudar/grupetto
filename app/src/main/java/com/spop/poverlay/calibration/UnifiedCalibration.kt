@@ -16,7 +16,8 @@ internal fun updateUnifiedCalibration(capture: CalibrationCapture, previous: Gru
     val prior = previous?.takeIf { it.matches(capture) }?.table
     val table = if (prior != null && capture.samples.none { it.capturedAt > prior.recordedThrough && it.usableForCalibration(capture.baseline) }) {
         prior.copy(sampleCount = capture.samples.size, activeComparison = null).withCalibrationCoverage(capture.samples)
-    } else GrupettoCalibrationFitter.fit(capture.baseline, capture.samples, active, seed = prior)
+    } else GrupettoCalibrationFitter.fit(capture.baseline, capture.samples, active, seed = prior,
+        cadenceReference = PelotonCadenceReference.forCapture(capture))
     return GrupettoCalibrationProfile(capture, table).withActivationReadiness()
 }
 

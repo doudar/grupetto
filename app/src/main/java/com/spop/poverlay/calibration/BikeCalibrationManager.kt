@@ -46,6 +46,14 @@ class BikeCalibrationManager(
         mutableSettings.value = settings
         resetWindow = true
     }
+    private val streamSettingsStore = CalibrationStreamSettingsStore(context.getSharedPreferences("grupetto-stream-capture-settings", Context.MODE_PRIVATE))
+    private val mutableStreamSettings = MutableStateFlow(streamSettingsStore.load())
+    val streamSettings = mutableStreamSettings.asStateFlow()
+    fun updateStreamSettings(settings: CalibrationStreamSettings) {
+        streamSettingsStore.save(settings)
+        mutableStreamSettings.value = settings
+        resetWindow = true
+    }
     private val mutableState = MutableStateFlow(CalibrationUiState())
     val state = mutableState.asStateFlow()
     private var capture: CalibrationCapture? = null
@@ -114,7 +122,7 @@ class BikeCalibrationManager(
                 val baseline = withContext(Dispatchers.IO) { connection.readTable() }
                 Timber.tag("CalibrationCapture").i("Subscribed to bike; read %d baseline points", baseline.size)
                 var window = CalibrationWindow(baseline, mutableSettings.value)
-                val stream = grupettoCalibration?.let { CalibrationStream(baseline, capture?.samples.orEmpty()) }
+                val stream = grupettoCalibration?.let { CalibrationStream(baseline, capture?.samples.orEmpty(), mutableStreamSettings.value) }
                 var dirty = false
                 var lastFlush = 0L
                 var bucketCounts = withContext(Dispatchers.Default) { capture?.samples.orEmpty().filter { it.observation != null }
@@ -145,6 +153,7 @@ class BikeCalibrationManager(
                     val frame = connection.frame
                     val pedal = readings.value
                     if (window.settings != mutableSettings.value) window = CalibrationWindow(baseline, mutableSettings.value)
+                    stream?.updateSettings(mutableStreamSettings.value)
                     if (resetWindow) { window.reset(); stream?.reset(); resetWindow = false; nextGuideRefresh = 0L }
                     if (frame == null || now - frame.timestamp !in 0..1000 ||
                         pedal == null || now - pedal.timestamp !in 0..1500) {

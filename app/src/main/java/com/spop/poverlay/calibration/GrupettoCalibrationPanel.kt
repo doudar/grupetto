@@ -36,8 +36,8 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
     metrics: CalibrationLiveMetrics = CalibrationLiveMetrics(),
     fileControls: @Composable () -> Unit = {}, onManualEdit: (() -> Unit)? = null,
     livePosition: CalibrationTablePosition? = null,
-    captureSettings: CalibrationCaptureSettings = CalibrationCaptureSettings(),
-    onCaptureSettings: ((CalibrationCaptureSettings) -> Unit)? = null,
+    captureSettings: CalibrationStreamSettings = CalibrationStreamSettings(),
+    onCaptureSettings: ((CalibrationStreamSettings) -> Unit)? = null,
     onRefit: (() -> Unit)? = null) {
     var confirmClear by remember { mutableStateOf(false) }
     var showInformation by remember { mutableStateOf(false) }
@@ -45,14 +45,7 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
     // Older versions saved Backups as index 2 before the Fit details tab was removed.
     val selectedTab = tab.coerceIn(0, 1)
     var settingsOpen by remember { mutableStateOf(false) }
-    if (settingsOpen) AlertDialog(onDismissRequest = { settingsOpen = false },
-        title = { Text("Capture settings", Modifier.testTag("stream-capture-settings-title")) },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Settle for 2 seconds with the knob unchanged and cadence inside one 5-rpm cell band.")
-            Text("Collect about once per second. Each cell keeps its latest 100 accepted seconds across visits.")
-            Text("An isolated ratio glitch is held aside. Three consecutive ratios within 3 percentage points establish a new level. No neighbor smoothing is applied.")
-            Text("These stream thresholds are fixed. Pausing keeps accepted observations; recording never resumes silently after restart.")
-        } }, confirmButton = { TextButton({ settingsOpen = false }) { Text("Close") } })
+    if (settingsOpen) CalibrationStreamSettingsDialog(captureSettings, { onCaptureSettings?.invoke(it) }) { settingsOpen = false }
     if (confirmClear) {
         AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text("Clear Grupetto table?") },
             text = { Text("Delete all saved Grupetto efforts and manual edits, stop recording, and turn correction off? " +
@@ -88,7 +81,7 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
                     if (!table.canActivate) Text("Record at least one valid effort to activate.")
                 }
                 Text("In exported files, pedalWatts is the editable calibration target. recordedPedalWatts keeps the original pedal measurement after an edit; when absent, pedalWatts is still the original. Error scores and refitting use the original measurement.")
-                Text("Error scores describe the saved efforts and are informational. Streaming: hold the knob still for two seconds and keep cadence in one 5-rpm cell band. Collect distinct paired readings about once a second; each cell retains its latest 100 accepted seconds across visits. Legacy efforts remain aggregates, not raw seconds. Three consistent shifted ratios establish a new level; isolated outliers are held aside. The bar transition is visual only. Pulse: cyan shows your current cell even when not recording; orange settles, yellow holds, green saves. A separate pulsing green border marks the nearest filled cell used when your current cell has no data.")
+                Text("Error scores describe the saved efforts and are informational. Streaming: hold the knob and cadence within your capture windows for the selected settle time. Collect distinct paired readings about once a second; each cell retains its latest 100 accepted seconds across visits. Legacy efforts remain aggregates, not raw seconds. Your outlier settings decide when consistent shifted ratios establish a new level; isolated outliers are held aside. The bar transition is visual only. Pulse: cyan shows your current cell even when not recording; orange settles, yellow holds, green saves. A separate pulsing green border marks the nearest filled cell used when your current cell has no data.")
             }
         }, confirmButton = { TextButton({ showInformation = false }) { Text("Close") } })
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -115,8 +108,8 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
                 color = Color(0xFF9EAEC0))
         }
         GrupettoCoverageChart(state.displayTable ?: state.table, capture, state.recording && meterReady, livePosition)
-        if (!capture.progress.streaming) CaptureHoldFeedback(capture, state.recording)
         CalibrationCorrectionLegend()
+        CaptureHoldFeedback(capture, state.recording)
         CalibrationErrorSummary(state.errors, onRefit,
             refitEnabled = !state.recording && (state.displayTable ?: state.table) != null)
         CalibrationTableActions(onGuide, onManualEdit, onCaptureSettings?.let { { settingsOpen = true } },
@@ -135,7 +128,6 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
             }, Modifier.weight(1f), fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFF6EE7B7))
         }
         }
-        if (selectedTab == 0 && capture.progress.streaming) CaptureHoldFeedback(capture, state.recording)
         if (selectedTab == 1) {
             Text("Save or share the current calibration, or load a backup.", fontSize = 14.sp)
             fileControls()

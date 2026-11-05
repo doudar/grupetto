@@ -5,24 +5,43 @@ The sensor-board candidate/write workflow remains separate and does not learn fr
 
 ## Admission and settling
 
-The current resistance/cadence cell uses the existing nearest 5-rpm band. After two seconds in that
-band, with unchanged displayed resistance and raw AD within max(2 AD, 2% of one baseline step)
-of its settling anchor, accept at most one distinct pair per 1,000 ms. Both native and pedal packet
-timestamps must advance. Bike readings must be at most 1,000 ms old and pedals at most 1,500 ms;
-future timestamps, invalid power/source/identity, disconnects, a polling gap over 1,500 ms, a cadence
-band change, or knob movement reset settling. Polling occurs every 250 ms; it does not create samples.
-Power remains bounded by the existing valid-reading and +/-35% correction safety checks.
+The fitting cell still uses the existing nearest 5-rpm row. The capture gate instead
+holds cadence within an adjustable window about its settling anchor: **±5 rpm by default**.
+Crossing a storage-row boundary inside that window does not restart settling. Each
+accepted observation keeps its exact AD/RPM and updates only its actual fitting cell.
+
+Settle time defaults to two seconds (0–15 configurable). Raw AD must stay within the
+selected percentage of one local baseline interval (default 2%, configurable 1–100%,
+minimum 2 AD). A rounded displayed resistance-level change alone does not reset a hold.
+Raw resistance or cadence leaving their windows resets settling and names that reason
+in the collection status. A separate More forgiving preset selects ±5 rpm, 10% resistance
+window and a 6-percentage-point ratio tolerance; it is applied only when explicitly saved.
+
+Accept at most one distinct pair per 1,000 ms. Both native and pedal timestamps must advance.
+Bike readings must be at most 1,000 ms old and pedals at most 1,500 ms. Future/invalid readings,
+disconnects or a polling gap over 1,500 ms reset the gate. Freshness, valid-power/source,
+ratio bounds and duplicate-packet checks cannot be disabled. The gate polls every 250 ms;
+polling is not evidence. Changing settings restarts only the in-progress hold and keeps
+accepted observations. All stream settings persist separately from legacy board settings.
 
 ## Isolated glitches and sustained changes
 
 Compare measured pedal/native ratio with the median of the last five accepted ratios in that cell,
-using tolerance max(0.03, four times median absolute deviation). This compares the recent stream,
+using tolerance max(configured percentage-point floor, configured multiplier × median
+absolute deviation). Defaults remain 0.03 and 4×; controls allow 1–30 percentage points and 1–10×. This compares the recent stream,
 never the old fitted gain. An isolated deviation is quarantined, not stored as accepted evidence.
-Three consecutive deviating pairs whose ratios remain within 0.03 of their pending median establish
-a new level. Preserve all three original pairs and timestamps, marking the first as the new level's
+The configured 2–10 consecutive deviating pairs (default 3), within the configured
+percentage-point floor of their pending median, establish
+a new level. Preserve all confirmed original pairs and timestamps, marking the first as the new level's
 boundary. An inconsistent reading, return to the recent level, or interrupted stable gate discards
-the unfinished quarantine. The first valid observation remains eligible for explicit activation;
+the unfinished quarantine. Nearby cell crossings keep separate confirmation queues;
+more than five seconds without a fresh pair for a cell expires that pending queue.
+The first valid observation remains eligible for explicit activation;
 zero or invalid observations never enable activation.
+
+When isolated-outlier rejection is switched off, valid distinct pairs are admitted without
+quarantine; robust fitting and all hard validity checks still apply. Disabling rejection
+does not force immediate replacement of the retained 100-second estimate.
 
 Per-cell estimates use a native-watt-weighted median of pedal/native multipliers, minimizing absolute
 watt error like Calculate New Solution. Only the most recent established level in the retained bucket
@@ -69,7 +88,7 @@ requires an older-format export/recovery copy rather than feeding the new file t
 
 ## Display
 
-The bottom collection bucket shows the current cell's accepted seconds out of 100 and the actual
+The collection bucket directly below the chart legend, above the error summary, shows the current cell's accepted seconds out of 100 and the actual
 waiting, settling, collecting, outlier-checking or paused state. Fill has a finite eased transition;
 cell changes crossfade the bucket, with no blended calibration gains or neighboring updates.
 Android animation-duration scale controls these finite animations. Accessibility reports the cell,
@@ -89,3 +108,40 @@ is disabled to avoid the observed API29 system_server Wi-Fi/telephony null-list 
 sensor fixtures and tests do not depend on guest Wi-Fi. Setup failures preserve crash
 diagnostics and their original exit status. The preparation helper rejects physical
 targets before mutation and is covered by mocked safety/failure tests.
+
+## Calculation-only cadence normalization
+
+For known 15-character bike identities on Affernet 2.4.490, use the extracted Rexon/Tonic
+factory reference selected by PowerFactory's serial convention (R-prefix selects Rexon).
+The source APK hash is 4bbc926f581e6132ad3b92cec0718920a8c3f5ab3670295b013276165117690f.
+These reference curves describe cadence shape; they are not a claim that factory watts
+or a particular bike's board readings are perfectly accurate. Unknown identities or invalid
+reference inputs retain the original calculation inputs rather than guessing a model.
+
+For an observation at raw AD x and actual cadence r, let c be its fitting row's center:
+
+    factor = referenceWatts(x, c) / referenceWatts(x, r)
+    calibrationPedals = originalPedalTarget * factor
+    calibrationNative = originalNativeWatts * factor
+
+Thus 97 rpm in the 95-rpm row scales pedal power down to its 95-rpm equivalent; 92.5 rpm
+scales up to 95. Native comparison uses the same reference cadence, avoiding a false
+correction caused by comparing 95-rpm pedal watts with 97-rpm native watts. Both live
+fitting and Calculate New Solution consume these derived pairs. Displayed PEDALS,
+recorded raw measurements/timestamps and immutable originals remain unchanged. No
+normalization is applied to the live meter stream, recording file evidence or ERG feedback.
+
+Scaling both readings preserves their ratio. The practical fitting change is consistent
+cell-center weighting in the absolute-watt objective, so a slightly faster sample does not
+receive extra weight solely because it produced more watts. A single pair retains the same
+gain when applied back at its actual RPM. This is not a new correction offset, neighboring
+cell blend, substitute for stable capture, or compensation for flywheel inertia/time alignment.
+Percent-based outlier ratios are also invariant to this common scaling; wider capture
+windows and configurable rejection thresholds address the separate admission problem.
+
+The arrays in PelotonCadenceReference preserve the extracted factory constants. Rexon
+uses its vendor AD-to-internal-row integer mapping; Tonic uses its fractional Lxx mapping.
+Cadence interpolation is continuous within the reference breakpoints to handle fractional
+RPM. Reference baseline validity is cached so fitting does not allocate validation lists
+for every observation. Tests cover factory anchors, 97→95, 92.5→95, unchanged raw/display
+inputs, same-RPM gain correctness, weighting, refits, settings persistence and UI placement.

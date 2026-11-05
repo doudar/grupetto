@@ -26,7 +26,7 @@ internal fun eligibleCalibrationErrorSamples(baseline: List<Int>, samples: List<
  * when possible, otherwise choose its nearest endpoint. No observations or neighbors are edited.
  */
 internal fun refitCalibrationTable(table: GrupettoCalibrationTable,
-    samples: List<CalibrationSample>): CalibrationRefitResult? {
+    samples: List<CalibrationSample>, cadenceReference: PelotonCadenceReference? = null): CalibrationRefitResult? {
     val eligible = eligibleCalibrationErrorSamples(table.baseline, samples)
     if (eligible.isEmpty()) return null
     val counts = table.effectiveCellSampleCounts().toMutableList()
@@ -36,17 +36,19 @@ internal fun refitCalibrationTable(table: GrupettoCalibrationTable,
     val gains = table.gains.toMutableList()
     var boundHits = 0
     groups.forEach { (cell, efforts) ->
-        val ordered = efforts.sortedBy { it.measuredPedalWatts / it.nativeWatts }
+        val ordered = efforts.map { calibrationCalculationPair(it, cadenceReference, measured = true) }
+            .sortedBy { it.pedalWatts / it.nativeWatts }
         val half = ordered.sumOf { it.nativeWatts } / 2
         var cumulative = 0.0
-        var lower = ordered.last().measuredPedalWatts / ordered.last().nativeWatts
+        var lower = ordered.last().pedalWatts / ordered.last().nativeWatts
         var upper = lower
         for ((index, effort) in ordered.withIndex()) {
             cumulative += effort.nativeWatts
-            if (cumulative >= half) {
-                lower = effort.measuredPedalWatts / effort.nativeWatts
-                upper = if (cumulative == half && index < ordered.lastIndex)
-                    ordered[index + 1].measuredPedalWatts / ordered[index + 1].nativeWatts else lower
+            val atHalf = abs(cumulative - half) <= kotlin.math.max(1e-9, half * 1e-12)
+            if (cumulative >= half || atHalf) {
+                lower = effort.pedalWatts / effort.nativeWatts
+                upper = if (atHalf && index < ordered.lastIndex)
+                    ordered[index + 1].pedalWatts / ordered[index + 1].nativeWatts else lower
                 break
             }
         }

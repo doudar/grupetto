@@ -30,8 +30,8 @@ internal fun CalibrationStreamBucket(capture: CalibrationUiState, recording: Boo
         !recording || !capture.enabled -> "Paused"
         capture.resting -> "Rest — resume when ready"
         capture.frame == null -> "Waiting for bike + pedals"
-        progress.phase == CapturePhase.Settling -> "Settling — ${progress.settleRemaining}s"
-        else -> progress.phase.cue
+        progress.phase == CapturePhase.Settling -> "${progress.detail ?: "Settling"} - ${progress.settleRemaining}s"
+        else -> progress.detail ?: progress.phase.cue
     }
     val seconds = progress.bucketSeconds.coerceIn(0, CalibrationCellSeconds)
     val cell = progress.cell

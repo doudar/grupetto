@@ -311,7 +311,7 @@ class GrupettoCalibrationManager(private val context: Context) {
             val generation = activationGeneration
             val beforeDraft = draft; val beforeSaved = savedProfile; val beforeActive = activeProfile
             val baseline = verifiedBaseline?.first
-            val fitted = withContext(Dispatchers.Default) { refitCalibrationTable(table, capture.samples) }
+            val fitted = withContext(Dispatchers.Default) { refitCalibrationTable(table, capture.samples, PelotonCadenceReference.forCapture(capture)) }
                 ?: error("No original pedal measurements are available for populated cells.")
             // The displayed active snapshot can lag the draft. A refit consumes the retained
             // capture, so do not rewind its watermark and replay those efforts on next Record.
