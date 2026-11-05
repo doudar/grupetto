@@ -14,7 +14,7 @@ class CalibrationAnchoringTest {
     private fun fit(samples: List<CalibrationSample>) = GrupettoCalibrationFitter.fit(baseline, samples)!!
     private fun assertMatches(table: GrupettoCalibrationTable, sample: CalibrationSample) {
         assertEquals(sample.pedalWatts, table.corrected(sample.nativeWatts, sample.ad, sample.rpm), 1e-8)
-        assertTrue(table.gains.all { it.isFinite() && it >= ln(.65) && it <= ln(1.35) })
+        assertTrue(table.gains.all { it.isFinite() && it >= ln(.5) && it <= ln(1.5) })
     }
 
     @Test fun fractionalObservationOnlyChangesItsOwnCellDespiteExtremeNeighbors() {
@@ -74,10 +74,12 @@ class CalibrationAnchoringTest {
 
     @Test fun ratiosAreClampedBeforeAveragingNotAfter() {
         val table = fit(listOf(effort(ratio = .5), effort(ratio = 1.0, time = 2)))
-        assertEquals(.825, exp(table.gains[199]), 1e-12)
+        assertEquals(.75, exp(table.gains[199]), 1e-12)
+        val upper = fit(listOf(effort(ratio = 2.0), effort(ratio = 1.0, time = 2)))
+        assertEquals(1.25, exp(upper.gains[199]), 1e-12)
         for (ratio in listOf(.5, .65, 1.35, 2.0)) {
             val sample = effort(ratio = ratio)
-            assertMatches(fit(listOf(sample)), sample.copy(pedalWatts = 200 * ratio.coerceIn(.65, 1.35)))
+            assertMatches(fit(listOf(sample)), sample.copy(pedalWatts = 200 * ratio.coerceIn(.5, 1.5)))
         }
     }
 

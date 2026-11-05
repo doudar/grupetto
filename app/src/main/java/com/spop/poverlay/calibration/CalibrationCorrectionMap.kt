@@ -10,10 +10,10 @@ internal val CorrectionZeroColor = Color(0xFFE2E8F0)
 internal val CorrectionUnderColor = Color(0xFF1239B5)
 internal val CorrectionUnknownColor = Color(0xFF273443)
 
-/** Percentage change relative to raw bike watts, on a fixed -10%..+10% color scale. */
+/** Percentage change relative to raw bike watts, on a fixed -20%..+20% color scale. */
 internal fun correctionColor(percent: Double?): Color {
     if (percent == null || !percent.isFinite()) return CorrectionUnknownColor
-    val fraction = (percent / 10).coerceIn(-1.0, 1.0).toFloat()
+    val fraction = (percent / 20).coerceIn(-1.0, 1.0).toFloat()
     return if (fraction < 0) lerp(CorrectionZeroColor, CorrectionOverColor, -fraction)
         else lerp(CorrectionZeroColor, CorrectionUnderColor, fraction)
 }

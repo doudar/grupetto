@@ -4,6 +4,26 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CalibrationStreamSettingsTest {
+    @Test fun forgivingDefaultsAndStrictPresetDoNotReplaceExplicitSavedValues() {
+        val defaults = CalibrationStreamSettings()
+        assertEquals(10, defaults.resistanceWindowPercent)
+        assertEquals(6.0, defaults.outlierTolerancePercent, 0.0)
+        assertEquals(defaults, CalibrationStreamSettings.MoreForgiving)
+        assertEquals(2, CalibrationStreamSettings.Stricter.resistanceWindowPercent)
+        assertEquals(3.0, CalibrationStreamSettings.Stricter.outlierTolerancePercent, 0.0)
+        assertEquals(defaults, CalibrationStreamSettings.fromStored(emptyMap<String, Any>()))
+        assertEquals(CalibrationStreamSettings.Stricter, CalibrationStreamSettings.fromStored(mapOf(
+            "resistanceWindowPercent" to 2, "outlierTolerancePercent" to 3.0)))
+    }
+
+    @Test fun toleranceWattExampleFollowsPercentAndHandlesInvalidOrFractionalInput() {
+        assertEquals("6 pp ≈ ±30 W at 500 W raw bike power", outlierWattExample("6"))
+        assertEquals("7.5 pp ≈ ±37.5 W at 500 W raw bike power", outlierWattExample("7.5"))
+        assertEquals("30 pp ≈ ±150 W at 500 W raw bike power", outlierWattExample("30"))
+        listOf("", "NaN", "Infinity", "0", "31").forEach {
+            assertTrue(outlierWattExample(it).startsWith("Enter 1–30"))
+        }
+    }
     private val baseline = List(31) { 1000 + it * 100 }
     private fun add(stream: CalibrationStream, t: Long, rpm: Double = 95.0, ad: Int = 2000,
         pedal: Int = 220, resistance: Int = 40, native: Double = 200.0) =

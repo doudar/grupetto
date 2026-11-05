@@ -36,17 +36,17 @@ class CalibrationStreamTest {
         assertTrue(add(stream, 3000, rpm = 86.0).isEmpty())
         assertTrue(add(stream, 4000, rpm = 86.0).isEmpty())
         assertEquals(1, add(stream, 5000, rpm = 86.0).size)
-        assertTrue(add(stream, 6000, rpm = 86.0, ad = 2003).isEmpty())
-        assertTrue(add(stream, 7000, rpm = 86.0, ad = 2003).isEmpty())
-        assertEquals(1, add(stream, 8000, rpm = 86.0, ad = 2003).size)
+        assertTrue(add(stream, 6000, rpm = 86.0, ad = 2011).isEmpty())
+        assertTrue(add(stream, 7000, rpm = 86.0, ad = 2011).isEmpty())
+        assertEquals(1, add(stream, 8000, rpm = 86.0, ad = 2011).size)
         assertEquals(1, a.size)
     }
 
     @Test fun rawKnobMovementMeterSwitchStalenessAndPollingGapRestartGate() {
         val stream = CalibrationStream(baseline)
         add(stream, 0); add(stream, 1000); add(stream, 2000)
-        assertTrue(add(stream, 3000, ad = 2003).isEmpty())
-        assertTrue(add(stream, 4000, ad = 2003, meter = "other").isEmpty())
+        assertTrue(add(stream, 3000, ad = 2011).isEmpty())
+        assertTrue(add(stream, 4000, ad = 2011, meter = "other").isEmpty())
         assertTrue(add(stream, 5000, frameAt = 3000).isEmpty())
         assertEquals(CapturePhase.Waiting, stream.progress.phase)
         assertTrue(add(stream, 6000).isEmpty())

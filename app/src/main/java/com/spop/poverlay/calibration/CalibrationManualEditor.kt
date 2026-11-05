@@ -39,6 +39,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 private val EditorBackground = Color(0xFF0C1420)
 private val EditorPanel = Color(0xFF142132)
@@ -155,7 +156,11 @@ internal fun CalibrationManualEditor(initial: GrupettoCalibrationTable, active: 
                 }
                 Text(error ?: notice, color = if (error != null) Color(0xFFFBBF24) else EditorMuted, fontSize = 12.sp)
             }
-            if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text("Discard unsaved edits?") },
+            if (discard) AlertDialog(onDismissRequest = { discard = false },
+                modifier = Modifier.widthIn(max = 620.dp).fillMaxWidth(.9f).testTag("manual-edit-discard-confirmation")
+                    .border(1.5.dp, EditorAccent.copy(alpha = .7f), RoundedCornerShape(16.dp)),
+                shape = RoundedCornerShape(16.dp), properties = DialogProperties(usePlatformDefaultWidth = false),
+                title = { Text("Discard unsaved edits?") },
                 text = { Text("Your saved power table has not changed.") },
                 confirmButton = { TextButton(onClose) { Text("Discard edits") } },
                 dismissButton = { TextButton({ discard = false }) { Text("Keep editing") } })
@@ -181,9 +186,9 @@ private fun EditorInspector(table: GrupettoCalibrationTable, selected: Int, scop
     }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var input by rememberSaveable(selected, percent) { mutableStateOf(String.format(Locale.US, "%.1f", percent)) }
-    val parsed = input.replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it in -35.0..35.0 }
+    val parsed = input.replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it in -CalibrationCorrectionLimits.maximumPercent..CalibrationCorrectionLimits.maximumPercent }
     Column(Modifier.fillMaxWidth().focusRequester(completedInputFocus).focusable()
-        .background(EditorPanel, RoundedCornerShape(12.dp)).padding(10.dp),
+        .background(EditorPanel, RoundedCornerShape(12.dp)).verticalScroll(rememberScrollState()).padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("${45 + selected % 16 * 5} rpm / point ${selected / 16} / ${percentLabel(percent)}", fontSize = 16.sp, fontWeight = FontWeight.Bold)
         if (!compactInput) GrupettoTabs(tab, listOf("Edit", "Scope", "Tools"), { tab = it }, fontSize = 12.sp)
@@ -212,12 +217,20 @@ private fun EditorInspector(table: GrupettoCalibrationTable, selected: Int, scop
             modifier = Modifier.fillMaxWidth().onFocusChanged { onInputFocus(it.isFocused) },
             colors = TextFieldDefaults.outlinedTextFieldColors(textColor = Color.White, unfocusedBorderColor = EditorMuted,
                 focusedBorderColor = EditorAccent, focusedLabelColor = EditorAccent, unfocusedLabelColor = EditorMuted, cursorColor = EditorAccent))
+        Slider(value = (parsed ?: percent).coerceIn(-50.0, 50.0).toFloat(),
+            onValueChange = { input = String.format(Locale.US, "%.1f", (it * 10).roundToInt() / 10.0) },
+            onValueChangeFinished = { parsed?.let(onSet); finishInput() },
+            valueRange = -50f..50f, enabled = enabled,
+            colors = SliderDefaults.colors(thumbColor = EditorAccent, activeTrackColor = EditorAccent),
+            modifier = Modifier.fillMaxWidth().testTag("manual-correction-slider")
+                .semantics { contentDescription = "Adjust selected correction from minus 50 to plus 50 percent" })
+        Text("Drag to adjust · Release to apply · Undo available", color = EditorMuted, fontSize = 10.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton({ input = if (input.startsWith("-")) input.removePrefix("-") else "-" + input.removePrefix("+") }, enabled = enabled) { Text("+/-") }
             Button({ parsed?.let(onSet); finishInput() }, enabled = enabled && parsed != null, modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.buttonColors(backgroundColor = EditorAccent, contentColor = EditorBackground)) { Text("Set correction") }
         }
-        Text(if (parsed == null) "Enter a number from -35 to +35%." else "Relative to raw bike watts / negative lowers power.",
+        Text(if (parsed == null) "Enter a number from -50 to +50%." else "Relative to raw bike watts / negative lowers power.",
             fontSize = 11.sp, color = if (parsed == null) Color(0xFFFBBF24) else EditorMuted)
         if (!compactInput) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton({ onNudge(-1.0) }, enabled = enabled, modifier = Modifier.weight(1f)) { Text("-1%") }

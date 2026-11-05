@@ -50,7 +50,7 @@ class CalibrationRefitTest {
     }
 
     @Test fun medianAndMedianIntervalsRespectBothGainBounds() {
-        for ((pedals, expected) in listOf(30.0 to .65, 250.0 to 1.35)) {
+        for ((pedals, expected) in listOf(30.0 to .5, 250.0 to 1.5)) {
             val result = refitCalibrationTable(table(), listOf(sample(100.0, pedals)))!!
             assertEquals(expected, multiplier(result.table), 1e-12)
             assertEquals(1, result.cellsAtBounds)
@@ -64,9 +64,9 @@ class CalibrationRefitTest {
         val edited = sample(100.0, 100.0).copy(recordedPedalWatts = 300.0)
         val outsideLiveGate = sample(100.0, 300.0, 2)
         val result = refitCalibrationTable(table(), listOf(edited, outsideLiveGate))!!
-        assertEquals(1.35, multiplier(result.table), 1e-12)
-        assertEquals(165.0, result.after.meanAbsoluteError, 1e-12)
-        assertEquals(-165.0, result.after.meanSignedError, 1e-12)
+        assertEquals(1.5, multiplier(result.table), 1e-12)
+        assertEquals(150.0, result.after.meanAbsoluteError, 1e-12)
+        assertEquals(-150.0, result.after.meanSignedError, 1e-12)
         assertEquals(2, result.after.count)
         assertEquals(100.0, edited.pedalWatts, 0.0)
         assertEquals(300.0, edited.recordedPedalWatts!!, 0.0)
@@ -136,8 +136,8 @@ class CalibrationRefitTest {
         fixtures.forEach { pairs ->
             val efforts = pairs.mapIndexed { index, (native, pedals) -> sample(native, pedals, index.toLong()) }
             val result = refitCalibrationTable(table(), efforts)!!
-            for (step in 0..700) {
-                val gain = .65 + step / 1000.0
+            for (step in 0..1000) {
+                val gain = .5 + step / 1000.0
                 val mae = efforts.map { abs(it.nativeWatts * gain - it.measuredPedalWatts) }.average()
                 assertTrue("${result.after.meanAbsoluteError} > $mae at gain $gain", result.after.meanAbsoluteError <= mae + 1e-10)
             }

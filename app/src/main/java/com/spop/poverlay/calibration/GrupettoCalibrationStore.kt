@@ -70,7 +70,7 @@ internal class GrupettoCalibrationStore(directory: File, name: String) {
                 it.nativeWatts in CalibrationPowerRange &&
                 if (it.recordedPedalWatts == null) it.pedalWatts in CalibrationPowerRange
                 else it.recordedPedalWatts in CalibrationPowerRange && it.pedalWatts.isFinite() &&
-                    it.pedalWatts / it.nativeWatts in (.65 - 1e-9)..(1.35 + 1e-9) })
+                    it.pedalWatts / it.nativeWatts in (CalibrationCorrectionLimits.minimumMultiplier - 1e-9)..(CalibrationCorrectionLimits.maximumMultiplier + 1e-9) })
             var legacyManualEdits = false
             val table = (if (json.has("table")) json.getJSONObject("table") else null)?.let { t ->
                 fun values(key: String) = t.getJSONArray(key).let { a -> List(a.length()) { a.getDouble(it) } }
@@ -105,7 +105,7 @@ internal class GrupettoCalibrationStore(directory: File, name: String) {
                         List(a.length()) { a.getInt(it) }.toSet()
                     } else emptySet()).also {
                     check(it.gains.size == 496 && it.confidence.size == 496 &&
-                        it.gains.all { value -> value.isFinite() && value in kotlin.math.ln(.65)..kotlin.math.ln(1.35) } &&
+                        it.gains.all { value -> value.isFinite() && value in CalibrationCorrectionLimits.logRange } &&
                         it.confidence.all { value -> value in 0.0..1.0 } && it.beforeRmse.isFinite() && it.afterRmse.isFinite() &&
                         it.beforeRmse >= 0 && it.afterRmse >= 0 && it.cells in 0..496)
                     check(offsets.isEmpty() || (offsets.size == 496 && offsets.indices.all { i ->

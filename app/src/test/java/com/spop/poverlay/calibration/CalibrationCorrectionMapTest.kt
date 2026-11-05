@@ -22,10 +22,12 @@ class CalibrationCorrectionMapTest {
     }
 
     @Test fun continuousColorScaleHasCorrectSignsMidpointAndSaturation() {
-        assertEquals(CorrectionOverColor, correctionColor(-10.0))
+        assertEquals(CorrectionOverColor, correctionColor(-20.0))
+        assertNotEquals(CorrectionOverColor, correctionColor(-10.0))
         assertEquals(CorrectionOverColor, correctionColor(-100.0))
         assertEquals(CorrectionZeroColor, correctionColor(0.0))
-        assertEquals(CorrectionUnderColor, correctionColor(10.0))
+        assertEquals(CorrectionUnderColor, correctionColor(20.0))
+        assertNotEquals(CorrectionUnderColor, correctionColor(10.0))
         assertEquals(CorrectionUnderColor, correctionColor(100.0))
         assertNotEquals(correctionColor(-5.0), correctionColor(-2.0))
         assertNotEquals(correctionColor(5.0), correctionColor(2.0))

@@ -10,6 +10,7 @@ import android.view.inspector.WindowInspector
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.darkColors
 import androidx.compose.ui.test.*
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.core.view.ViewCompat
@@ -135,6 +136,38 @@ class CalibrationManualEditorTest {
         return GrupettoCalibrationFitter.fit(baseline, samples)!!
     }
 
+    @Test fun draggingCorrectionCommitsOnceOnReleaseOnlyToSelectionAndSupportsUndo() {
+        val original = table()
+        val history = CalibrationEditHistory(original)
+        var saves = 0
+        compose.setContent { MaterialTheme(colors = darkColors()) {
+            CalibrationManualEditor(original, false, { _, _ -> saves++ }, {}, history)
+        } }
+        val slider = compose.onNodeWithTag("manual-correction-slider")
+        slider.performScrollTo().performTouchInput {
+            down(center)
+            moveTo(Offset(width * .8f, centerY), 300)
+        }
+        compose.runOnIdle { assertEquals(original, history.current); assertEquals(0, saves) }
+        slider.performTouchInput { up() }
+        compose.runOnIdle {
+            assertTrue(CalibrationManualEdit.percent(history.current.gains[15 * 16 + 7]) > 20)
+            assertEquals(original.sampleCount, history.current.sampleCount)
+            original.gains.indices.filter { it != 15 * 16 + 7 }.forEach {
+                assertEquals(original.gains[it], history.current.gains[it], 0.0)
+            }
+            assertEquals(0, saves)
+        }
+        compose.onNodeWithText("Undo").performClick()
+        compose.runOnIdle { assertEquals(original, history.current) }
+        compose.onNodeWithText("Undo").assertIsNotEnabled()
+        compose.onNodeWithText("Redo").performClick()
+        compose.onNodeWithText("Compare original").performClick()
+        slider.assertIsNotEnabled()
+        compose.onNodeWithText("Show edited").performClick()
+        slider.assertIsEnabled()
+    }
+
     @Test fun signedInputValidationExactCellsUndoRedoAndExplicitSave() {
         val original = table()
         var saved: GrupettoCalibrationTable? = null
@@ -145,6 +178,12 @@ class CalibrationManualEditorTest {
         compose.onNodeWithText("Save draft").assertIsNotEnabled()
         compose.onNodeWithContentDescription("Point 15, 80 rpm,", substring = true).performClick()
         compose.onNodeWithText("Correction (%)").assertIsDisplayed().performTextReplacement("-99")
+        compose.onNodeWithText("Set correction").assertIsNotEnabled()
+        compose.onNodeWithText("Correction (%)").performTextReplacement("50")
+        compose.onNodeWithText("Set correction").assertIsEnabled()
+        compose.onNodeWithText("Correction (%)").performTextReplacement("-50")
+        compose.onNodeWithText("Set correction").assertIsEnabled()
+        compose.onNodeWithText("Correction (%)").performTextReplacement("50.1")
         compose.onNodeWithText("Set correction").assertIsNotEnabled()
         compose.onNodeWithText("Correction (%)").performTextReplacement("-12.5")
         clickAfterKeyboardLayoutSettles("Set correction")
@@ -184,6 +223,11 @@ class CalibrationManualEditorTest {
         compose.onNodeWithText("Zoom in").performClick()
         compose.onNodeWithText("Fit table").assertExists().performClick()
         compose.onNodeWithText("Close").performClick()
+        compose.onNodeWithTag("manual-edit-discard-confirmation").assertIsDisplayed()
+        val screenshot = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+        File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir, "manual-edit-confirmation.png")
+            .outputStream().use { screenshot.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        screenshot.recycle()
         compose.onNodeWithText("Keep editing").performClick()
         assertFalse(closed)
         compose.onNodeWithText("Close").performClick()

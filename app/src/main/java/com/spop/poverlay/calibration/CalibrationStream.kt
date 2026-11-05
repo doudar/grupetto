@@ -150,7 +150,7 @@ internal fun streamCellGain(samples: List<CalibrationSample>, old: Double,
         if (cumulative >= half || atHalf) {
             val lower = sample.pedalWatts / sample.nativeWatts
             val upper = if (atHalf && i < values.lastIndex) values[i + 1].pedalWatts / values[i + 1].nativeWatts else lower
-            return old.coerceIn(lower, upper).coerceIn(.65, 1.35)
+            return old.coerceIn(lower, upper).coerceIn(CalibrationCorrectionLimits.minimumMultiplier, CalibrationCorrectionLimits.maximumMultiplier)
         }
     }
     return old

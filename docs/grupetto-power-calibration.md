@@ -35,7 +35,7 @@ Activate can reuse that saved snapshot for the same bike and baseline; the
 controls show which saved effort count will be used and why the draft is not ready.
 Record and Start capture require a connected meter with fresh readings. A dropout
 resets the collection window; an already running session waits for reconnection.
-The correction grid uses a fixed continuous **-10% bright red → 0% neutral → +10%
+The correction grid uses a fixed continuous **-20% bright red → 0% neutral → +20%
 deep blue** scale. Negative reduces bike overestimation; positive increases bike
 underestimation. Percentages are relative to raw bike watts and come directly from
 the fitted gain: `100 * (exp(logGain) - 1)`. Colors saturate at the ends without
@@ -105,7 +105,7 @@ baseline resistance points and 45–120 rpm. **Fit table** sizes cells to the ac
 viewport in whole pixels and fits cadence labels within their rows; all four
 corners remain visible without scrolling, including after leaving Zoom.
 Tap a cell to inspect its raw resistance AD and enter a signed percentage of raw
-bike watts (−35% to +35%). **Set correction** assigns the desired correction;
+bike watts (−50% to +50%). **Set correction** assigns the desired correction;
 **−1% / +1%** nudge it by one percentage point. Choose a cell, cadence row,
 resistance column, or the whole table. **Zoom in** adds numeric cell labels and
 larger touch targets; the scrollable grid retains its axis labels.

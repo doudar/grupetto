@@ -69,7 +69,7 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
                 Text("Record + Activate: each usable saved effort updates the active table automatically. " +
                     "One valid saved effort is enough to activate. Activate is still required the first time and after loading a backup.")
                 Text("Colors show the ${if (state.active) "active" else "preview"} correction as a percentage of raw bike watts. " +
-                    "Red: bike overestimated. Blue: bike underestimated. Scale saturates at -10% / +10%.")
+                    "Red: bike overestimated. Blue: bike underestimated. Scale saturates at -20% / +20%.")
                 state.errors?.let {
                     Text("Average absolute error compares the same ${it.count} saved pedal measurements, not live wattage. Corrected error uses " +
                         if (it.preview) "the preview table." else "the active table.")
@@ -168,9 +168,9 @@ internal fun CalibrationCorrectionLegend() {
             drawRect(Brush.horizontalGradient(listOf(CorrectionOverColor, CorrectionZeroColor, CorrectionUnderColor)))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("-10% · bike high", fontSize = 11.sp, lineHeight = 15.sp)
+            Text("-20% · bike high", fontSize = 11.sp, lineHeight = 15.sp)
             Text("0%", fontSize = 11.sp, lineHeight = 15.sp)
-            Text("+10% · bike low", fontSize = 11.sp, lineHeight = 15.sp)
+            Text("+20% · bike low", fontSize = 11.sp, lineHeight = 15.sp)
         }
         Text("Correction · gray: no saved cell data", fontSize = 11.sp, lineHeight = 14.sp, color = Color(0xFF9EAEC0))
     }
@@ -228,7 +228,7 @@ internal fun GrupettoCoverageChart(table: GrupettoCalibrationTable?, capture: Ca
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("120\nrpm\n\n45", fontSize = 11.sp, lineHeight = 18.sp, modifier = Modifier.width(32.dp))
         Canvas(Modifier.weight(1f).height(80.dp).semantics {
-            contentDescription = "Correction percentage: red -10% for bike overestimation, neutral 0%, blue +10% for bike underestimation; gray unknown. Resistance left to right, cadence bottom to top" +
+            contentDescription = "Correction percentage: red -20% for bike overestimation, neutral 0%, blue +20% for bike underestimation; gray unknown. Resistance left to right, cadence bottom to top" +
                 (cell?.let { "; ${if (it == recordingCell) "recording" else "current"} resistance cell ${it.first}, ${45 + it.second * 5} rpm" } ?: "") +
                 (fallbackCell?.let { "; green pulsing border: fallback resistance cell ${it.first}, ${45 + it.second * 5} rpm" } ?: "")
         }) {

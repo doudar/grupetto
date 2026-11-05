@@ -33,7 +33,7 @@ data class GrupettoCalibrationTable(val baseline: List<Int>, val gains: List<Dou
     val canActivate get() = ready && hasUsableCells
 
     internal val hasUsableCells get() = sampleCount > 0 && cells in 1..496 && validCalibrationTable(baseline) &&
-        gains.size == 496 && gains.all { it.isFinite() && it in ln(.65)..ln(1.35) } &&
+        gains.size == 496 && gains.all { it.isFinite() && it in CalibrationCorrectionLimits.logRange } &&
         confidence.size == 496 && confidence.all { it.isFinite() && it in 0.0..1.0 } &&
         (cellSampleCounts.isEmpty() || cellSampleCounts.size == 496 && cellSampleCounts.all { it in 0..10 }) &&
         effectiveCellSampleCounts().any { it > 0 }
@@ -61,7 +61,7 @@ data class GrupettoCalibrationTable(val baseline: List<Int>, val gains: List<Dou
     fun corrected(watts: Double, ad: Double, rpm: Double): Double {
         if (!watts.isFinite() || watts <= 0) return watts
         val cell = lookupCellIndex(ad, rpm) ?: return watts
-        return watts * exp(gains[cell].coerceIn(ln(.65), ln(1.35)))
+        return watts * exp(gains[cell].coerceIn(CalibrationCorrectionLimits.logRange))
     }
 }
 
@@ -89,13 +89,13 @@ object GrupettoCalibrationFitter {
         usable.filter { previous == null || it.capturedAt > previous.recordedThrough }
             .sortedBy { it.capturedAt }.forEach { sample ->
                 val cell = calibrationCellIndex(baseline, sample.ad, sample.rpm)!!
-                val measurement = (sample.pedalWatts / sample.nativeWatts).coerceIn(.65, 1.35)
+                val measurement = (sample.pedalWatts / sample.nativeWatts).coerceIn(CalibrationCorrectionLimits.minimumMultiplier, CalibrationCorrectionLimits.maximumMultiplier)
                 if (sample.observation != null) return@forEach
                 val count = counts[cell]
                 val nextCount = (count + 1).coerceAtMost(10)
                 val mean = if (count == 0) measurement
                     else exp(gains[cell]) + (measurement - exp(gains[cell])) / nextCount
-                gains[cell] = ln(mean.coerceIn(.65, 1.35))
+                gains[cell] = ln(mean.coerceIn(CalibrationCorrectionLimits.minimumMultiplier, CalibrationCorrectionLimits.maximumMultiplier))
                 counts[cell] = nextCount
             }
         usable.filter { it.observation != null }.groupBy {

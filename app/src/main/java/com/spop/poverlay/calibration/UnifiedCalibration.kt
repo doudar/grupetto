@@ -25,7 +25,7 @@ internal fun updateUnifiedCalibration(capture: CalibrationCapture, previous: Gru
 internal fun applyUnifiedManualEdit(profile: GrupettoCalibrationProfile, edited: GrupettoCalibrationTable,
     now: Long): GrupettoCalibrationProfile {
     require(profile.capture.baseline == edited.baseline && edited.gains.size == 496 &&
-        edited.gains.all { it.isFinite() && it in kotlin.math.ln(.65)..kotlin.math.ln(1.35) })
+        edited.gains.all { it.isFinite() && it in CalibrationCorrectionLimits.logRange })
     val capture = profile.capture.copy(samples = samplesForCalibrationTable(profile.capture.samples, edited))
     val through = maxOf(now, edited.recordedThrough, profile.table?.recordedThrough ?: Long.MIN_VALUE,
         capture.samples.maxOfOrNull { it.capturedAt } ?: Long.MIN_VALUE)

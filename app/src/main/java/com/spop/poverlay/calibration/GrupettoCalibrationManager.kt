@@ -236,7 +236,7 @@ class GrupettoCalibrationManager(private val context: Context) {
             refitRevision.incrementAndGet()
             check(displayedTable() == expected) { "The table changed. Close the editor and reopen the latest table." }
             require(edited.baseline == expected.baseline && edited.gains.size == 496 &&
-                edited.gains.all { it.isFinite() && it in kotlin.math.ln(.65)..kotlin.math.ln(1.35) })
+                edited.gains.all { it.isFinite() && it in CalibrationCorrectionLimits.logRange })
             val source = (activeProfile ?: activationProfile(draft, savedProfile) ?: draft)
                 ?: error("Record a calibration effort before editing.")
             check(verifiedBaseline?.first?.let { it == edited.baseline } != false) { "The bike baseline changed. Reopen calibration." }

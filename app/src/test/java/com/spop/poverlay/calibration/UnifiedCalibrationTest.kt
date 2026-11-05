@@ -122,7 +122,7 @@ class UnifiedCalibrationTest {
     }
 
     @Test fun editedTargetsOutsideCapturePowerRangeRemainUsableWithValidOriginalEvidence() {
-        for ((watts, percent) in listOf(5.0 to -35.0, 1500.0 to 35.0)) {
+        for ((watts, percent) in listOf(5.0 to -50.0, 1500.0 to 50.0)) {
             val original = profile(listOf(sample(native = watts, pedals = watts)))
             val edited = edit(original, percent)
             val target = edited.capture.samples.single()

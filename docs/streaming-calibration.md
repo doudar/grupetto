@@ -11,11 +11,16 @@ Crossing a storage-row boundary inside that window does not restart settling. Ea
 accepted observation keeps its exact AD/RPM and updates only its actual fitting cell.
 
 Settle time defaults to two seconds (0–15 configurable). Raw AD must stay within the
-selected percentage of one local baseline interval (default 2%, configurable 1–100%,
+selected percentage of one local baseline interval (default 10%, configurable 1-100%,
 minimum 2 AD). A rounded displayed resistance-level change alone does not reset a hold.
 Raw resistance or cadence leaving their windows resets settling and names that reason
-in the collection status. A separate More forgiving preset selects ±5 rpm, 10% resistance
-window and a 6-percentage-point ratio tolerance; it is applied only when explicitly saved.
+in the collection status. Forgiving settings are now the default: ±5 rpm, 10% resistance
+window and a 6-percentage-point ratio tolerance. Stricter settings restores the former
+2% resistance window and 3-point tolerance. Explicitly saved preferences remain unchanged.
+Defaults or a preset takes effect only on Save settings; Cancel keeps the previous
+configuration. Numeric fields support typing and tap/drag sliders. The watt example
+updates immediately from the percentage (6 points is ±30 W at 500 W raw bike power);
+it illustrates the floor, not the adaptive final bound.
 
 Accept at most one distinct pair per 1,000 ms. Both native and pedal timestamps must advance.
 Bike readings must be at most 1,000 ms old and pedals at most 1,500 ms. Future/invalid readings,
@@ -28,7 +33,7 @@ accepted observations. All stream settings persist separately from legacy board 
 
 Compare measured pedal/native ratio with the median of the last five accepted ratios in that cell,
 using tolerance max(configured percentage-point floor, configured multiplier × median
-absolute deviation). Defaults remain 0.03 and 4×; controls allow 1–30 percentage points and 1–10×. This compares the recent stream,
+absolute deviation). Defaults are 0.06 and 4×; controls allow 1–30 percentage points and 1–10×. This compares the recent stream,
 never the old fitted gain. An isolated deviation is quarantined, not stored as accepted evidence.
 The configured 2–10 consecutive deviating pairs (default 3), within the configured
 percentage-point floor of their pending median, establish
@@ -145,3 +150,17 @@ Cadence interpolation is continuous within the reference breakpoints to handle f
 RPM. Reference baseline validity is cached so fitting does not allocate validation lists
 for every observation. Tests cover factory anchors, 97→95, 92.5→95, unchanged raw/display
 inputs, same-RPM gain correctness, weighting, refits, settings persistence and UI placement.
+
+## Correction bounds and display
+
+Tablet correction multipliers are bounded to 0.5–1.5 (−50% to +50%) in recording,
+refitting, editing, runtime lookup and file validation. The chart and manual-editor
+colors saturate at −20% (red) and +20% (blue); larger valid corrections keep the
+endpoint color. Old gains are preserved exactly; no automatic refit is performed.
+The manual editor also has a −50% to +50% slider. A drag previews the number and
+commits one selection-only undoable change on release, without saving or creating
+observations. Typed entry and explicit Save remain available. Compare mode disables
+editing, and cancelling the bordered discard dialog keeps the unsaved preview.
+Older builds that only accept ±35% cannot load a newly saved table beyond that
+range; retain a pre-update backup when testing a downgrade. Schema-one offset
+reconstruction keeps its historical bounds to preserve old migration behavior.

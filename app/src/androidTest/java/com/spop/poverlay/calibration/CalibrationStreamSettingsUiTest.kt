@@ -2,6 +2,8 @@ package com.spop.poverlay.calibration
 
 import android.content.Context
 import androidx.compose.material.MaterialTheme
+import androidx.compose.material.darkColors
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
@@ -33,7 +35,7 @@ class CalibrationStreamSettingsUiTest {
         }
     }
 
-    @Test fun invalidValuesCannotSaveAndForgivingPresetCanBeCancelled() {
+    @Test fun invalidValuesCannotSaveAndStricterPresetCanBeCancelled() {
         var saved = false
         var closed = false
         compose.setContent { MaterialTheme {
@@ -41,10 +43,50 @@ class CalibrationStreamSettingsUiTest {
         } }
         compose.onNodeWithText("Cadence window (± rpm)").performScrollTo().performTextReplacement("NaN")
         compose.onNodeWithText("Save settings").assertIsNotEnabled()
-        compose.onNodeWithText("More forgiving").performScrollTo().performClick()
+        compose.onNodeWithText("Stricter settings").performScrollTo().performClick()
         compose.onNodeWithText("Save settings").assertIsEnabled()
         compose.onNodeWithText("Cancel").performClick()
         compose.runOnIdle { assertTrue(closed); assertFalse(saved) }
+    }
+
+    @Test fun forgivingDefaultAndStricterPresetSaveTheIntendedValues() {
+        var saved: CalibrationStreamSettings? = null
+        compose.setContent { MaterialTheme {
+            CalibrationStreamSettingsDialog(CalibrationStreamSettings(), { saved = it }, {})
+        } }
+        compose.onNodeWithText("Forgiving by default").assertIsDisplayed()
+        compose.onNodeWithText("Stricter settings").performClick()
+        compose.onNodeWithText("Save settings").performClick()
+        compose.runOnIdle { assertEquals(CalibrationStreamSettings.Stricter, saved) }
+        compose.onNodeWithText("Defaults").performScrollTo().performClick()
+        compose.onNodeWithText("Save settings").performClick()
+        compose.runOnIdle {
+            assertEquals(10, saved!!.resistanceWindowPercent)
+            assertEquals(6.0, saved!!.outlierTolerancePercent, 0.0)
+        }
+    }
+
+    @Test fun toleranceExampleTracksTypedAndDraggedValuesAndDisabledSlidersStayDisabled() {
+        var saved: CalibrationStreamSettings? = null
+        compose.setContent { MaterialTheme {
+            CalibrationStreamSettingsDialog(CalibrationStreamSettings(), { saved = it }, {})
+        } }
+        compose.onNodeWithText("Outlier tolerance (percentage points)").performScrollTo().performTextReplacement("7.5")
+        compose.onNodeWithTag("capture-hint-tolerance").assertTextEquals(outlierWattExample("7.5"))
+        compose.onNodeWithTag("capture-slider-tolerance").performScrollTo().performTouchInput {
+            swipe(Offset(width * .25f, centerY), Offset(width * .75f, centerY), 500)
+        }
+        compose.onNodeWithText("Save settings").performClick()
+        compose.runOnIdle { assertTrue(saved!!.outlierTolerancePercent > 7.5) }
+        compose.onNodeWithTag("capture-hint-tolerance").assertTextEquals(outlierWattExample(saved!!.outlierTolerancePercent.toString()))
+        compose.onNodeWithTag("capture-slider-settle").performScrollTo().performTouchInput { click(Offset(width * .8f, centerY)) }
+        compose.onNodeWithText("Save settings").performClick()
+        compose.runOnIdle { assertTrue(saved!!.settleSeconds >= 10) }
+        compose.onNodeWithContentDescription("Reject isolated outliers").performScrollTo().performClick()
+        compose.onNodeWithTag("capture-slider-tolerance").assertIsNotEnabled()
+        compose.onNodeWithTag("capture-slider-noise").assertIsNotEnabled()
+        compose.onNodeWithTag("capture-slider-confirmation").assertIsNotEnabled()
+        compose.onNodeWithTag("capture-slider-cadence").assertIsEnabled()
     }
 
     @Test fun savedSettingsSurviveReloadWithoutChangingCalibrationOrUnrelatedPreferences() {
@@ -62,13 +104,17 @@ class CalibrationStreamSettingsUiTest {
     }
 
     @Test fun settingsControlsAndSaveRemainAccessibleOnTablet() {
-        compose.setContent { MaterialTheme {
+        compose.setContent { MaterialTheme(colors = darkColors()) {
             CalibrationStreamSettingsDialog(CalibrationStreamSettings(), {}, {})
         } }
         compose.onNodeWithText("Settle time (seconds)").assertIsDisplayed()
         compose.onNodeWithText("Cadence window (± rpm)").assertIsDisplayed()
-        compose.onNodeWithText("Resistance window (± % cell)").assertIsDisplayed()
-        compose.onNodeWithText("Outlier tolerance (percentage points)").assertIsDisplayed()
+        val initialScreenshot = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+        File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir, "stream-capture-settings-top.png")
+            .outputStream().use { initialScreenshot.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        initialScreenshot.recycle()
+        compose.onNodeWithText("Resistance window (± % cell)").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Outlier tolerance (percentage points)").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("New level confirmation (readings)").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Save settings").assertIsDisplayed().assertIsEnabled()
         val context = InstrumentationRegistry.getInstrumentation().targetContext

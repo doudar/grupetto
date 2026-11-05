@@ -11,6 +11,29 @@ import kotlin.math.ln
 
 /** Schema changes must preserve the exact saved surface, not reconstruct an older fitted layer. */
 class CalibrationPersistenceMigrationTest {
+    @Test fun fiftyPercentCorrectionRoundTripsAndRemainsActivatableWithoutChangingEvidence() {
+        val original = profile()
+        val cells = listOf(10 * 16 + 7, 12 * 16 + 10)
+        var edited = CalibrationManualEdit.setPercent(original.table!!, setOf(cells[0]), -50.0, false)
+        edited = CalibrationManualEdit.setPercent(edited, setOf(cells[1]), 50.0, false)
+        val unified = applyUnifiedManualEdit(original, edited, 4000)
+        val restored = GrupettoCalibrationStore.decode(GrupettoCalibrationStore.encode(unified))
+        assertEquals(edited.gains, restored.table!!.gains)
+        assertEquals(unified.capture, restored.capture)
+        assertEquals(original.capture.samples.map { it.measuredPedalWatts },
+            restored.capture.samples.map { it.measuredPedalWatts })
+        assertTrue(restored.canActivate)
+        assertEquals(100.0, restored.table.corrected(200.0, baseline[10].toDouble(), 80.0), 1e-10)
+        assertEquals(300.0, restored.table.corrected(200.0, baseline[12].toDouble(), 95.0), 1e-10)
+        for (bad in listOf(.499, 1.501)) {
+            val json = GrupettoCalibrationStore.encode(unified)
+            json.getJSONObject("table").getJSONArray("gains").put(cells[0], ln(bad))
+            assertTrue(runCatching { GrupettoCalibrationStore.decode(json) }.isFailure)
+        }
+        val encodedBackup = CalibrationBackup(unified, unified).encode()
+        val imported = CalibrationBackup.decode(encodedBackup)
+        assertEquals(edited.gains, imported.draft!!.table!!.gains)
+    }
     private val baseline = List(31) { 1000 + it * 100 }
     private val samples = listOf(
         CalibrationSample(2000.0, 80.0, 200.0, 225.0, 1000L),
@@ -503,7 +526,7 @@ class CalibrationPersistenceMigrationTest {
             { it.getJSONArray("samples").getJSONObject(0).put("recordedPedalWatts", 1501.0) },
             { it.getJSONArray("samples").getJSONObject(0).put("recordedPedalWatts", 4.0) },
             { it.getJSONArray("samples").getJSONObject(0).put("recordedPedalWatts", "NaN") },
-            { it.getJSONArray("samples").getJSONObject(0).put("recordedPedalWatts", 225.0).put("pedalWatts", 280.0) },
+            { it.getJSONArray("samples").getJSONObject(0).put("recordedPedalWatts", 225.0).put("pedalWatts", 301.0) },
             { it.getJSONArray("samples").getJSONObject(0).put("recordedPedalWatts", 225.0).put("pedalWatts", "NaN") },
         )
         mutations.forEachIndexed { index, mutate ->

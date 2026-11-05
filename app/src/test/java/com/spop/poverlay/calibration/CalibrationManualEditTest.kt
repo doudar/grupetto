@@ -33,19 +33,22 @@ class CalibrationManualEditTest {
         val cell = 0
         CalibrationEditScope.values().forEach { scope ->
             val selection = scope.indices(cell)
-            val edited = CalibrationManualEdit.setPercent(original, selection, 35.0, false)
+            val edited = CalibrationManualEdit.setPercent(original, selection, 50.0, false)
             original.gains.indices.forEach { index ->
-                assertEquals(if (index in selection) ln(1.35) else original.gains[index], edited.gains[index], 1e-12)
+                assertEquals(if (index in selection) ln(1.5) else original.gains[index], edited.gains[index], 1e-12)
             }
         }
         assertEquals(1, CalibrationEditScope.Cell.indices(cell).size)
         assertEquals(31, CalibrationEditScope.Cadence.indices(cell).size)
         assertEquals(16, CalibrationEditScope.Resistance.indices(cell).size)
         assertEquals(496, CalibrationEditScope.All.indices(cell).size)
-        val lowered = CalibrationManualEdit.nudge(CalibrationManualEdit.setPercent(original, setOf(cell), -35.0, false), setOf(cell), -1.0, false)
-        assertEquals(ln(.65), lowered.gains[cell], 1e-12)
+        val lowered = CalibrationManualEdit.nudge(CalibrationManualEdit.setPercent(original, setOf(cell), -50.0, false), setOf(cell), -1.0, false)
+        assertEquals(ln(.5), lowered.gains[cell], 1e-12)
+        val raised = CalibrationManualEdit.nudge(CalibrationManualEdit.setPercent(original, setOf(cell), 50.0, false), setOf(cell), 1.0, false)
+        assertEquals(ln(1.5), raised.gains[cell], 1e-12)
         assertTrue(runCatching { CalibrationManualEdit.setPercent(original, setOf(cell), Double.NaN, true) }.isFailure)
-        assertTrue(runCatching { CalibrationManualEdit.setPercent(original, setOf(cell), 35.1, true) }.isFailure)
+        assertTrue(runCatching { CalibrationManualEdit.setPercent(original, setOf(cell), 50.1, true) }.isFailure)
+        assertTrue(runCatching { CalibrationManualEdit.setPercent(original, setOf(cell), -50.1, true) }.isFailure)
     }
 
     @Test fun fillingPreservesKnownCellsAndExtendsConstantCalibrationToEveryEdge() {

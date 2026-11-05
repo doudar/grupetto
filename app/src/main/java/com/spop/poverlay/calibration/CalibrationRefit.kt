@@ -53,10 +53,10 @@ internal fun refitCalibrationTable(table: GrupettoCalibrationTable,
             }
         }
         val old = exp(gains[cell])
-        val fitted = old.coerceIn(lower, upper).coerceIn(.65, 1.35)
+        val fitted = old.coerceIn(lower, upper).coerceIn(CalibrationCorrectionLimits.minimumMultiplier, CalibrationCorrectionLimits.maximumMultiplier)
         // Preserve exact stored bits for an unchanged optimum, including repeat previews.
         if (old != fitted) gains[cell] = ln(fitted)
-        if (fitted == .65 || fitted == 1.35) boundHits++
+        if (fitted == CalibrationCorrectionLimits.minimumMultiplier || fitted == CalibrationCorrectionLimits.maximumMultiplier) boundHits++
         counts[cell] = maxOf(counts[cell], efforts.size.coerceAtMost(10))
     }
     val candidate = table.copy(gains = gains, cellSampleCounts = counts,

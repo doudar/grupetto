@@ -20,8 +20,8 @@ internal enum class CalibrationEditScope(val label: String) {
 
 /** Pure editing operations. No fake pedal samples, confidence, or validation scores are produced. */
 internal object CalibrationManualEdit {
-    private val minimum = ln(.65)
-    private val maximum = ln(1.35)
+    private val minimum = CalibrationCorrectionLimits.logRange.start
+    private val maximum = CalibrationCorrectionLimits.logRange.endInclusive
     fun percent(gain: Double) = 100 * expm1(gain)
 
     private fun change(table: GrupettoCalibrationTable, gains: List<Double>, coverage: Set<Int>): GrupettoCalibrationTable {
@@ -43,7 +43,7 @@ internal object CalibrationManualEdit {
      * neighbor changes require the separate, explicit Smooth or Fill gaps operation. */
     @Suppress("UNUSED_PARAMETER")
     fun setPercent(table: GrupettoCalibrationTable, selected: Set<Int>, value: Double, blend: Boolean): GrupettoCalibrationTable {
-        require(value.isFinite() && value in -35.0..35.0)
+        require(value.isFinite() && value in -CalibrationCorrectionLimits.maximumPercent..CalibrationCorrectionLimits.maximumPercent)
         return paint(table, selected) { ln1p(value / 100) }
     }
 
@@ -51,7 +51,7 @@ internal object CalibrationManualEdit {
     fun nudge(table: GrupettoCalibrationTable, selected: Set<Int>, amount: Double, blend: Boolean): GrupettoCalibrationTable {
         require(amount.isFinite())
         return paint(table, selected) {
-            ln1p((percent(table.gains[it]) + amount).coerceIn(-35.0, 35.0) / 100)
+            ln1p((percent(table.gains[it]) + amount).coerceIn(-CalibrationCorrectionLimits.maximumPercent, CalibrationCorrectionLimits.maximumPercent) / 100)
         }
     }
 
