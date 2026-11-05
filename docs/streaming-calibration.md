@@ -83,7 +83,8 @@ test fails at that limit and passes at 256 MiB. The disposable test fixture expl
 sets a tablet-sized 256 MiB heap and verifies it; APK production heap flags are unchanged.
 This does not establish full-capacity support for a 16 MiB application heap. Stream tuples
 avoid per-observation maps during serialization and keep the worst-case export bounded.
-CI enables/verifies KVM instead of silently using x86_64 software emulation. Guest Wi-Fi
+CI enables/verifies KVM when the hosted runner exposes it, and logs an explicit
+software fallback when /dev/kvm is absent. Guest Wi-Fi
 is disabled to avoid the observed API29 system_server Wi-Fi/telephony null-list crash;
 sensor fixtures and tests do not depend on guest Wi-Fi. Setup failures preserve crash
 diagnostics and their original exit status. The preparation helper rejects physical
