@@ -71,6 +71,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
     val grupettoTable by viewModel.grupettoCalibrationState.collectAsStateWithLifecycle()
     val calibrationMeterReady by viewModel.calibrationMeterReady.collectAsStateWithLifecycle(initialValue = false)
     val captureSettings by viewModel.calibrationCaptureSettings.collectAsStateWithLifecycle()
+    val flywheelTemperature by viewModel.flywheelTemperature.collectAsStateWithLifecycle()
     var dialog by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     androidx.compose.runtime.LaunchedEffect(dialog) {
         if (dialog == "grupetto-calibration") viewModel.showCalibrationTable()
@@ -251,6 +252,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                             export = viewModel::exportCalibrationBackup, load = viewModel::loadCalibrationBackup)
                     }, onManualEdit = { dialog = "manual-calibration" }, livePosition = livePosition,
                     captureSettings = captureSettings, onCaptureSettings = viewModel::setCalibrationCaptureSettings,
+                    temperature = flywheelTemperature, onRoomTemperature = viewModel::setRoomTemperature,
                     onRefit = { dialog = "refit-calibration" })
             }
         }

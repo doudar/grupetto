@@ -22,6 +22,7 @@ data class CalibrationRefitPreview(val id: Long, val result: CalibrationRefitRes
 
 /** First activation is explicit. While recording, every usable fit replaces the active snapshot. */
 class GrupettoCalibrationManager(private val context: Context) {
+    val flywheelTemperature = FlywheelTemperatureTracker(context)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutex = Mutex()
     private val preferences = context.getSharedPreferences("grupetto-power-calibration", Context.MODE_PRIVATE)
@@ -418,6 +419,7 @@ class GrupettoCalibrationManager(private val context: Context) {
     fun clearVerification() { refitRevision.incrementAndGet(); verifiedBaseline = null; mutablePosition.value = null; mutableState.update { it.copy(verified = false) } }
     /** Null means this frame was not calibrated; never label a fallback as corrected power. */
     fun correctedPower(frame: CalibrationFrame): Float? {
+        flywheelTemperature.observe(frame)
         val baseline = verifiedBaseline
         if (baseline != null && SystemClock.elapsedRealtime() - baseline.second in 0..6500 &&
             (mutablePosition.value?.frame?.timestamp?.let { frame.timestamp - it >= 250 } != false)) {

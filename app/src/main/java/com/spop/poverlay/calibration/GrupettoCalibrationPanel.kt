@@ -38,6 +38,7 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
     livePosition: CalibrationTablePosition? = null,
     captureSettings: CalibrationStreamSettings = CalibrationStreamSettings(),
     onCaptureSettings: ((CalibrationStreamSettings) -> Unit)? = null,
+    temperature: FlywheelTemperatureState? = null, onRoomTemperature: ((Double) -> Unit)? = null,
     onRefit: (() -> Unit)? = null) {
     var confirmClear by remember { mutableStateOf(false) }
     var showInformation by remember { mutableStateOf(false) }
@@ -45,7 +46,9 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
     // Older versions saved Backups as index 2 before the Fit details tab was removed.
     val selectedTab = tab.coerceIn(0, 1)
     var settingsOpen by remember { mutableStateOf(false) }
-    if (settingsOpen) CalibrationStreamSettingsDialog(captureSettings, { onCaptureSettings?.invoke(it) }) { settingsOpen = false }
+    if (settingsOpen) CalibrationStreamSettingsDialog(captureSettings, { onCaptureSettings?.invoke(it) },
+        { settingsOpen = false }, roomFahrenheit = temperature?.roomFahrenheit ?: 65.0,
+        onRoomTemperature = onRoomTemperature)
     if (confirmClear) {
         AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text("Clear Grupetto table?") },
             text = { Text("Delete all saved Grupetto efforts and manual edits, stop recording, and turn correction off? " +
@@ -66,6 +69,10 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
             Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(state.message)
+                Text("Experimental flywheel estimate: raw bike watts approximate brake heat; no temperature sensor is read. " +
+                    "Assumes 8000 J/K effective heat capacity and 8 W/K cooling with a constant fan. Starts at room temperature; " +
+                    "missing telemetry and app-off periods assume zero heat input, so riding during gaps is missed. " +
+                    "Surface temperature may differ. This does not change power or calibration. Room temperature is in Capture settings.")
                 Text("Record + Activate: each usable saved effort updates the active table automatically. " +
                     "One valid saved effort is enough to activate. Activate is still required the first time and after loading a backup.")
                 Text("Colors show the ${if (state.active) "active" else "preview"} correction as a percentage of raw bike watts. " +
@@ -103,6 +110,7 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
         if (selectedTab == 0) {
         if (!meterReady) Text("Connect a power meter to record", fontSize = 14.sp, lineHeight = 18.sp, color = Color(0xFFFBBF24))
         CalibrationMetrics(metrics, showCorrected = true)
+        temperature?.let { FlywheelTemperatureReadout(it) }
         (state.displayTable ?: state.table)?.takeIf { it.streamSeconds > 0 }?.let {
             Text("${it.streamSeconds} paired seconds · ${it.legacyEffortCount} legacy effort aggregates", fontSize = 11.sp,
                 color = Color(0xFF9EAEC0))

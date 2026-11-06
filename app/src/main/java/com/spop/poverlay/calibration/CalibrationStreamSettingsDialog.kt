@@ -34,7 +34,10 @@ internal fun outlierWattExample(input: String): String {
 
 @Composable
 internal fun CalibrationStreamSettingsDialog(settings: CalibrationStreamSettings,
-    onSave: (CalibrationStreamSettings) -> Unit, onClose: () -> Unit) {
+    onSave: (CalibrationStreamSettings) -> Unit, onClose: () -> Unit,
+    roomFahrenheit: Double = 65.0, onRoomTemperature: ((Double) -> Unit)? = null) {
+    var room by remember { mutableStateOf(captureSettingNumber(roomFahrenheit)) }
+    val parsedRoom = room.toDoubleOrNull()?.takeIf(::validRoomTemperature)
     var settle by remember { mutableStateOf(settings.settleSeconds.toString()) }
     var cadence by remember { mutableStateOf(settings.cadenceWindowRpm.toString()) }
     var resistance by remember { mutableStateOf(settings.resistanceWindowPercent.toString()) }
@@ -80,6 +83,11 @@ internal fun CalibrationStreamSettingsDialog(settings: CalibrationStreamSettings
                         }
                         OutlinedButton({ use(CalibrationStreamSettings.Stricter) }) { Text("Stricter settings", fontSize = 12.sp) }
                         TextButton({ use(CalibrationStreamSettings()) }) { Text("Defaults", fontSize = 12.sp) }
+                        if (onRoomTemperature != null) OutlinedTextField(room, { room = it },
+                            Modifier.width(135.dp).testTag("room-temperature-input"),
+                            label = { Text("Room temp (°F)", fontSize = 11.sp) }, singleLine = true,
+                            isError = parsedRoom == null,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
                     }
                 }
                 CaptureSettingsSection("01", "Settle & collect", accent) {
@@ -108,7 +116,10 @@ internal fun CalibrationStreamSettingsDialog(settings: CalibrationStreamSettings
                     fontSize = 11.sp, color = muted)
             }
         },
-        confirmButton = { Button({ parsed?.let { onSave(it); onClose() } }, enabled = parsed != null,
+        confirmButton = { Button({ parsed?.let {
+            if (onRoomTemperature != null) parsedRoom?.let(onRoomTemperature)
+            onSave(it); onClose()
+        } }, enabled = parsed != null && (onRoomTemperature == null || parsedRoom != null),
             colors = ButtonDefaults.buttonColors(backgroundColor = accent, contentColor = Color(0xFF101B2B))) { Text("Save settings") } },
         dismissButton = { TextButton(onClose) { Text("Cancel") } })
 }
