@@ -35,7 +35,9 @@ class SerialNameUpgradeDialogTest {
             }
         }
         compose.onNodeWithText("Check your Grupetto connection").assertIsDisplayed()
-        androidx.test.espresso.Espresso.pressBack()
+        androidx.test.espresso.Espresso.onView(androidx.test.espresso.matcher.ViewMatchers.isRoot())
+            .inRoot(androidx.test.espresso.matcher.RootMatchers.isDialog())
+            .perform(androidx.test.espresso.action.ViewActions.pressKey(android.view.KeyEvent.KEYCODE_BACK))
         compose.onNodeWithText("Check your Grupetto connection").assertDoesNotExist()
     }
 }
