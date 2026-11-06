@@ -49,12 +49,13 @@ class CalibrationUpgradeVerificationTest {
         }
 
         fun assertUnifiedFile(): JSONObject = JSONObject(calibrationFile.readText()).also { json ->
-            assertEquals("Migration must be persisted automatically, not wait for a manual save", 2,
+            assertEquals("Migration must be persisted automatically, not wait for a manual save", 3,
                 json.getInt("schema"))
             listOf("draft", "saved").forEach { key ->
                 val profile = json.getJSONObject(key)
                 assertEquals(5, profile.getInt("schema"))
                 assertEquals("thermal_cell_stream_v5", profile.getString("model"))
+                assertEquals(CalibrationThermalCorrection.Model, profile.getString("temperatureCorrectionModel"))
                 assertFalse(profile.getJSONObject("table").has("manualOffsets"))
             }
         }
@@ -73,9 +74,12 @@ class CalibrationUpgradeVerificationTest {
                 assertEquals(confidence, table.confidence)
                 assertEquals(manualCoverage, table.manualCoverage)
                 assertEquals(List(496) { 1 }, table.cellSampleCounts)
+                assertTrue("Legacy gains must not acquire a temperature multiplier", table.thermalCells.isEmpty())
+                assertTrue(table.thermalAnchors.isEmpty())
                 assertEquals(rawSamples.length(), profile.capture.samples.size)
                 profile.capture.samples.forEachIndexed { index, sample ->
                     val original = rawSamples.getJSONObject(index)
+                    assertNull("An old recording has no known temperature", sample.temperature)
                     assertEquals(original.getDouble("ad"), sample.ad, 0.0)
                     assertEquals(original.getDouble("rpm"), sample.rpm, 0.0)
                     assertEquals(original.getDouble("nativeWatts"), sample.nativeWatts, 0.0)
