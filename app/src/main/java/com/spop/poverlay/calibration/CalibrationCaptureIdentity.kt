@@ -24,5 +24,5 @@ internal fun mergeCalibrationCaptures(saved: CalibrationCapture, incoming: Calib
     val fresh = incoming.samples.filter { it.capturedAt >= clearedAt }
     if (fresh.isEmpty()) return saved
     return saved.copy(meterAddress = incoming.meterAddress,
-        samples = (saved.samples + fresh).distinctBy { it.capturedAt }.sortedBy { it.capturedAt }.takeLast(3600))
+        samples = retainCalibrationObservations(saved.baseline, saved.samples + fresh))
 }

@@ -15,6 +15,7 @@ import androidx.lifecycle.viewModelScope
 import com.spop.poverlay.overlay.OverlayService
 import com.spop.poverlay.releases.Release
 import com.spop.poverlay.releases.ReleaseChecker
+import com.spop.poverlay.sensor.averageCadenceBuckets
 import com.spop.poverlay.sensor.heartrate.HeartRateDevice
 import com.spop.poverlay.sensor.heartrate.HeartRateManager
 import kotlinx.coroutines.Dispatchers
@@ -136,8 +137,8 @@ class ConfigurationViewModel(
     val boardCalibrationState = boardCalibration.state
     private val grupettoCalibration = (application as GrupettoApplication).grupettoCalibration
     val grupettoCalibrationState = grupettoCalibration.state
-    val calibrationCaptureSettings = calibration.settings
-    fun setCalibrationCaptureSettings(settings: com.spop.poverlay.calibration.CalibrationCaptureSettings) = calibration.updateSettings(settings)
+    val calibrationCaptureSettings = calibration.streamSettings
+    fun setCalibrationCaptureSettings(settings: com.spop.poverlay.calibration.CalibrationStreamSettings) = calibration.updateStreamSettings(settings)
     val liveCalibrationPosition = grupettoCalibration.livePosition.flatMapLatest { position ->
         kotlinx.coroutines.flow.flow {
             val age = position?.let { android.os.SystemClock.elapsedRealtime() - it.frame.timestamp }
@@ -157,14 +158,18 @@ class ConfigurationViewModel(
         device.address == reading?.address &&
             com.spop.poverlay.sensor.power.freshExternalPower(reading, android.os.SystemClock.elapsedRealtime()) != null
     } == true
+    private fun requireCalibrationMeter() = com.spop.poverlay.calibration.requireCalibrationMeter(
+        hasCalibrationMeter(), { infoPopup.value = it })
     fun recordGrupettoCalibration(enabled: Boolean) {
-        calibration.setMode(com.spop.poverlay.calibration.CalibrationMode.FreeRide)
         if (!calibration.supported || boardSetupRunning()) return
+        if (enabled && !requireCalibrationMeter()) return
+        calibration.setMode(com.spop.poverlay.calibration.CalibrationMode.FreeRide)
         if (enabled && !hasBluetoothPermissions()) { requestBluetoothPermissions.value = getRequiredBluetoothPermissions(); return }
-        if (enabled && !hasCalibrationMeter()) return
         viewModelScope.launch {
             val saved = calibration.savedCapture()
-            if (boardSetupRunning() || enabled && !hasCalibrationMeter()) return@launch
+            if (boardSetupRunning() || enabled && !requireCalibrationMeter()) return@launch
+            // Flush the last stream batch before disabling its table consumer.
+            if (!enabled) { calibration.stop(); return@launch }
             grupettoCalibration.record(enabled, saved)
             if (enabled && grupettoCalibration.state.value.recording && !calibration.state.value.enabled) setCalibrationEnabled(true)
             else if (!enabled) setCalibrationEnabled(false)
@@ -175,6 +180,18 @@ class ConfigurationViewModel(
     suspend fun exportCalibrationBackup() = grupettoCalibration.exportBackup()
     suspend fun saveManualCalibration(expected: com.spop.poverlay.calibration.GrupettoCalibrationTable,
         edited: com.spop.poverlay.calibration.GrupettoCalibrationTable) = grupettoCalibration.saveManualEdit(expected, edited)
+    suspend fun previewCalibrationRefit(): com.spop.poverlay.calibration.CalibrationRefitPreview {
+        check(!calibration.state.value.enabled && !boardSetupRunning()) { "Pause calibration capture before refitting." }
+        return grupettoCalibration.prepareRefit()
+    }
+    suspend fun applyCalibrationRefit(preview: com.spop.poverlay.calibration.CalibrationRefitPreview) {
+        check(!calibration.state.value.enabled && !boardSetupRunning()) { "Pause calibration capture before applying a refit." }
+        grupettoCalibration.applyRefit(preview)
+    }
+    suspend fun undoCalibrationRefit(preview: com.spop.poverlay.calibration.CalibrationRefitPreview) {
+        check(!calibration.state.value.enabled && !boardSetupRunning()) { "Pause calibration capture before undoing a refit." }
+        grupettoCalibration.undoRefit(preview)
+    }
     internal suspend fun loadCalibrationBackup(backup: com.spop.poverlay.calibration.CalibrationBackup): com.spop.poverlay.calibration.CalibrationLoadResult {
         check(!calibration.state.value.enabled && !boardSetupRunning()) {
             "Pause calibration capture before loading a table."
@@ -186,10 +203,10 @@ class ConfigurationViewModel(
         calibration.setMode(com.spop.poverlay.calibration.CalibrationMode.Guided)
         showGuidedCalibration.value = true
         if (!hasBluetoothPermissions()) { requestBluetoothPermissions.value = getRequiredBluetoothPermissions(); return }
-        if (!hasCalibrationMeter()) return
+        if (!requireCalibrationMeter()) return
         viewModelScope.launch {
             val saved = calibration.savedCapture()
-            if (boardSetupRunning() || !hasCalibrationMeter()) return@launch
+            if (boardSetupRunning() || !requireCalibrationMeter()) return@launch
             grupettoCalibration.record(true, saved)
             if (grupettoCalibration.state.value.recording && !calibration.state.value.enabled) setCalibrationEnabled(true)
         }
@@ -211,11 +228,11 @@ class ConfigurationViewModel(
         if (!calibration.supported) return
         if (enabled && boardSetupRunning()) return
         if (enabled) {
+            if (!requireCalibrationMeter()) return
             if (!hasBluetoothPermissions()) {
                 requestBluetoothPermissions.value = getRequiredBluetoothPermissions()
                 return
             }
-            if (!hasCalibrationMeter()) return
             powerMeters.start()
             ContextCompat.startForegroundService(getApplication(), Intent(getApplication(),
                 com.spop.poverlay.calibration.CalibrationCaptureService::class.java))
@@ -224,6 +241,7 @@ class ConfigurationViewModel(
         }
     }
     fun clearCalibrationCapture() = calibration.clear()
+    val powerMeterConnecting = powerMeters.connectingDevice
     val powerMeterDevice = powerMeters.connectedDevice
     val powerMeterReading = powerMeters.reading
     val powerMeterStatus = powerMeters.status
@@ -231,7 +249,7 @@ class ConfigurationViewModel(
     val powerMeterSaved = powerMeters.savedDevices
     val powerMeterScanning = powerMeters.scanning
     val livePowerDisplay = (application as GrupettoApplication).sensorInterface.displayPower
-    val liveCadence = (application as GrupettoApplication).sensorInterface.cadence
+    val liveCadence = (application as GrupettoApplication).sensorInterface.cadence.averageCadenceBuckets()
     val liveResistance = (application as GrupettoApplication).sensorInterface.resistance
     val liveSpeed = (application as GrupettoApplication).sensorInterface.speed
     val liveIncline = (application as GrupettoApplication).sensorInterface.incline

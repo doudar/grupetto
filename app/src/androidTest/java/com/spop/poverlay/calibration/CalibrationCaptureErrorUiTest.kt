@@ -13,9 +13,12 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
+import com.spop.poverlay.UiTestDiagnostics
 
 class CalibrationCaptureErrorUiTest {
-    @get:Rule val compose = createComposeRule()
+    private val compose = createComposeRule()
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(compose).around(UiTestDiagnostics(compose))
     private val mismatch = "Bike, power meter or calibration changed. Clear the saved capture to start a new one."
     private val capture = mutableStateOf(CalibrationUiState())
     private val tableView = mutableStateOf(true)

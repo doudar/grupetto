@@ -13,9 +13,12 @@ import androidx.compose.ui.unit.dp
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
+import com.spop.poverlay.UiTestDiagnostics
 
 class CalibrationPanelTest {
-    @get:Rule val compose = createComposeRule()
+    private val compose = createComposeRule()
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(compose).around(UiTestDiagnostics(compose))
     @Test fun startPauseAndReviewCandidateWithExplicitClearConfirmation() {
         val state = mutableStateOf(CalibrationUiState(sampleCount = 18,
             status = "Waiting for fresh bike and power-meter readings."))

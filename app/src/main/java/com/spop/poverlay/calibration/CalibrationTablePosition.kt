@@ -12,3 +12,15 @@ internal fun liveTableCell(position: CalibrationTablePosition?, baseline: List<I
     val x = calibrationCoordinate(current.baseline, frame.ad.toDouble()) ?: return null
     return x.roundToInt().coerceIn(0, 30) to ((frame.rpm - 45) / 5).roundToInt().coerceIn(0, 15)
 }
+
+/** UI-only selection, using the same lookup as compensation. Recording is deliberately irrelevant. */
+internal data class CalibrationTableHighlights(val current: Pair<Int, Int>, val fallback: Pair<Int, Int>?)
+
+internal fun liveTableHighlights(position: CalibrationTablePosition?, table: GrupettoCalibrationTable?,
+    now: Long): CalibrationTableHighlights? {
+    val current = liveTableCell(position, table?.baseline, now) ?: return null
+    val frame = position!!.frame
+    val source = table?.lookupCellIndex(frame.ad.toDouble(), frame.rpm)
+        ?.let { it / 16 to it % 16 }
+    return CalibrationTableHighlights(current, source?.takeIf { it != current })
+}

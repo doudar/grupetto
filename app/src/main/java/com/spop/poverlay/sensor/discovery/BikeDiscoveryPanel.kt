@@ -1,5 +1,7 @@
 package com.spop.poverlay.sensor.discovery
 
+import com.spop.poverlay.ui.components.GrupettoTabs
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.*
 import androidx.compose.runtime.*
@@ -17,11 +19,7 @@ fun BikeDiscoveryPanel(state: BikeDiscoveryState, connection: String, preview: B
     var page by rememberSaveable { mutableIntStateOf(0) }
     Column(Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        TabRow(tab, backgroundColor = Color.Transparent) {
-            listOf("Overview", "Services", "Notes").forEachIndexed { index, label ->
-                Tab(tab == index, { tab = index; page = 0 }, text = { Text(label) })
-            }
-        }
+        GrupettoTabs(tab, listOf("Overview", "Services", "Notes"), { tab = it; page = 0 })
         if (tab == 0) {
         Text("Find built-in bike sensors when automatic detection cannot connect.", fontSize = 15.sp)
         if (preview) Text("Exit model emulation to discover real services.", color = Color(0xFFFBBF24))

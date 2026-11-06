@@ -67,7 +67,7 @@ class CalibrationWindowTest {
         val fit = GrupettoCalibrationFitter.fit(baseline, listOf(accepted))!!
         assertEquals(1, fit.sampleCount)
         assertTrue(fit.corrected(15.0, 1500.0, 75.0) < 15.0)
-        assertFalse(fit.ready) // A single low-power cell cannot activate an entire table.
+        assertTrue(fit.canActivate) // One valid low-power cell can supply nearest-filled lookup.
     }
     @Test fun zeroPowerAndLargeLowPowerRampsDoNotBecomeCalibrationSamples() {
         for ((native, pedal) in listOf(0.0 to 12, 15.0 to 0, 4.0 to 12, 15.0 to 4)) {

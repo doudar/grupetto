@@ -42,4 +42,20 @@ class V1BikeServiceTest {
         assertTrue(runCatching { validateV1ServiceDescriptor(V1BikeService.SensorData, null) }.isFailure)
         assertTrue(runCatching { validateV1ServiceDescriptor(V1BikeService.Affernet, "android.os.IMessenger") }.isFailure)
     }
+
+    @Test fun `capture selects the exact primary service and therefore its explicit binding identity`() {
+        val affernet = candidate(V1BikeService.Affernet, "com.onepeloton.affernetservice", system = true)
+        val other = candidate(V1BikeService.Affernet, "z.other")
+        val available = listOf(other, affernet, candidate(V1BikeService.SensorData, "legacy"))
+        assertSame(selectV1BikeServices(available).first(), calibrationV1Service(available))
+        assertSame(affernet, calibrationV1Service(available))
+    }
+
+    @Test fun `capture cannot create a parallel binding to a different primary provider`() {
+        val affernet = candidate(V1BikeService.Affernet, "com.onepeloton.affernetservice")
+        val primary = candidate(V1BikeService.Affernet, "vendor.system", system = true)
+        assertTrue(runCatching { calibrationV1Service(listOf(affernet, primary)) }.isFailure)
+        assertTrue(runCatching { calibrationV1Service(listOf(candidate(V1BikeService.SensorData, "legacy"))) }.isFailure)
+        assertTrue(runCatching { calibrationV1Service(emptyList()) }.isFailure)
+    }
 }

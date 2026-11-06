@@ -1,5 +1,10 @@
 # Grupetto power calibration
 
+The current collector uses [stable-gated streaming calibration](streaming-calibration.md):
+adjustable settling with a default±5-rpm window, distinct paired seconds, per-cell
+100-second retention and schema 4.
+The linked specification defines the current gate, outlier recovery and persistence format.
+
 External Sensors → **Calibration** opens the table with **Record**, **Activate** and
 **Clear** controls. The main screen and notification Show actions always open this
 table. Free riding records directly here; there is no separate Free ride screen.
@@ -20,16 +25,17 @@ then bike watts. The raw BIKE number in capture remains uncorrected.
 Clearing this option does not clear the board-fit capture
 or change the sensor board. Activation is explicit and persists across restarts;
 recording pauses after a process restart. With Record and Activate both on,
-each usable fit automatically replaces the active snapshot after a saved effort,
+each persisted stream batch automatically replaces the active snapshot,
 without requiring a lower error score than the previous table or raw bike power.
-With recording off, the snapshot stays fixed; **Update active table** remains a
-manual option. Turning Activate off prevents automatic activation.
-Turning it off retains the last usable snapshot. If a later draft lacks coverage,
+With recording off, the snapshot stays fixed. **Apply latest fit** appears on the
+Table page only when a usable draft differs from the active snapshot (for example,
+a refit after restart or a failed automatic update). It is not a routine save step. Turning Activate off prevents automatic activation.
+Turning it off retains the last usable snapshot. If a later draft has no usable cell,
 Activate can reuse that saved snapshot for the same bike and baseline; the
 controls show which saved effort count will be used and why the draft is not ready.
 Record and Start capture require a connected meter with fresh readings. A dropout
 resets the collection window; an already running session waits for reconnection.
-The correction grid uses a fixed continuous **-10% bright red → 0% neutral → +10%
+The correction grid uses a fixed continuous **-20% bright red → 0% neutral → +20%
 deep blue** scale. Negative reduces bike overestimation; positive increases bike
 underestimation. Percentages are relative to raw bike watts and come directly from
 the fitted gain: `100 * (exp(logGain) - 1)`. Colors saturate at the ends without
@@ -42,18 +48,23 @@ progress bar and seconds-left label follow the configured effort duration.
 The live pulse does not require recording, activation, or an external meter. It disappears
 when raw bike data is stale, cadence is out of range, or the baseline differs. The table screen shows live raw bike
 watts, corrected watts, pedal watts, cadence and resistance even while recording
-is paused. Fit messages and validation details are available under **Fit details**.
-Calibration dialogs use wide, compact layouts without scrolling. The table has
-**Table**, **Fit details**, and **Backups** tabs; guided capture has Ride and Review
-views. Secondary actions use compact buttons while riding actions keep larger targets.
-The table page compares **Before calibration** and **After calibration** as mean
+is paused. Fit messages and validation details are available from the information
+button beside **Grupetto table**. There is no separate Fit details tab.
+The table has **Table** and **Backups** tabs; guided capture has Ride and Review
+views. The Table page groups **Guided capture**, **Manual editor**, **Capture settings**,
+and **Clear table...** in compact horizontal controls, wrapping on narrow screens
+while retaining 48 dp touch targets. Clear opens an explicit confirmation with
+**Keep table** initially focused. Cancel, Back, or dismissal leaves everything intact.
+Only **Clear Grupetto table** deletes saved Grupetto efforts and manual edits, stops
+recording, and disables correction; exported backups and bike calibration are unchanged.
+The table page compares **Raw bike error** and **Corrected error** as mean
 absolute error in watts against the pedals, on exactly the same saved paired
-efforts. After uses the actual active snapshot, not the newer draft. When correction
+efforts. Corrected error uses the actual active snapshot, not the newer draft. When correction
 is off, it is labeled **preview** and uses the table Activate would select, or the
 unfinished draft when no validated table exists. Unknown values show a dash.
 This descriptive comparison updates with recording and activation. Both it and
-the separate held-out RMSE are informational; neither gates table updates.
-Capture → Review shows the Grupetto draft's measured cells, validation error and
+the separate saved-effort RMSE are informational; neither gates table updates.
+Capture → Review shows the Grupetto draft's measured cells, saved-effort error and
 readiness, with a shortcut to its controls. The rider flow does not expose the
 experimental sensor-board fit or write controls. Raw paired efforts remain saved
 for future work translating Grupetto calibration into bike-table offsets.
@@ -94,17 +105,15 @@ baseline resistance points and 45–120 rpm. **Fit table** sizes cells to the ac
 viewport in whole pixels and fits cadence labels within their rows; all four
 corners remain visible without scrolling, including after leaving Zoom.
 Tap a cell to inspect its raw resistance AD and enter a signed percentage of raw
-bike watts (−35% to +35%). **Set correction** assigns the desired correction;
+bike watts (−50% to +50%). **Set correction** assigns the desired correction;
 **−1% / +1%** nudge it by one percentage point. Choose a cell, cadence row,
 resistance column, or the whole table. **Zoom in** adds numeric cell labels and
 larger touch targets; the scrollable grid retains its axis labels.
 
-**Blend into neighbors** is on by default. It tapers the change in log-power space
-using the recorded fitter's Gaussian length scales (2.5 resistance points and
-15 rpm), while hitting the selected correction exactly. Turn blending off to
-change only selected cells. Manual input uses the same ride-time interpolation
-and correction bounds as recorded calibration, without creating synthetic pedal
-efforts or claiming measured confidence.
+Set and nudge change only the selected cells. There is no automatic neighbor
+blending. Use the explicit **Smooth** or **Fill gaps** tools when desired. Manual
+input uses the same correction bounds as recordings and shares their cell values;
+it does not create synthetic pedal measurements.
 
 Four one-touch quick fixes stay visible above the table. The selection inspector
 uses **Edit**, **Scope**, and **Tools** pages without scrolling. Quick fixes affect
@@ -117,8 +126,9 @@ the whole table and remain reversible with Undo:
 - **Smooth whole table:** blends every cell halfway toward its immediate
   neighbors' average to reduce abrupt changes.
 - **Reduce all 20%:** scales every percentage correction toward zero.
-- **Restore recorded fit:** removes all manual edits, including edits saved in
-  earlier sessions, and restores the fit from the recorded efforts.
+- **Reset corrections:** sets the shared correction table to zero. Original
+  pedal observations remain available for diagnostics; Undo restores the table
+  before the reset until the edit session is saved.
 
 The inspector also retains **Smooth selection** and **Reduce corrections 20%**
 for cell, cadence-row, resistance-column, or whole-table selections. Compare mode
@@ -138,39 +148,96 @@ Changes affect riding only after **Save & apply** when already active, or after
 **Save draft** followed by **Activate** when correction is off. A changed table
 or resumed recording prevents a stale editor session from overwriting new data.
 
-Manual adjustments are stored as a separate additive log-gain layer in the
-atomic snapshot and JSON backups. Restarts and subsequent recorded fits retain
-that layer; a new fit may change the underlying recorded correction. Coverage
-from manual editing is displayed but never counted as measured ride coverage.
-Manual edits can make a sparse draft usable by explicit activation. Restoring
-an insufficient recorded fit disables correction until more coverage is collected.
-Before/After error uses the edited surface; held-out validation still describes
-the underlying recorded fit and is labeled accordingly.
+Manual tools and recordings now modify **one shared correction surface**. Saving
+an edit updates calibration targets at all saved effort coordinates to the edited
+surface. Original pedal readings are retained once as audit metadata, so the
+Raw bike/Corrected error display still compares against actual measured pedals, not
+edited targets. There is no additive manual offset layer to compound or reapply.
+Coverage from editing remains descriptive and never counts as measured efforts.
+Explicit manual saves (including Reset corrections) can make a sparse table usable.
+
+Subsequent paired observations update that same cell using a robust weighted-median
+estimate over its retained stream at the current established level. Unchanged old targets
+cannot immediately reconstruct over an edit; future real observations remain able to change it.
+No new observations means no reconstruction: restarting, pausing/resuming, and
+receiving duplicate old captures preserve the shared table exactly. A persisted
+processed-through timestamp prevents old overlapping/imported observations from
+replaying over newer edits. Capture timestamps use the device clock; readings at
+or before that boundary are historical, not new calibration updates.
+
+Schema-1 backups remain importable. Migration validates their offsets, preserves
+the exact saved gains, folds existing manual adjustments into targets once, keeps
+original readings, and discards the offsets. Draft and saved activation snapshots
+migrate independently. Schema-4 profiles preserve existing gains and keep legacy
+efforts as explicit aggregates, without inventing raw stream seconds. New observations
+use compact timestamped tuples; the first new stream in a cell estimates that cell from
+real paired observations. Older app versions reject schema 4. A fsynced recovery copy
+retains each old source before migration. Fractional coordinates still use the nearest
+grid cell, not the old interpolated surface.
+Valid old snapshots are rewritten atomically at startup, including the older
+separate draft/active files. Versions v0.0.49 and v0.0.50 use the supported schema-1
+format. If persisted calibration is malformed, oversized, or uses an unsupported
+format, startup keeps a recoverable copy, writes an empty calibration snapshot,
+and turns correction off. An on-disk reset marker prevents old captures from
+reappearing after an interrupted upgrade. Unrelated settings and the separate raw
+sensor-board capture remain unchanged. Real storage I/O failures do not authorize
+discarding data; correction stays off with an error instead. Explicit backup
+imports still reject invalid files without replacing the current calibration.
+
+Export a backup before testing this branch if you may want to return to an older
+version. CI tests the source-built v0.0.49/v0.0.50 debug APKs with the same disposable
+key, then installs the new APK in place without clearing data. The old binary
+writes the smoothed calibration used by the migration assertions; these tests do
+not substitute for matching the production APK signature on the actual bike.
 
 ### Recorded fit
 
-The model fits log(pedal watts / native watts) as a function of raw AD, mapped to
-the 31-point baseline coordinate, and cadence. A zero-mean Gaussian kernel has
-length scales of 2.5 baseline intervals and 15 rpm. Cholesky solves the regularized
-system. Local repeated efforts are aggregated; observation noise includes a
-minimum floor and robust within-cell scatter. All usable efforts enter the fit and
-validation. The matrix is bounded to 128 cells by widening the local resistance
-and cadence bins when necessary; cells are never dropped by subsampling. This
-preserves isolated low-cadence measurements that the previous 64-cell cap omitted.
+Each accepted stable recording belongs to exactly one cell of the 31 × 16 table.
+Raw resistance AD maps through the bike's 31-point baseline and rounds to the
+nearest column. Cadence rounds to the nearest 5-rpm row from 45–120 rpm. Half-cell
+ties round up. No recording changes a neighboring cell.
 
-The posterior mean is multiplied by local support and bounded to 0.65–1.35 times
-native power. A 31 × 16 table covers the full baseline and 45–120 rpm, with bilinear
-interpolation during the ride. Correction fades toward native power away from
-measurements; this is not evidence of accuracy at unmeasured high powers. Outside
-the baseline/cadence range, native power is used. Zero power stays zero.
+Each cell retains up to 100 accepted paired seconds across visits. Its live correction
+is the native-watt-weighted median of editable pedal/native ratios at its current
+established level, bounded to 0.65-1.35. Isolated ratio glitches are quarantined;
+three internally consistent shifted observations establish a new level instead of
+being rejected forever against an older gain. See the stream specification for exact
+thresholds. The old first-ten/tenth-weight average remains only for legacy aggregated
+inputs; it is no longer the live recording algorithm.
 
-Validation leaves an entire local cell out, including all repeats, and remains
-available as an informational score. Activation requires six efforts in six cells,
-three resistance locations, cadences spanning at least 10 rpm, and finite fit
-values. Error improvement is no longer required, including for the first table.
-Saved drafts are re-evaluated on load under these coverage requirements.
+During a ride, lookup uses the current rounded cell if populated; otherwise it
+uses the closest populated cell. Distance is squared Euclidean distance in grid
+steps: one resistance column and one 5-rpm row each count as one step. Equal
+distances select lower resistance, then lower cadence. This is a deterministic
+fallback, not interpolation, and can introduce a step when crossing between
+cells. There is no fading to native power within the table domain. Outside the
+baseline/cadence range, with no filled cells, or at zero power, power is unchanged.
+Lookup directly returns a populated current cell; fallback uses one bounded,
+allocation-free scan of at most 496 cells. Sensor callbacks perform no fitting or
+deferred cache construction.
 
-With Record + Activate on, every saved effort refits the accumulated data and
+The current table cell pulses whenever fresh bike telemetry is available, even
+with Record off. When lookup falls back to another populated cell, that source
+cell has a pulsing green border. Fallback does not mark an empty current cell as
+measured or fill it automatically.
+
+Capture stability, settling and valid-data requirements are unchanged. One valid
+recorded effort in one populated cell is enough to enable **Activate**; empty or
+invalid-only data cannot activate correction. Empty cells use nearest-filled lookup,
+so additional resistances and cadences improve coverage but do not gate activation.
+First activation remains explicit, and older one-point drafts become eligible without
+replaying recordings or changing saved gains. Display averages and rounded broadcasts can differ from the
+instantaneous paired recording.
+
+**Raw bike error** and **Corrected error** are mean absolute differences from the
+original pedal measurements over saved efforts, using the current active table
+(or the activation preview when off). They are descriptive retrospective errors,
+not live power or a guarantee that a new recording will improve all old samples.
+Manual edits, changing equipment behavior and conflicting recordings can make the
+corrected value worse. Diagnostics also show saved-effort RMSE; no held-out Gaussian
+validation score remains. Neither error metric gates activation or updates.
+
+With Record + Activate on, every new saved effort updates the current surface and
 publishes the latest usable table. Equal or worse error scores do not block it.
 First activation stays explicit; Off is never silently enabled. Resuming Record
 also applies the latest usable draft immediately. Error comparisons and cadence
@@ -210,19 +277,13 @@ Both meters may read as low as 5 W, including easy spinning around 12–15 W.
 Zero/below-5 W readings reset the window with an explicit low-power cue. Capture,
 the Grupetto fit and saved-data loading share this power range.
 
-**Capture settings** on the calibration table edits settle time (0–15 seconds) and
-maximum resistance movement (1–100% of one local baseline interval, minimum three
-raw AD units). Defaults are three seconds and 10%. Settings persist across restarts;
-changing them restarts only the in-progress hold and keeps all saved efforts.
-With defaults, eight distinct paired readings spanning seven elapsed seconds form
-an effort; the first three seconds settle, leaving five readings. Every setting
-still requires at least five settled readings. Cadence spread may reach 8 rpm.
-Power can have one isolated outlier, but the remaining spread and the
-first-to-last settled medians must stay within max(20 W, 12%) at normal power.
-Below 40 W the absolute allowance scales down to half the median, with a 5 W floor,
-so low-power ramps are not mistaken for steady efforts. Stale packets,
-disconnects, sustained ramps and resistance transitions are rejected. Shorter
-windows trade some delay rejection for achievable human efforts.
+**Capture settings** edits settle time, cadence/resistance windows and ratio-based
+outlier rejection. Defaults are 2 seconds and±5 rpm. Crossing a 5-rpm storage boundary
+inside the capture window does not reset settling; each pair stays in its actual cell.
+Leaving the configured windows, stale readings or disconnection resets settling. Both packet timestamps must advance and observations are accepted at most once
+per second. The bucket below the chart legend shows waiting, settling, collecting, possible-outlier or
+paused state. Finite fill/cell-crossfade motion changes only the pixels, never the fitted
+values. Legacy configurable effort windows remain separate from tablet streaming.
 
 ## Experimental sensor-board workflow
 
@@ -246,3 +307,53 @@ to or been validated on the real board**. An aligned knob can still move between
 the final read and the capture command; readback detects a mismatch and stops.
 No board write occurs during recording, fitting, activation of the Grupetto table,
 or installation. Board setup disables the separate Grupetto correction.
+
+### Optional refit from retained original measurements
+
+While recording is paused, select **Calculate New Solution** above the Corrected error watt difference.
+This explicit offline operation uses all eligible retained observations and legacy aggregates
+(up to 100 stream seconds per cell plus 3600 legacy aggregates), including earlier retained
+levels. Review its preview before replacing the current live level. It does not run automatically
+between rides. The preview compares the current and fitted table's mean absolute
+error, signed bias (corrected minus pedals), RMSE, fitted cells and bound hits.
+**Apply refit** changes the shared table only after confirmation; **Cancel** leaves
+it unchanged. **Undo refit** restores the complete previous saved snapshots while
+no later calibration operation has changed them. Applying while active updates
+live compensation; applying while inactive leaves correction off. Normal readiness
+is preserved rather than bypassed.
+
+The objective is bounded least absolute deviation in each already populated cell:
+minimize `sum(abs(nativeWatts * gain - originalPedalWatts))`, with gain in
+0.65–1.35. The optimum is the weighted median of original-pedal/native ratios,
+weighted by native watts. When half the weight lies on either side of an interval,
+the old gain is projected into that interval, preserving an already optimal value.
+No global polynomial, neighbor smoothing, or fictitious zero-error claim is used.
+Cells without eligible evidence retain their values; unfilled cells remain unfilled,
+although their nearest-cell fallback output can change when its source is refitted.
+
+Refit leaves original observations and edited targets untouched. It preserves the
+processed-history boundary (advancing only to cover retained data it consumes)
+and each cell's live count, raising it to the smaller of ten and its fit-evidence
+count if larger. Subsequent streaming updates use the current-level weighted median
+in the same shared table; the refit is not a permanent offline override.
+Record, Clear, imports, edits, activation or baseline changes invalidate stale
+previews. Fitting runs off the UI thread; disk save completes before publication.
+
+#### Exported measurement fields
+
+For backward compatibility, exported `pedalWatts` is the calibration target. Before
+any manual target change it is the original pedal measurement. Once an edit
+changes that target, `recordedPedalWatts` retains the immutable original measurement.
+For example, native 195 W, target 191.69 W and recorded 177 W mean a 177 W pedal
+observation with a later 191.69 W calibration target, not two simultaneous pedal
+readings. Displayed errors and optional refit always use `recordedPedalWatts` when
+present, otherwise `pedalWatts`. Live recording uses newly captured pedal readings.
+
+### Cadence-normalized calibration inputs
+
+Known bike identities use extracted Rexon/Tonic cadence references to express each paired
+measurement at its fitting row's RPM before fitting, including optional refits.97rpm in a
+95-rpm cell is normalized down. Both native and pedal calculation inputs use that same
+reference cadence; the ratio is preserved while absolute-watt fit weights become comparable
+at the row center. Raw stored observations, PEDALS display and live meter/ERG input remain
+unchanged. See streaming-calibration.md for the formula, limits and provenance.

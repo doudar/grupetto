@@ -12,10 +12,10 @@ class GrupettoAutoUpdateTest {
     private fun constant(gain: Double) = GrupettoCalibrationTable(baseline, List(496) { ln(gain) },
         List(496) { 1.0 }, 6, 6, .001, .001, true)
 
-    @Test fun activationCanReuseSavedTableWhenLatestDraftLacksCoverage() {
+    @Test fun activationCanReuseSavedTableWhenLatestDraftHasNoPopulatedCells() {
         val capture = CalibrationCapture("bike", "pedals", 2040490, baseline, samples)
         val saved = GrupettoCalibrationProfile(capture, constant(1.1))
-        val draft = saved.copy(table = saved.table!!.copy(cells = 2, ready = false))
+        val draft = saved.copy(table = saved.table!!.copy(cells = 0, sampleCount = 0, ready = false))
         assertSame(saved, activationProfile(draft, saved))
         assertNull(activationProfile(draft, null))
         assertSame(saved, activationProfile(null, saved))
@@ -28,7 +28,7 @@ class GrupettoAutoUpdateTest {
         val saved = GrupettoCalibrationProfile(capture, constant(1.1))
         listOf(capture.copy(frameSerial = "other"),
             capture.copy(serviceVersion = 1), capture.copy(baseline = baseline.map { it + 1 })).forEach {
-            assertNull(activationProfile(GrupettoCalibrationProfile(it, saved.table!!.copy(ready = false)), saved))
+            assertNull(activationProfile(GrupettoCalibrationProfile(it, saved.table!!.copy(cells = 0, sampleCount = 0, ready = false)), saved))
         }
     }
 
@@ -77,8 +77,11 @@ class GrupettoAutoUpdateTest {
     }
 
     @Test fun worseValidationErrorDoesNotBlockAUsableFit() {
-        val alternating = samples.mapIndexed { i, sample ->
-            sample.copy(pedalWatts = sample.nativeWatts + if (i % 2 == 0) 20.0 else -20.0)
+        // At each cell, ten low-native ratios followed by one high-native ratio leave
+        // the EMA far from the watt-weighted optimum. This is descriptive, not a gate.
+        val alternating = samples.flatMap { sample ->
+            (0..10).map { i -> sample.copy(nativeWatts = if (i < 10) 100.0 else 1000.0,
+                pedalWatts = if (i < 10) 65.0 else 1350.0, capturedAt = sample.capturedAt * 100 + i) }
         }
         val capture = CalibrationCapture("bike", "pedals", 2040490, baseline, alternating)
         val fit = GrupettoCalibrationFitter.fit(baseline, alternating)!!
@@ -92,7 +95,7 @@ class GrupettoAutoUpdateTest {
         val capture = CalibrationCapture("bike", "pedals", 2040490, baseline, samples)
         val profile = GrupettoCalibrationProfile(capture, constant(1.1))
         assertNull(automaticCalibrationProfile(profile, null))
-        assertNull(automaticCalibrationProfile(profile.copy(table = profile.table!!.copy(ready = false)), profile))
+        assertNull(automaticCalibrationProfile(profile.copy(table = profile.table!!.copy(cells = 0, sampleCount = 0, ready = false)), profile))
         listOf(capture.copy(frameSerial = "other"),
             capture.copy(serviceVersion = 1), capture.copy(baseline = baseline.map { it + 1 })).forEach {
             assertNull(automaticCalibrationProfile(profile.copy(capture = it), profile))
@@ -116,6 +119,7 @@ class GrupettoAutoUpdateTest {
         val saved = GrupettoCalibrationProfile(capture, constant(1.1))
         val latest = saved.copy(capture = capture.copy(meterAddress = "new-meter"))
         assertSame(latest, automaticCalibrationProfile(latest, saved))
-        assertSame(saved, activationProfile(latest.copy(table = latest.table!!.copy(ready = false)), saved))
+        val unfinished = latest.copy(table = latest.table!!.copy(cells = 0, sampleCount = 0, ready = false))
+        assertSame(saved, activationProfile(unfinished, saved))
     }
 }

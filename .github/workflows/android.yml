@@ -10,7 +10,7 @@ on:
 # PR builds have their own group and never block a publication.
 concurrency:
   group: android-${{ github.event_name == 'push' && 'release' || github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -38,7 +38,16 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    - name: Configure release signing
+    - name: Test release artifact contracts
+      run: python3 .github/scripts/test_apk_artifact.py
+
+    - name: Test emulator fixture safety
+      run: python3 .github/scripts/test_emulator_fixture.py
+
+    - name: Configure production signing
+      id: signing
+      # Fork code never runs this step with signing credentials.
+      if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
       env:
         SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
         KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
@@ -46,14 +55,7 @@ jobs:
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       run: |
         if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ -z "$SIGNING_KEY" ]; then
-          # Fork PRs do not receive signing secrets. Only PR builds may use the debug key.
-          echo "::notice::No signing secrets available; building with the debug keystore"
-          mkdir -p ~/.android
-          if [ ! -f ~/.android/debug.keystore ]; then
-            keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android \
-              -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
-              -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          fi
+          echo "::notice::No signing secrets available; selecting a debug-only PR artifact"
           exit 0
         fi
         # Fail closed before building a release with missing signing credentials.
@@ -72,6 +74,23 @@ jobs:
         keyAlias=$KEY_ALIAS
         keyPassword=$KEY_PASSWORD
         EOF
+        echo "mode=production" >> "$GITHUB_OUTPUT"
+
+    - name: Configure disposable debug fallback for unprivileged PR build
+      id: debug_signing
+      if: github.event_name == 'pull_request' && steps.signing.outputs.mode != 'production'
+      run: |
+        set -euo pipefail
+        echo "::notice::Debug-signed fallback: not a release or a production-signed Peloton update"
+        mkdir -p ~/.android
+        if [ ! -f ~/.android/debug.keystore ]; then
+          keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android \
+            -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+            -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+        fi
+        CERT=$(keytool -exportcert -keystore ~/.android/debug.keystore -storepass android \
+          -alias androiddebugkey | sha256sum | cut -d ' ' -f1)
+        echo "certificate=$CERT" >> "$GITHUB_OUTPUT"
 
     - name: Test release version allocation
       run: bash .github/scripts/test-release-version.sh
@@ -84,16 +103,32 @@ jobs:
       run: |
         # Update versionName to match the new tag
         sed -i "s/versionName \".*\"/versionName \"${{ steps.version_info.outputs.TAG_NAME }}\"/" app/build.gradle
-        
+
         # Update versionCode to incremented value
         sed -i "s/versionCode [0-9]*/versionCode ${{ steps.version_info.outputs.NEW_VERSION_CODE }}/" app/build.gradle
-        
+
         # Verify changes
         echo "Updated build.gradle versions:"
         grep -E "(versionCode|versionName)" app/build.gradle
 
+    - name: Run unit tests and compile UI tests
+      run: ./gradlew testDebugUnitTest compileDebugAndroidTestKotlin
+
     - name: Build release APK
       run: ./gradlew assembleRelease
+
+    - name: Verify APK signing mode and stage flat artifact
+      env:
+        SIGNING_MODE: ${{ steps.signing.outputs.mode == 'production' && 'production' || 'debug-fallback' }}
+        DEBUG_CERTIFICATE: ${{ steps.debug_signing.outputs.certificate }}
+        SOURCE_SHA: ${{ steps.version_info.outputs.SOURCE_SHA }}
+      run: |
+        set -euo pipefail
+        TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+        python3 .github/scripts/apk_artifact.py stage --tools "$TOOLS" \
+          --apk app/build/outputs/apk/release/app-release.apk --directory ci-artifact \
+          --mode "$SIGNING_MODE" --event "$GITHUB_EVENT_NAME" --source-sha "$SOURCE_SHA" \
+          --debug-certificate "$DEBUG_CERTIFICATE"
 
     - name: List APK outputs
       run: |
@@ -101,15 +136,16 @@ jobs:
         find app/build/outputs/apk -name "*.apk" -type f || echo "No APK files found"
         echo "Directory structure:"
         ls -la app/build/outputs/apk/ || echo "APK output directory not found"
-    - name: Upload release APK as artifact
+    - name: Upload verified APK artifact
       uses: actions/upload-artifact@v4
       with:
-        name: release-apk
-        path: app/build/outputs/apk/release/app-release.apk
+        name: ${{ steps.signing.outputs.mode == 'production' && 'release-apk' || 'debug-fallback-apk' }}
+        path: ci-artifact/
+        if-no-files-found: error
 
   release:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')
-    needs: build
+    needs: [build, calibration-persistence-tests, calibration-upgrade-tests]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -125,13 +161,32 @@ jobs:
       run: |
         # Update versionName to match the new tag
         sed -i "s/versionName \".*\"/versionName \"${{ needs.build.outputs.TAG_NAME }}\"/" app/build.gradle
-        
+
         # Update versionCode to incremented value
         sed -i "s/versionCode [0-9]*/versionCode ${{ needs.build.outputs.NEW_VERSION_CODE }}/" app/build.gradle
-        
+
         # Verify changes
         echo "Updated build.gradle versions:"
         grep -E "(versionCode|versionName)" app/build.gradle
+
+    - name: Download release APK
+      uses: actions/download-artifact@v4
+      with:
+        name: release-apk
+        path: release-artifact/
+
+    - name: Validate release input before publication
+      id: find_apk
+      env:
+        SOURCE_SHA: ${{ needs.build.outputs.SOURCE_SHA }}
+        VERSION_CODE: ${{ needs.build.outputs.NEW_VERSION_CODE }}
+        VERSION_NAME: ${{ needs.build.outputs.TAG_NAME }}
+      run: |
+        set -euo pipefail
+        TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+        python3 .github/scripts/apk_artifact.py validate-release --tools "$TOOLS" \
+          --directory release-artifact --source-sha "$SOURCE_SHA" \
+          --version-code "$VERSION_CODE" --version-name "$VERSION_NAME" --output "$GITHUB_OUTPUT"
 
     - name: Commit version updates
       run: |
@@ -140,24 +195,6 @@ jobs:
         git add app/build.gradle
         git commit -m "Auto-update version to ${{ needs.build.outputs.TAG_NAME }} (build ${{ needs.build.outputs.NEW_VERSION_CODE }})"
         git push origin HEAD:${{ github.ref_name }} || echo "::warning::Branch advanced; release tag will retain the version commit"
-
-    - name: Download release APK
-      uses: actions/download-artifact@v4
-      with:
-        name: release-apk
-        path: ./
-
-    - name: Find and prepare APK
-      id: find_apk
-      run: |
-        # Find the APK file (could be signed or unsigned)
-        APK_FILE=$(find . -name "*.apk" -type f | head -1)
-        if [ -z "$APK_FILE" ]; then
-          echo "No APK file found!"
-          exit 1
-        fi
-        echo "Found APK: $APK_FILE"
-        echo "APK_PATH=$APK_FILE" >> $GITHUB_OUTPUT
 
     - name: Create new tag
       run: |
@@ -176,20 +213,20 @@ jobs:
         release_name: "Grupetto ${{ needs.build.outputs.TAG_NAME }}"
         body: |
           ## Grupetto Release ${{ needs.build.outputs.TAG_NAME }}
-          
+
           **Version:** ${{ needs.build.outputs.TAG_NAME }}
           **Previous Version:** ${{ needs.build.outputs.PREVIOUS_TAG }}
           **Build Code:** ${{ needs.build.outputs.NEW_VERSION_CODE }} (was ${{ needs.build.outputs.VERSION_CODE }})
           **Commit:** ${{ needs.build.outputs.SOURCE_SHA }}
-          
+
           ### Changes
           - Automated release from ${{ github.ref_name }} branch
           - Auto-incremented from ${{ needs.build.outputs.PREVIOUS_TAG }}
           - Updated app/build.gradle with new version numbers
-          
+
           ### Installation
           Download the APK file below and install on your Android device.
-          
+
           **Note:** You may need to enable "Install from unknown sources" in your device settings.
         draft: false
         prerelease: false
@@ -200,7 +237,106 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: app-release.apk
+        asset_path: ${{ steps.find_apk.outputs.APK_PATH }}
         asset_name: grupetto-${{ needs.build.outputs.TAG_NAME }}.apk
         asset_content_type: application/vnd.android.package-archive
-    
+
+
+  calibration-persistence-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
+    - name: Create disposable test-only signing key
+      run: |
+        mkdir -p ~/.android
+        if [ ! -f ~/.android/debug.keystore ]; then
+          keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android \
+            -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+            -validity 1 -dname "CN=Android Debug,O=Android,C=US"
+        fi
+    - name: Configure available hosted-runner KVM
+      run: |
+        if [ -c /dev/kvm ]; then
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -r /dev/kvm && test -w /dev/kvm
+          echo 'KVM is accessible; emulator hardware acceleration is available.'
+        else
+          echo '::notice::This hosted runner has no /dev/kvm; use explicit emulator software fallback.'
+        fi
+    - name: Test calibration persistence on virtual Android
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: 29
+        arch: x86_64
+        # The generic 320px profile silently clamps a 1920px wm override to 640px.
+        # Use a defined profile with sufficient physical dimensions.
+        profile: pixel_2
+        emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -accel auto
+        emulator-boot-timeout: 1200
+        disable-linux-hw-accel: auto
+        disable-animations: true
+        script: |
+          bash .github/scripts/prepare-calibration-emulator.sh --landscape
+          bash -c 'set +e; bash ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.uiDiagnostics=true; result=$?; mkdir -p app/build/reports/androidTests; adb logcat -d -b crash > app/build/reports/androidTests/emulator-crash.log || true; adb pull /data/local/tmp/grupetto-ui-test-diagnostics app/build/reports/androidTests/fixture-diagnostics || true; adb pull /sdcard/Android/data/com.spop.poverlay/files/calibration-test-diagnostics app/build/reports/androidTests/diagnostics || true; exit "$result"'
+    - name: Preserve instrumentation test reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: calibration-instrumentation-reports
+        path: app/build/reports/androidTests
+
+  calibration-upgrade-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        legacy-tag: [v0.0.49, v0.0.50]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
+    - name: Configure available hosted-runner KVM
+      run: |
+        if [ -c /dev/kvm ]; then
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -r /dev/kvm && test -w /dev/kvm
+          echo 'KVM is accessible; emulator hardware acceleration is available.'
+        else
+          echo '::notice::This hosted runner has no /dev/kvm; use explicit emulator software fallback.'
+        fi
+    - name: Upgrade a real released install on virtual Android
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: 29
+        arch: x86_64
+        emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -accel auto
+        emulator-boot-timeout: 1200
+        disable-linux-hw-accel: auto
+        disable-animations: true
+        script: |
+          CALIBRATION_SETUP_REPORTS=app/build/reports/calibration-upgrade bash .github/scripts/prepare-calibration-emulator.sh
+          bash .github/scripts/test-calibration-upgrade.sh ${{ matrix.legacy-tag }}
+    - name: Preserve old-to-new upgrade evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: calibration-upgrade-${{ matrix.legacy-tag }}
+        path: app/build/reports/calibration-upgrade

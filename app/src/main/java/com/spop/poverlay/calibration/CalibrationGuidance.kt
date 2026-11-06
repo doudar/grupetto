@@ -5,8 +5,8 @@ import kotlin.math.*
 enum class CalibrationMode { Guided, FreeRide }
 
 data class CalibrationTarget(val point: Int, val ad: Int, val rpm: Int, val repeats: Int,
-    val lowerAd: Int, val upperAd: Int, val approximateWatts: Int? = null) {
-    val complete get() = repeats >= 3
+    val lowerAd: Int, val upperAd: Int, val approximateWatts: Int? = null, val required: Int = 3) {
+    val complete get() = repeats >= required
     // Adjacent bands share a boundary, but an effort belongs to only one band.
     fun containsResistance(value: Double) = value >= lowerAd && value < upperAd
     fun containsCadence(value: Double) = (value / 5).roundToInt() * 5 == rpm
@@ -25,10 +25,10 @@ internal class CalibrationGuide(private val baseline: List<Int>, startAd: Int) {
     fun easier() { first = (first - 2).coerceAtLeast(1); skipped.clear(); selected = null }
     fun harder() { first = (first + 2).coerceAtMost(25); skipped.clear(); selected = null }
     fun skip(target: CalibrationTarget?) { target?.let { skipped += it.point to it.rpm }; selected = null }
-    fun cells(samples: List<CalibrationSample>): List<CalibrationTarget> = listOf(75, 85).flatMap { rpm ->
+    fun cells(samples: List<CalibrationSample>, streaming: Boolean = false): List<CalibrationTarget> = listOf(75, 85).flatMap { rpm ->
         (first..first + 4 step 2).map { index ->
-            val target = CalibrationTarget(index, baseline[index], rpm, 0, baseline[index - 1], baseline[index + 1])
-            target.copy(repeats = samples.count { target.containsResistance(it.ad) && target.containsCadence(it.rpm) },
+            val target = CalibrationTarget(index, baseline[index], rpm, 0, baseline[index - 1], baseline[index + 1], required = if (streaming) 100 else 3)
+            target.copy(repeats = samples.count { (!streaming || it.observation != null) && target.containsResistance(it.ad) && target.containsCadence(it.rpm) },
                 approximateWatts = estimateTargetWatts(baseline, target, samples))
         }
     }

@@ -13,10 +13,13 @@ import com.spop.poverlay.ui.theme.PTONOverlayTheme
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 import java.io.File
 
 class ShifterSettingsTest {
-    @get:Rule val compose = createComposeRule()
+    private val compose = createComposeRule()
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(OverlayPermissionRule())
+        .around(compose).around(UiTestDiagnostics(compose))
 
     @Test fun previewOnlyAppearsDuringPositionGestureEvenWhenCheckboxIsOff() {
         val shown = mutableStateOf(true)

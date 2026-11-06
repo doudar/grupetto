@@ -3,6 +3,7 @@ package com.spop.poverlay.sensor.v1new
 import android.os.IBinder
 import android.os.Parcel
 import com.spop.poverlay.sensor.readBikeCoreData
+import com.spop.poverlay.BuildConfig
 import com.spop.poverlay.sensor.interfaces.SensorInterface
 import com.spop.poverlay.sensor.power.PowerDisplay
 import com.spop.poverlay.sensor.power.DisplayPowerSource
@@ -43,6 +44,8 @@ class V1NewCombinedSensor(
 
     private var isRegistered = false
     private val callbackBinder = createCallback()
+    private val nativeFrames = java.util.concurrent.atomic.AtomicLong()
+    private val lastDiagnosticAt = java.util.concurrent.atomic.AtomicLong()
 
     companion object {
         private const val INTERFACE_DESCRIPTOR = "com.onepeloton.affernetservice.IV1Interface"
@@ -136,6 +139,13 @@ class V1NewCombinedSensor(
                         if (bikeData != null) {
                             // Power is divided by 100.0f
                             val native = bikeData.power.toFloat() / 100.0f
+                            // Debug-only, bounded evidence of native delivery before correction/UI work.
+                            val frames = nativeFrames.incrementAndGet()
+                            val now = android.os.SystemClock.elapsedRealtime()
+                            val last = lastDiagnosticAt.get()
+                            if (BuildConfig.DEBUG && now - last >= 5000 && lastDiagnosticAt.compareAndSet(last, now)) {
+                                Timber.tag("V1Telemetry").w("Native frames=%d watts=%.2f rpm=%d", frames, native, bikeData.rpm)
+                            }
                             mutableNativePower.tryEmit(native)
                             // Also publish the raw table position while correction/recording is off.
                             val corrected = if (powerCalibration != null) runCatching {
