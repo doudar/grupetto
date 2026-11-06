@@ -109,6 +109,15 @@ class CalibrationStreamSettingsUiTest {
         } }
         compose.onNodeWithText("Settle time (seconds)").assertIsDisplayed()
         compose.onNodeWithText("Cadence window (± rpm)").assertIsDisplayed()
+        val viewport = compose.onNodeWithTag("capture-settings-body").getUnclippedBoundsInRoot()
+        for (key in listOf("settle", "cadence", "resistance", "tolerance", "noise", "confirmation")) {
+            for (part in listOf("slider", "hint")) {
+                val control = compose.onNodeWithTag("capture-$part-$key").assertIsDisplayed()
+                val bounds = control.getUnclippedBoundsInRoot()
+                assertTrue("$part $key clipped above viewport", bounds.top >= viewport.top)
+                assertTrue("$part $key clipped below viewport", bounds.bottom <= viewport.bottom)
+            }
+        }
         val initialScreenshot = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
         File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir, "stream-capture-settings-top.png")
             .outputStream().use { initialScreenshot.compress(Bitmap.CompressFormat.PNG, 100, it) }

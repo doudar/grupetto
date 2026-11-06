@@ -50,26 +50,29 @@ internal fun CalibrationStreamSettingsDialog(settings: CalibrationStreamSettings
     }
     val parsed = runCatching { CalibrationStreamSettings(settle.toInt(), cadence.toDouble(), resistance.toInt(),
         rejection, tolerance.toDouble(), noise.toDouble(), confirmation.toInt()) }.getOrNull()
-    val accent = MaterialTheme.colors.secondary
+    val accent = Color(0xFF65D9C1)
     val muted = MaterialTheme.colors.onSurface.copy(alpha = .7f)
     val shape = RoundedCornerShape(18.dp)
     AlertDialog(onDismissRequest = onClose,
-        modifier = Modifier.widthIn(max = 940.dp).fillMaxWidth(.94f), shape = shape,
+        modifier = Modifier.widthIn(max = 1000.dp).fillMaxWidth(.94f), shape = shape,
+        backgroundColor = Color(0xFF101B2B), contentColor = Color(0xFFE7EEF8),
         properties = DialogProperties(usePlatformDefaultWidth = false),
         title = {
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text("TUNE YOUR CAPTURE", color = accent, fontSize = 10.sp, letterSpacing = 1.5.sp,
-                    fontWeight = FontWeight.Bold)
-                Text("Capture settings", Modifier.testTag("stream-capture-settings-title"), fontWeight = FontWeight.Bold)
-                Text("Tap a number to type, or tap and drag its slider.", color = muted, fontSize = 12.sp)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("TUNE YOUR CAPTURE", color = accent, fontSize = 10.sp, letterSpacing = 1.5.sp,
+                        fontWeight = FontWeight.Bold)
+                    Text("Capture settings", Modifier.testTag("stream-capture-settings-title"), fontWeight = FontWeight.Bold)
+                }
+                Text("Tap to type · Drag to adjust", color = muted, fontSize = 12.sp)
             }
         },
         text = {
-            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.heightIn(max = 460.dp).testTag("capture-settings-body").verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Surface(color = accent.copy(alpha = .07f), shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(1.dp, accent.copy(alpha = .25f))) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("Forgiving by default", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
@@ -79,7 +82,7 @@ internal fun CalibrationStreamSettingsDialog(settings: CalibrationStreamSettings
                         TextButton({ use(CalibrationStreamSettings()) }) { Text("Defaults", fontSize = 12.sp) }
                     }
                 }
-                CaptureSettingsSection("01", "Settle & collect", "Keep a steady pace; each pair updates only its actual cell.") {
+                CaptureSettingsSection("01", "Settle & collect", accent) {
                     StreamSettingFields(listOf(
                         StreamSettingField("settle", "Settle time (seconds)", settle, { settle = it },
                             "Wait after a change", 0.0, 15.0, 1.0),
@@ -88,11 +91,11 @@ internal fun CalibrationStreamSettingsDialog(settings: CalibrationStreamSettings
                         StreamSettingField("resistance", "Resistance window (± % cell)", resistance, { resistance = it },
                             "Percent of one resistance column", 1.0, 100.0, 1.0)))
                 }
-                CaptureSettingsSection("02", "Outlier protection", "Reject isolated spikes while letting a consistent new level settle in.") {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Reject isolated outliers", Modifier.weight(1f), fontSize = 13.sp)
-                        Switch(rejection, { rejection = it }, Modifier.semantics { contentDescription = "Reject isolated outliers" })
-                    }
+                CaptureSettingsSection("02", "Outlier protection", Color(0xFF79B9FF), trailing = {
+                    Text("Reject isolated outliers", fontSize = 11.sp)
+                    Switch(rejection, { rejection = it }, Modifier.semantics { contentDescription = "Reject isolated outliers" },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF79B9FF)))
+                }) {
                     StreamSettingFields(listOf(
                         StreamSettingField("tolerance", "Outlier tolerance (percentage points)", tolerance, { tolerance = it },
                             outlierWattExample(tolerance), 1.0, 30.0, .5, rejection),
@@ -101,31 +104,30 @@ internal fun CalibrationStreamSettingsDialog(settings: CalibrationStreamSettings
                         StreamSettingField("confirmation", "New level confirmation (readings)", confirmation, { confirmation = it },
                             "Consistent shifted readings", 2.0, 10.0, 1.0, rejection)))
                 }
-                Text("Factory cadence normalization affects calibration calculations only. Displayed pedal watts and saved originals stay raw.",
-                    fontSize = 11.sp, color = muted)
-                Text("Saving restarts settling and keeps accepted data. Freshness, valid-power and duplicate-packet checks always remain on.",
+                Text("Calculations use cell RPM; displayed watts stay raw. Saving restarts settling and keeps accepted data.",
                     fontSize = 11.sp, color = muted)
             }
         },
-        confirmButton = { Button({ parsed?.let { onSave(it); onClose() } }, enabled = parsed != null) { Text("Save settings") } },
+        confirmButton = { Button({ parsed?.let { onSave(it); onClose() } }, enabled = parsed != null,
+            colors = ButtonDefaults.buttonColors(backgroundColor = accent, contentColor = Color(0xFF101B2B))) { Text("Save settings") } },
         dismissButton = { TextButton(onClose) { Text("Cancel") } })
 }
 
 @Composable
-private fun CaptureSettingsSection(number: String, title: String, hint: String, content: @Composable () -> Unit) {
-    val accent = MaterialTheme.colors.secondary
-    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colors.onSurface.copy(alpha = .025f),
-        border = BorderStroke(1.dp, MaterialTheme.colors.onSurface.copy(alpha = .12f))) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+private fun CaptureSettingsSection(number: String, title: String, accent: Color,
+    trailing: @Composable RowScope.() -> Unit = {}, content: @Composable () -> Unit) {
+    Surface(shape = RoundedCornerShape(12.dp), color = accent.copy(alpha = .075f),
+        border = BorderStroke(1.dp, accent.copy(alpha = .4f))) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Surface(shape = RoundedCornerShape(6.dp), color = accent.copy(alpha = .12f)) {
                     Text(number, Modifier.padding(horizontal = 7.dp, vertical = 4.dp), color = accent,
                         fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
-                Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(title, Modifier.weight(1f), color = accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                trailing()
             }
-            Text(hint, fontSize = 11.sp, color = MaterialTheme.colors.onSurface.copy(alpha = .7f))
-            content()
+            CompositionLocalProvider(LocalContentColor provides accent) { content() }
         }
     }
 }
@@ -164,7 +166,8 @@ private fun StreamSettingInput(field: StreamSettingField, modifier: Modifier) {
                 field.change(captureSettingNumber(snapped))
             },
             enabled = field.enabled, valueRange = field.minimum.toFloat()..field.maximum.toFloat(),
-            colors = SliderDefaults.colors(activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent),
+            colors = SliderDefaults.colors(thumbColor = LocalContentColor.current, activeTrackColor = LocalContentColor.current,
+                activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent),
             steps = ((field.maximum - field.minimum) / field.step).roundToInt() - 1,
             modifier = Modifier.fillMaxWidth().testTag("capture-slider-${field.key}")
                 .semantics { contentDescription = "Adjust ${field.label}" })
