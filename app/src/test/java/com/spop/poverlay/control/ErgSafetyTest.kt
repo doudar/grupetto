@@ -105,6 +105,52 @@ class ErgSafetyTest {
         assertEquals(expected.toDouble(), resistance.toDouble(), 1.0)
     }
 
+    @Test fun dropAfterA102RpmEffortStillUsesHeldCadence() {
+        // Nov 3: 362 W spun at 102 rpm, recovery settles to 88. With an 8 rpm allowance the drop was
+        // floored at 94 rpm, a level light (dip to ~150 W); 15 rpm lets the held 88 rpm through.
+        ride(20_000, 88f)
+        assertTrue(control.localErg(165)); ride(40_000, 88f)
+        assertTrue(control.localErg(362)); ride(30_000, 102f)
+        assertTrue(control.localErg(165)); ride(1_000, 102f)
+        val jump = lines.last { "target from=362 to=165" in it }
+        assertTrue(jump, "cadSrc=held" in jump)
+        val expected = control.powerModel.nearestLevelFor(165f, 88f)!!
+        ride(4_000, 88f)
+        assertEquals(expected.toDouble(), resistance.toDouble(), 1.0)
+    }
+
+    @Test fun staleSlowMemoryDropIsBoundedByTheFloor() {
+        // The trade-off of the 15 rpm allowance: a 60 rpm warm-up memory, a 95 rpm effort, then the drop is
+        // sized at the floor (95 - 15 = 80 rpm), never heavier, and never above the current level.
+        resistance = 40
+        ride(20_000, 60f)
+        assertTrue(control.localErg(150)); ride(40_000, 60f)
+        assertTrue(control.localErg(300)); ride(30_000, 95f)
+        val before = resistance
+        assertTrue(control.localErg(150)); ride(1_000, 95f)
+        val jump = lines.last { "target from=300 to=150" in it }
+        assertTrue(jump, "cadSrc=floor" in jump)
+        val jumped = Regex("jump to=(\\d+)").find(jump)!!.groupValues[1].toInt()
+        val atFloor = control.powerModel.nearestLevelFor(150f, Regex("cadUsed=([0-9.]+)").find(jump)!!.groupValues[1].toFloat())!!
+        assertEquals(atFloor, jumped)
+        assertTrue(jumped < before)
+    }
+
+    @Test fun sparseSamplesDoNotPassAClimbAsSteady() {
+        // Independent review: with ~1.1 s between samples a 3 s window may span only 2 s; a 1.8 rpm/s climb
+        // (3.6 rpm over 2 s, 5.4 rpm over 3 s) must not end the spin-up wait.
+        ride(2_000, 0f)
+        assertTrue(control.localErg(165))
+        var t = 0
+        while (t < 12_100) {
+            now += 100; t += 100
+            val c = 50f + 1.8f * t / 1000f
+            if (t % 1100 == 0) control.acceptSample(BikeSample(watts(c), c, resistance, now))
+            control.tick()
+        }
+        assertNull(lines.firstOrNull { "spin-up steady" in it })
+    }
+
     @Test fun cancelledRampDoesNotResumeAsAFastJump() {
         resistance = 44
         ride(20_000, 90f)

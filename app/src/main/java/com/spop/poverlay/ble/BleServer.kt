@@ -110,7 +110,13 @@ class BleServer(
     private var gattServer: BluetoothGattServer? = null
     private var advertiser: BluetoothLeAdvertiser? = null
     private val registeredServices = mutableListOf<BaseBleService>()
-    private var dirConServer: DirConServer? = null
+    // Keep one transport owner across BLE-only/DirCon-only transitions. Notifications and
+    // accepted clients must always refer to the same server, including after a failed bind.
+    private val dirConDelegate: Lazy<DirConServer> = lazy {
+        DirConServer(context, dirConBridge, { serialNumber() })
+    }
+    private val dirConServer: DirConServer by dirConDelegate
+    val dirConStatus get() = dirConServer.status
     private var dirConTransportEnabled = true
     private var isDirConOnlyStarted = false
     private val servicesToRegister = LinkedList<BaseBleService>()
@@ -258,7 +264,7 @@ class BleServer(
             if (uuid != FitnessMachineConstants.ControlPointUUID) return writeCharacteristic(uuid, value)
             val service = advertisedServices().filterIsInstance<FitnessMachineService>().firstOrNull() ?: return false
             val response = service.handleControl(client, value)
-            dirConServer?.notifyCharacteristicChanged(uuid, response, client)
+            if (dirConDelegate.isInitialized()) dirConServer.notifyCharacteristicChanged(uuid, response, client)
             return true
         }
 
@@ -585,6 +591,7 @@ class BleServer(
         }
     }
 
+    @Synchronized
     fun setDirConTransportEnabled(enabled: Boolean) {
         dirConTransportEnabled = enabled
         if (enabled) {
@@ -600,6 +607,7 @@ class BleServer(
         }
     }
 
+    @Synchronized
     fun startDirConOnly() {
         if (!dirConTransportEnabled || isServerStarted || isDirConOnlyStarted) {
             return
@@ -614,6 +622,7 @@ class BleServer(
         Timber.i("DIRCON-only transport started")
     }
 
+    @Synchronized
     fun stopDirConOnly() {
         if (!isDirConOnlyStarted) {
             stopDirCon()
@@ -668,21 +677,18 @@ class BleServer(
         startDirCon()
     }
 
+    @Synchronized
     private fun startDirCon() {
-        if (!dirConTransportEnabled || dirConServer != null || registeredServices.isEmpty()) {
+        if (!dirConTransportEnabled || registeredServices.isEmpty()) {
             return
         }
 
-        dirConServer = DirConServer(
-            context = context,
-            bridge = dirConBridge,
-            serialNumberProvider = { serialNumber() }
-        ).also { it.start() }
+        dirConServer.start()
     }
 
+    @Synchronized
     private fun stopDirCon() {
-        dirConServer?.stop()
-        dirConServer = null
+        if (dirConDelegate.isInitialized()) dirConServer.stop()
     }
 
     @Synchronized
@@ -805,7 +811,8 @@ class BleServer(
     }
 
     fun notifyDirConCharacteristicChanged(characteristic: BluetoothGattCharacteristic) {
-        dirConServer?.notifyCharacteristicChanged(
+        if (!dirConDelegate.isInitialized()) return
+        dirConServer.notifyCharacteristicChanged(
             characteristic.uuid,
             characteristicValue(characteristic)
         )
@@ -1550,8 +1557,7 @@ class BleServer(
         val key = com.spop.poverlay.ConfigurationRepository.Preferences.SerialNumber.key
         var existing = prefs.getString(key, null)
         if (existing.isNullOrEmpty()) {
-            val value = kotlin.random.Random.nextInt(0x10000)
-            existing = value.toString(16).padStart(4, '0').uppercase()
+            existing = com.spop.poverlay.util.DeviceSerial.generate(context)
             prefs.edit { putString(key, existing) }
         }
         return existing
