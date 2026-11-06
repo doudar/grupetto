@@ -34,16 +34,24 @@ internal fun refitCalibrationTable(table: GrupettoCalibrationTable,
         .filterKeys { counts[it] > 0 }
     if (groups.isEmpty()) return null
     val gains = table.gains.toMutableList()
+    val thermalCells = table.thermalCells.toMutableSet()
+    val thermalAnchors = table.thermalAnchors.toMutableMap()
+    var fittedCells = 0
     var boundHits = 0
     groups.forEach { (cell, efforts) ->
-        val ordered = efforts.map { calibrationCalculationPair(it, cadenceReference, measured = true) }
+        val tagged = efforts.filter(CalibrationThermalCorrection::usable)
+        val thermal = cell in thermalCells || tagged.isNotEmpty()
+        val fitting = if (thermal) tagged else efforts
+        if (fitting.isEmpty()) return@forEach
+        fittedCells++
+        val ordered = fitting.map { calibrationCalculationPair(it, cadenceReference, measured = true, thermal = thermal) }
             .sortedBy { it.pedalWatts / it.nativeWatts }
-        val half = ordered.sumOf { it.nativeWatts } / 2
+        val half = ordered.sumOf { it.nativeWatts * it.thermalFactor } / 2
         var cumulative = 0.0
         var lower = ordered.last().pedalWatts / ordered.last().nativeWatts
         var upper = lower
         for ((index, effort) in ordered.withIndex()) {
-            cumulative += effort.nativeWatts
+            cumulative += effort.nativeWatts * effort.thermalFactor
             val atHalf = abs(cumulative - half) <= kotlin.math.max(1e-9, half * 1e-12)
             if (cumulative >= half || atHalf) {
                 lower = effort.pedalWatts / effort.nativeWatts
@@ -52,27 +60,36 @@ internal fun refitCalibrationTable(table: GrupettoCalibrationTable,
                 break
             }
         }
-        val old = exp(gains[cell])
-        val fitted = old.coerceIn(lower, upper).coerceIn(CalibrationCorrectionLimits.minimumMultiplier, CalibrationCorrectionLimits.maximumMultiplier)
+        val old = if (thermal && cell !in thermalCells) 1.0 else exp(gains[cell])
+        val range = if (thermal) CalibrationThermalCorrection.referenceRange else
+            CalibrationCorrectionLimits.minimumMultiplier..CalibrationCorrectionLimits.maximumMultiplier
+        val fitted = old.coerceIn(lower, upper).coerceIn(range)
         // Preserve exact stored bits for an unchanged optimum, including repeat previews.
-        if (old != fitted) gains[cell] = ln(fitted)
-        if (fitted == CalibrationCorrectionLimits.minimumMultiplier || fitted == CalibrationCorrectionLimits.maximumMultiplier) boundHits++
-        counts[cell] = maxOf(counts[cell], efforts.size.coerceAtMost(10))
+        if (exp(gains[cell]) != fitted) gains[cell] = ln(fitted)
+        if (fitted == range.start || fitted == range.endInclusive) boundHits++
+        if (thermal) {
+            thermalCells.add(cell)
+            thermalAnchors[cell] = CalibrationThermalCorrection.factor(fitting.maxBy { it.capturedAt }.temperature)!!
+        }
+        counts[cell] = maxOf(counts[cell], fitting.size.coerceAtMost(10))
     }
+    if (fittedCells == 0) return null
     val candidate = table.copy(gains = gains, cellSampleCounts = counts,
-        confidence = counts.map { it / 10.0 }, cells = counts.count { it > 0 }, activeComparison = null)
+        confidence = counts.map { it / 10.0 }, cells = counts.count { it > 0 }, activeComparison = null,
+        thermalCells = thermalCells, thermalAnchors = thermalAnchors)
         .withCalibrationCoverage(samples)
+    val evaluated = eligible.filter { table.canEvaluate(it) && candidate.canEvaluate(it) }
     fun metrics(surface: GrupettoCalibrationTable): CalibrationRefitMetrics {
-        val errors = eligible.map { surface.corrected(it.nativeWatts, it.ad, it.rpm) - it.measuredPedalWatts }
+        val errors = evaluated.map { surface.correctedSample(it) - it.measuredPedalWatts }
         return CalibrationRefitMetrics(errors.map { abs(it) }.average(), errors.average(),
             sqrt(errors.map { it * it }.average()), errors.size)
     }
     val before = metrics(table)
     val after = metrics(candidate)
-    val rawRmse = sqrt(eligible.map {
+    val rawRmse = sqrt(evaluated.map {
         val error = it.nativeWatts - it.measuredPedalWatts
         error * error
     }.average())
     return CalibrationRefitResult(candidate.copy(beforeRmse = rawRmse, afterRmse = after.rmse),
-        before, after, boundHits, groups.size)
+        before, after, boundHits, fittedCells)
 }

@@ -112,7 +112,7 @@ internal fun CalibrationStreamSettingsDialog(settings: CalibrationStreamSettings
                         StreamSettingField("confirmation", "New level confirmation (readings)", confirmation, { confirmation = it },
                             "Consistent shifted readings", 2.0, 10.0, 1.0, rejection)))
                 }
-                Text("Calculations use cell RPM; displayed watts stay raw. Saving restarts settling and keeps accepted data.",
+                Text("Calculations use cell RPM and a fixed 65°F thermal reference. Pedal watts stay raw; saved data is kept.",
                     fontSize = 11.sp, color = muted)
             }
         },

@@ -43,11 +43,11 @@ class CalibrationStreamUiTest {
             assertEquals(original.table!!.gains, migrated.draft.table!!.gains)
             assertEquals(0, migrated.draft.table.streamSeconds)
             assertEquals(1, migrated.draft.table.legacyEffortCount)
-            assertEquals(4, JSONObject(file.readText()).getJSONObject("draft").getInt("schema"))
-            val recovery = directory.listFiles()!!.single { it.name.contains("before-stream-v4") }
+            assertEquals(5, JSONObject(file.readText()).getJSONObject("draft").getInt("schema"))
+            val recovery = directory.listFiles()!!.single { it.name.contains("before-thermal-v5") }
             assertArrayEquals(bytes, recovery.readBytes())
             CalibrationBackupStore(directory).load()
-            assertEquals(1, directory.listFiles()!!.count { it.name.contains("before-stream-v4") })
+            assertEquals(1, directory.listFiles()!!.count { it.name.contains("before-thermal-v5") })
         } finally { directory.deleteRecursively() }
     }
 
@@ -86,8 +86,8 @@ class CalibrationStreamUiTest {
             val next = capture.copy(samples = capture.samples + point)
             store.save(next, CalibrationFit(baseline, emptyList()))
             assertEquals(next, CalibrationStore(directory).load())
-            assertArrayEquals(bytes, directory.listFiles()!!.single { it.name.contains("before-stream-v4") }.readBytes())
-            assertEquals(2, JSONObject(file.readText()).getInt("schema"))
+            assertArrayEquals(bytes, directory.listFiles()!!.single { it.name.contains("before-thermal-v5") }.readBytes())
+            assertEquals(3, JSONObject(file.readText()).getInt("schema"))
         } finally { directory.deleteRecursively() }
     }
 

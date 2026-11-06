@@ -20,6 +20,8 @@ class FlywheelTemperatureTracker(context: Context,
             ThermalCheckpoint(j.getInt("version"), j.getDouble("celsius"), j.getDouble("roomFahrenheit"), j.getLong("wallMillis"))
         }.getOrNull())
     private val mutableState = MutableStateFlow(model.state)
+    private val recent = ArrayDeque<CalibrationTemperature>()
+    private var lastOutputTemperature: CalibrationTemperature? = null
     val state = mutableState.asStateFlow()
 
     init {
@@ -37,6 +39,23 @@ class FlywheelTemperatureTracker(context: Context,
 
     fun observe(frame: CalibrationFrame) = synchronized(lock) {
         model.observe(frame.timestamp, if (frame.powerSource == 1) frame.nativeWatts else Double.NaN)
+        if (model.latestObservationAt == frame.timestamp && model.state.receivingPower && frame.powerSource == 1 && frame.nativeWatts.isFinite() &&
+            (recent.lastOrNull()?.let { frame.timestamp - it.estimatedAt >= 250 } != false)) {
+            recent.addLast(CalibrationTemperature(model.state.celsius, model.state.roomFahrenheit,
+                frame.timestamp, historyUnobserved = model.state.unobservedHistory, confidence = model.state.confidence))
+            while (recent.size > 24) recent.removeFirst()
+        }
+    }
+
+    /** Never label a past sample with a future estimate. Bounded history spans delayed capture polls. */
+    fun temperatureAt(nativeAt: Long): CalibrationTemperature? = synchronized(lock) {
+        recent.lastOrNull { nativeAt - it.estimatedAt in 0..1500 }
+    }
+
+    /** Output may hold the last applied estimate during a gap; recordings must never retimestamp it. */
+    fun outputTemperatureAt(nativeAt: Long): CalibrationTemperature? = synchronized(lock) {
+        temperatureAt(nativeAt)?.let { lastOutputTemperature = it }
+        lastOutputTemperature
     }
 
     fun setRoomTemperature(fahrenheit: Double) = synchronized(lock) {

@@ -5,7 +5,8 @@ package com.spop.poverlay.calibration
  */
 internal fun samplesForCalibrationTable(samples: List<CalibrationSample>, table: GrupettoCalibrationTable): List<CalibrationSample> =
     samples.map { sample ->
-        val target = table.corrected(sample.nativeWatts, sample.ad, sample.rpm)
+        if (!table.canEvaluate(sample)) return@map sample
+        val target = table.correctedSample(sample)
         if (target == sample.pedalWatts) sample else sample.copy(
             pedalWatts = target, recordedPedalWatts = sample.measuredPedalWatts)
     }
@@ -25,17 +26,17 @@ internal fun updateUnifiedCalibration(capture: CalibrationCapture, previous: Gru
 internal fun applyUnifiedManualEdit(profile: GrupettoCalibrationProfile, edited: GrupettoCalibrationTable,
     now: Long): GrupettoCalibrationProfile {
     require(profile.capture.baseline == edited.baseline && edited.gains.size == 496 &&
-        edited.gains.all { it.isFinite() && it in CalibrationCorrectionLimits.logRange })
+        edited.gains.indices.all { edited.gains[it].isFinite() && edited.gains[it] in edited.gainRange(it) })
     val capture = profile.capture.copy(samples = samplesForCalibrationTable(profile.capture.samples, edited))
     val through = maxOf(now, edited.recordedThrough, profile.table?.recordedThrough ?: Long.MIN_VALUE,
         capture.samples.maxOfOrNull { it.capturedAt } ?: Long.MIN_VALUE)
-    val errors = eligibleCalibrationErrorSamples(capture.baseline, capture.samples)
+    val errors = eligibleCalibrationErrorSamples(capture.baseline, capture.samples).filter(edited::canEvaluate)
     val rawRmse = errors.takeIf { it.isNotEmpty() }?.let { values -> kotlin.math.sqrt(values.map {
         val error = it.nativeWatts - it.measuredPedalWatts
         error * error
     }.average()) } ?: edited.beforeRmse
     val correctedRmse = errors.takeIf { it.isNotEmpty() }?.let { values -> kotlin.math.sqrt(values.map {
-        val error = edited.corrected(it.nativeWatts, it.ad, it.rpm) - it.measuredPedalWatts
+        val error = edited.correctedSample(it) - it.measuredPedalWatts
         error * error
     }.average()) } ?: edited.afterRmse
     val table = edited.copy(ready = true, sampleCount = capture.samples.size, recordedThrough = through,

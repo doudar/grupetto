@@ -72,8 +72,8 @@ class CalibrationPersistenceMigrationTest {
         val updated = samplesForCalibrationTable(samples, edited)
         val unified = original.copy(capture = original.capture.copy(samples = updated), table = edited)
         val encoded = GrupettoCalibrationStore.encode(unified)
-        assertEquals(4, encoded.getInt("schema"))
-        assertEquals("stable_cell_stream_v4", encoded.getString("model"))
+        assertEquals(5, encoded.getInt("schema"))
+        assertEquals("thermal_cell_stream_v5", encoded.getString("model"))
         assertFalse(encoded.getJSONObject("table").has("manualOffsets"))
         assertEquals(edited.recordedThrough, encoded.getJSONObject("table").getLong("recordedThrough"))
         val restored = GrupettoCalibrationStore.decode(JSONObject(encoded.toString()))
@@ -150,9 +150,9 @@ class CalibrationPersistenceMigrationTest {
             assertEquals(original.capture, restored.draft!!.capture)
             assertEquals(original.table!!.gains, restored.saved!!.table!!.gains)
             val encoded = JSONObject(restored.encode())
-            assertEquals(2, encoded.getInt("schema"))
-            assertEquals(4, encoded.getJSONObject("draft").getInt("schema"))
-            assertEquals(4, encoded.getJSONObject("saved").getInt("schema"))
+            assertEquals(3, encoded.getInt("schema"))
+            assertEquals(5, encoded.getJSONObject("draft").getInt("schema"))
+            assertEquals(5, encoded.getJSONObject("saved").getInt("schema"))
             assertFalse(encoded.getJSONObject("saved").getJSONObject("table").has("manualOffsets"))
             assertEquals(restored, CalibrationBackup.decode(encoded.toString()))
         }
@@ -234,7 +234,7 @@ class CalibrationPersistenceMigrationTest {
         assertEquals(List(496) { 1 }, table.cellSampleCounts)
         assertEquals(496, table.cells)
         assertEquals(496, table.correctionPercent.count { it != null })
-        assertEquals(4, JSONObject(File(directory, "grupetto-calibration.json").readText())
+        assertEquals(5, JSONObject(File(directory, "grupetto-calibration.json").readText())
             .getJSONObject("draft").getInt("schema"))
         assertEquals(migrated, CalibrationBackupStore(directory).load())
         val fresh = CalibrationSample(2000.0, 80.0, 200.0, 180.0, table.recordedThrough + 1)
@@ -310,7 +310,7 @@ class CalibrationPersistenceMigrationTest {
             assertEquals(legacyCorrected(migrated.saved.table!!, sample), sample.pedalWatts, 0.0)
         }
         val upgraded = JSONObject(File(directory, "grupetto-calibration.json").readText())
-        assertEquals(2, upgraded.getInt("schema"))
+        assertEquals(3, upgraded.getInt("schema"))
         assertFalse(upgraded.getJSONObject("saved").getJSONObject("table").has("manualOffsets"))
         assertEquals(migrated, CalibrationBackupStore(directory).load())
     }
@@ -335,7 +335,7 @@ class CalibrationPersistenceMigrationTest {
         assertEquals(1, migrated.draft!!.capture.samples.size)
         assertEquals(draftText, File(directory, "grupetto-power-draft.json").readText())
         assertEquals(savedText, File(directory, "grupetto-power-active.json").readText())
-        assertEquals(2, JSONObject(File(directory, "grupetto-calibration.json").readText()).getInt("schema"))
+        assertEquals(3, JSONObject(File(directory, "grupetto-calibration.json").readText()).getInt("schema"))
         assertEquals(migrated, CalibrationBackupStore(directory).load())
     }
 
@@ -381,7 +381,7 @@ class CalibrationPersistenceMigrationTest {
         val loaded = store.load()
         assertFalse(store.resetOnLoad)
         assertEquals(original.table!!.gains, loaded.saved!!.table!!.gains)
-        assertEquals(2, JSONObject(stored.readText()).getInt("schema"))
+        assertEquals(3, JSONObject(stored.readText()).getInt("schema"))
         assertEquals(loaded, store.load())
         assertEquals("unrelated bike capture", unrelated.readText())
         assertFalse(directory.listFiles()!!.any { ".unusable-" in it.name })
@@ -398,7 +398,7 @@ class CalibrationPersistenceMigrationTest {
         assertFalse(store.resetOnLoad)
         assertEquals(original.capture, loaded.draft!!.capture)
         assertEquals(original.table!!.gains, loaded.saved!!.table!!.gains)
-        assertEquals(2, JSONObject(File(directory, "grupetto-calibration.json").readText()).getInt("schema"))
+        assertEquals(3, JSONObject(File(directory, "grupetto-calibration.json").readText()).getInt("schema"))
         assertEquals(oldDraft, draft.readText())
         assertEquals(oldSaved, saved.readText())
         assertEquals(loaded, store.load())
@@ -418,7 +418,7 @@ class CalibrationPersistenceMigrationTest {
                 val store = CalibrationBackupStore(directory)
                 assertFalse(store.load().hasData)
                 assertTrue(store.resetOnLoad)
-                assertEquals(2, JSONObject(combined.readText()).getInt("schema"))
+                assertEquals(3, JSONObject(combined.readText()).getInt("schema"))
                 assertFalse(CalibrationBackup.decode(combined.readText()).hasData)
                 originals.forEach { (name, contents) ->
                     val copies = directory.listFiles()!!.filter { it.name.startsWith("$name.unusable-") }

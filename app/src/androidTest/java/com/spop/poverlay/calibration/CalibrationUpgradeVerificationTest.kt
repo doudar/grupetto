@@ -53,8 +53,8 @@ class CalibrationUpgradeVerificationTest {
                 json.getInt("schema"))
             listOf("draft", "saved").forEach { key ->
                 val profile = json.getJSONObject(key)
-                assertEquals(4, profile.getInt("schema"))
-                assertEquals("stable_cell_stream_v4", profile.getString("model"))
+                assertEquals(5, profile.getInt("schema"))
+                assertEquals("thermal_cell_stream_v5", profile.getString("model"))
                 assertFalse(profile.getJSONObject("table").has("manualOffsets"))
             }
         }

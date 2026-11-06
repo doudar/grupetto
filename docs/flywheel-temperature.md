@@ -4,7 +4,9 @@ The calibration page shows an **estimated effective flywheel temperature**, not 
 Capture settings includes room temperature in Fahrenheit (default 65°F; accepted range 32–110°F).
 Changing room temperature preserves the absolute flywheel estimate and changes subsequent cooling.
 Capture presets do not change room temperature. Cancel discards unsaved room edits.
-No temperature value feeds calibration fitting, displayed/broadcast power, ERG or resistance control.
+New temperature-tagged calibration cells now use the experimental normalization described in
+[thermal calibration](thermal-calibration.md). Old unknown-temperature cells retain their prior behavior.
+The heat estimator itself continues to use only raw native power, never its corrected output.
 
 ## Provisional model
 
@@ -21,7 +23,7 @@ This remains stable for long gaps and avoids small-step cancellation. At 200 W, 
 about 102.6°F after 30 minutes and approaches 110°F; this is an illustration, **not a fit or a limit**.
 At 400 W it can exceed 110°F. The observed 65→100–110°F ride cannot identify both parameters without
 time, power history and fan conditions. Collect time-aligned temperature readings during warming and
-cooling to fit them before considering any compensation. Shiny-metal infrared readings need care
+cooling to fit them before relying on the experimental compensation. Shiny-metal infrared readings need care
 with emissivity and reflected temperature; use a consistent, independently checked measurement method.
 
 Peloton's [20250367501 patent application](https://patents.justia.com/patent/20250367501) discusses
@@ -48,7 +50,8 @@ death may lose up to 30 seconds. Restore applies zero-input cooling over wall-cl
 never replays last watts, and marks history unobserved. Riding while the app is closed is missed.
 Backwards clock changes apply no elapsed cooling; forward clock changes may overcool the estimate.
 Invalid/unknown-version state starts at 65°F. No existing calibration/settings files are migrated,
-reset or rewritten, and calibration exports remain unchanged (thermal state is a separate estimate).
+reset by the estimator. The separate thermal-calibration format migration now adds immutable sample
+temperatures and reference-gain metadata to calibration exports, with recovery copies of older files.
 
 ## Validation
 

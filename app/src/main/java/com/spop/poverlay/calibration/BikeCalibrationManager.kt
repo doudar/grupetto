@@ -194,7 +194,8 @@ class BikeCalibrationManager(
                             continue
                         }
                         if (stream != null) {
-                            val accepted = stream.add(frame, pedal.watts, pedal.timestamp, pedal.address, now, System.currentTimeMillis())
+                            val accepted = stream.add(frame, pedal.watts, pedal.timestamp, pedal.address, now, System.currentTimeMillis(),
+                                grupettoCalibration?.flywheelTemperature?.temperatureAt(frame.timestamp))
                             if (accepted.isNotEmpty()) {
                                 // Once admitted, finish staging this batch even if Pause arrives
                                 // during background retention; finally then flushes every accepted pair.

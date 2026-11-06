@@ -22,12 +22,12 @@ internal class CalibrationStore(directory: File) {
         }
         val json = JSONObject(input.use(::boundedCalibrationText))
         val schema = json.getInt("schema")
-        check(schema in 1..2)
+        check(schema in 1..3)
         val baseline = json.getJSONArray("baseline").let { a -> List(a.length()) { a.getInt(it) } }
         check(validCalibrationTable(baseline))
         val samples = json.getJSONArray("samples").let { a ->
             check(a.length() <= MaxCalibrationSamples)
-            List(a.length()) { i -> decodeStoredCalibrationSample(a, i, schema >= 2) }
+            List(a.length()) { i -> decodeStoredCalibrationSample(a, i, schema >= 2, schema >= 3) }
         }
         validateObservationRetention(baseline, samples)
         check(samples.all { it.ad.isFinite() && it.ad >= baseline.first() && it.ad <= baseline.last() &&
@@ -40,10 +40,10 @@ internal class CalibrationStore(directory: File) {
     fun save(capture: CalibrationCapture, fit: CalibrationFit) {
         if (!migrationChecked && file.baseFile.exists()) {
             val old = JSONObject(file.baseFile.inputStream().use(::boundedCalibrationText))
-            if (old.optInt("schema") == 1) preserveCalibrationMigrationSource(file.baseFile)
+            if (old.optInt("schema") < 3) preserveCalibrationMigrationSource(file.baseFile)
         }
         migrationChecked = true
-        val json = JSONObject().put("schema", 2).put("destination", "sensor_board_candidate_only")
+        val json = JSONObject().put("schema", 3).put("destination", "sensor_board_candidate_only")
             .put("boardWriteSupported", false).put("applied", false)
             .put("frameSerial", capture.frameSerial).put("meterAddress", capture.meterAddress)
             .put("serviceVersion", capture.serviceVersion).put("baseline", JSONArray(capture.baseline))
@@ -53,7 +53,7 @@ internal class CalibrationStore(directory: File) {
             .put("beforeRmse", fit.beforeRmse ?: JSONObject.NULL).put("afterRmse", fit.afterRmse ?: JSONObject.NULL)
             .put("samples", JSONArray().also { a -> capture.samples.forEach { a.put(encodeStoredCalibrationSample(it)) } })
         val stream = file.startWrite()
-        try { stream.write(json.toString(2).toByteArray(Charsets.UTF_8)); file.finishWrite(stream) }
+        try { stream.write(json.toString().toByteArray(Charsets.UTF_8)); file.finishWrite(stream) }
         catch (e: Exception) { file.failWrite(stream); throw e }
     }
     fun clear() = file.delete()
