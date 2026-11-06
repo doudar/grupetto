@@ -138,7 +138,9 @@ class BikeControlTest {
         sample(100f, 80f)
         // No accumulated windup: restarting after a stop adds nothing while the rider spins up.
         assertTrue("held during spin-up, got $writes", writes.isEmpty())
-        repeat(80) { sample(100f, 80f) }
+        // Steady 80 rpm ends the spin-up wait after SPIN_UP_MIN_MS; 8 s covers the wait and the ramp
+        // but not the settle hold, after which ordinary feedback may trim past the cap toward 1000 W.
+        repeat(40) { sample(100f, 80f) }
         // Then one ramp to the modeled level, capped at FEED_FORWARD_MAX_LEVEL, at the ramp speed.
         assertTrue(writes.isNotEmpty() && writes.all { it <= BikeControl.FEED_FORWARD_MAX_LEVEL })
         assertTrue(writes.zipWithNext().all { (a, b) -> b - a in 0..2 })
@@ -482,19 +484,40 @@ class BikeControlTest {
     }
     @Test fun moreResistanceWaitsUntilSpinUpIsOver() {
         // Oct 31: ERG 165 W arrived 5 s after the rider started pedaling; a jump sized for the
-        // 55 rpm average put out ~285 W at 75 rpm. Now the level holds while the rider spins up,
-        // then jumps once, sized for the cadence they actually settled at.
+        // 55 rpm average put out ~285 W at 75 rpm. Now the level holds while cadence is still
+        // rising, then jumps once, sized for the cadence they actually settled at.
         resistance = 30
         repeat(10) { sample(0f, 0f) }
-        repeat(20) { sample(40f, 60f) }   // 4 s of pedaling
+        repeat(20) { k -> sample(40f, 45f + k * .5f) }   // 4 s of pedaling, rising 2.5 rpm/s
         assertTrue(control.localErg(165))
-        repeat(50) { sample(70f, 80f) }   // to 14 s: still spinning up
+        repeat(25) { k -> sample(60f, 55f + k * .5f) }   // to 9 s: still rising (to ~67 rpm)
         assertTrue("held while spinning up, got $writes", writes.isEmpty())
-        repeat(20) { sample(70f, 80f) }   // past 15 s, ramp done
-        // One jump, to about the level 165 W needs at the 80 rpm the rider settled at.
+        repeat(25) { sample(70f, 80f) }                  // settles at 80 rpm: steady after 3 s
+        // One jump well before the 15 s cap, to about the level 165 W needs at 80 rpm.
         val expected = control.powerModel.nearestLevelFor(165f, 80f)!!
         assertTrue("expected about $expected, got $resistance", resistance in expected - 1..expected + 1)
         assertTrue(writes.zipWithNext().all { (x, y) -> y - x in 1..2 })
+    }
+    @Test fun steadyCadenceEndsTheSpinUpWaitEarly() {
+        // Nov 2: steady 92 rpm 3 s after starting; the fixed 15 s wait held 165 W back another 9 s.
+        resistance = 20
+        repeat(10) { sample(0f, 0f) }
+        assertTrue(control.localErg(165))
+        repeat(15) { sample(30f, 92f) }                  // 3 s: below SPIN_UP_MIN_MS, still waiting
+        assertTrue("held before the minimum, got $writes", writes.isEmpty())
+        repeat(25) { sample(35f, 92f) }                  // to 8 s: steady, so the wait is over
+        val expected = control.powerModel.nearestLevelFor(165f, 92f)!!
+        assertTrue("expected about $expected by 8 s, got $resistance", resistance in expected - 1..expected + 1)
+    }
+    @Test fun wobblingCadenceKeepsTheFullSpinUpWait() {
+        // Cadence that never holds within SPIN_UP_STEADY_RPM keeps the 15 s bound.
+        resistance = 20
+        repeat(10) { sample(0f, 0f) }
+        assertTrue(control.localErg(165))
+        repeat(70) { k -> sample(35f, if (k % 10 < 5) 84f else 92f) }   // 14 s, 8 rpm swings
+        assertTrue("held for the full window, got $writes", writes.isEmpty())
+        repeat(15) { sample(35f, 88f) }
+        assertTrue("jumps after 15 s, got $writes", writes.isNotEmpty())
     }
     @Test fun jumpsNormallyAfterSpinUp() {
         resistance = 30
