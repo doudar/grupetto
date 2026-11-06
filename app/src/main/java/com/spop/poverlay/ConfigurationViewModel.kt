@@ -127,6 +127,7 @@ class ConfigurationViewModel(
 
 
     private val bleServer = (application as GrupettoApplication).bleServer
+    val dirConStatus get() = bleServer.dirConStatus
     private val antPlusServer = (application as GrupettoApplication).antPlusServer
     private val bikeControl = (application as GrupettoApplication).sensorInterface.bikeControl
     private val powerMeters = (application as GrupettoApplication).powerMeterManager
