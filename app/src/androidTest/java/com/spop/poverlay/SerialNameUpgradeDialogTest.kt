@@ -26,4 +26,16 @@ class SerialNameUpgradeDialogTest {
         compose.onNodeWithText("OK").performClick()
         compose.onNodeWithText("Check your Grupetto connection").assertDoesNotExist()
     }
+
+    @Test fun backDismissesNotice() {
+        val visible = mutableStateOf(true)
+        compose.setContent {
+            PTONOverlayTheme {
+                if (visible.value) SerialNameUpgradeDialog { visible.value = false }
+            }
+        }
+        compose.onNodeWithText("Check your Grupetto connection").assertIsDisplayed()
+        androidx.test.espresso.Espresso.pressBack()
+        compose.onNodeWithText("Check your Grupetto connection").assertDoesNotExist()
+    }
 }
