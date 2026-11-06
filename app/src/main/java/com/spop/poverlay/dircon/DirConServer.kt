@@ -8,13 +8,18 @@ import java.net.SocketException
 import java.util.Collections
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import timber.log.Timber
+
+enum class DirConStatus { Stopped, Starting, Listening, Failed }
 
 class DirConServer(
     context: Context,
@@ -28,48 +33,94 @@ class DirConServer(
     private val clients = Collections.synchronizedSet(mutableSetOf<ClientSession>())
     private var serverSocket: ServerSocket? = null
     private var acceptJob: Job? = null
+    private val lifecycleLock = Any()
+    private var generation = 0L
+    private var requested = false
+    private val mutableStatus = MutableStateFlow(DirConStatus.Stopped)
+    val status = mutableStatus.asStateFlow()
 
     fun start() {
-        if (acceptJob != null) return
-
+        // Read bridge state before taking the lifecycle lock: the bridge may hold BleServer's monitor.
         val serviceUuids = bridge.services()
             .map { it.uuid.toShortUuidString() }
             .toDirConMdnsServiceUuidList()
-        mdnsAdvertiser.start(port, serviceUuids, serialNumberProvider())
+        val serial = serialNumberProvider()
+        val job = synchronized(lifecycleLock) {
+            if (requested) return
+            requested = true
+            val token = ++generation
+            mutableStatus.value = DirConStatus.Starting
+            launch(start = CoroutineStart.LAZY) { listen(token, serviceUuids, serial) }
+                .also { acceptJob = it }
+        }
+        job.start()
+    }
 
-        acceptJob = launch {
-            runCatching {
-                ServerSocket(port).use { socket ->
-                    serverSocket = socket
-                    Timber.i("DIRCON TCP server listening on port $port")
-                    while (isActive) {
-                        val client = socket.accept()
-                        ClientSession(client).also { session ->
-                            clients.add(session)
-                            launch { session.run() }
-                        }
-                    }
-                }
-            }.onFailure { error ->
-                if (error !is SocketException || isActive) {
-                    Timber.e(error, "DIRCON TCP server stopped unexpectedly")
+    private suspend fun listen(token: Long, serviceUuids: List<String>, serial: String) = coroutineScope {
+        var ownedSocket: ServerSocket? = null
+        try {
+            // Binding happens on IO. Stop and a newer generation cannot overtake publication/close.
+            val socket = synchronized(lifecycleLock) {
+                if (!requested || generation != token || !isActive) return@coroutineScope
+                ServerSocket(port).also {
+                    ownedSocket = it
+                    serverSocket = it
+                    mdnsAdvertiser.start(it.localPort, serviceUuids, serial)
+                    mutableStatus.value = DirConStatus.Listening
                 }
             }
+            Timber.i("DIRCON TCP server listening on port ${socket.localPort}")
+            while (isActive) {
+                val client = socket.accept()
+                val session = ClientSession(client)
+                val accepted = synchronized(lifecycleLock) {
+                    if (!requested || generation != token || !isActive) false
+                    else { clients.add(session); true }
+                }
+                if (accepted) launch { session.run() } else session.close()
+            }
+        } catch (error: Exception) {
+            val failed = synchronized(lifecycleLock) {
+                (requested && generation == token).also { if (it) mutableStatus.value = DirConStatus.Failed }
+            }
+            if (failed) {
+                Timber.e(error, "DIRCON TCP server stopped unexpectedly")
+            }
+        } finally {
+            val abandoned = synchronized(lifecycleLock) {
+                runCatching { ownedSocket?.close() }
+                if (generation == token) {
+                    requested = false
+                    acceptJob = null
+                    serverSocket = null
+                    mdnsAdvertiser.stop()
+                    if (mutableStatus.value != DirConStatus.Failed) mutableStatus.value = DirConStatus.Stopped
+                    drainClients()
+                } else emptyList()
+            }
+            abandoned.forEach { it.close() }
         }
     }
 
-    fun stop() {
-        acceptJob?.cancel()
-        acceptJob = null
-        runCatching { serverSocket?.close() }
-        serverSocket = null
-
+    private fun drainClients(): List<ClientSession> =
         synchronized(clients) {
-            clients.forEach { it.close() }
-            clients.clear()
+            clients.toList().also { clients.clear() }
         }
-        mdnsAdvertiser.stop()
-        coroutineContext.cancelChildren()
+
+    fun stop() {
+        val abandoned = synchronized(lifecycleLock) {
+            requested = false
+            generation++
+            acceptJob?.cancel()
+            acceptJob = null
+            runCatching { serverSocket?.close() }
+            serverSocket = null
+            mdnsAdvertiser.stop()
+            mutableStatus.value = DirConStatus.Stopped
+            drainClients()
+        }
+        // Disconnect callbacks may acquire BleServer's monitor; never call them under lifecycleLock.
+        abandoned.forEach { it.close() }
     }
 
     fun notifyCharacteristicChanged(uuid: UUID, value: ByteArray, client: String? = null) {

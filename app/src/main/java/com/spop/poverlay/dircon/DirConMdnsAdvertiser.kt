@@ -8,7 +8,7 @@ import timber.log.Timber
 class DirConMdnsAdvertiser(private val context: Context) {
     private val nsdManager =
         context.applicationContext.getSystemService(Context.NSD_SERVICE) as NsdManager
-    private var registrationListener: NsdManager.RegistrationListener? = null
+    @Volatile private var registrationListener: NsdManager.RegistrationListener? = null
 
     fun start(port: Int, serviceUuids: List<String>, serialNumber: String) {
         stop()
@@ -35,7 +35,7 @@ class DirConMdnsAdvertiser(private val context: Context) {
 
             override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
                 Timber.w("DIRCON mDNS registration failed: $errorCode")
-                registrationListener = null
+                if (registrationListener === this) registrationListener = null
             }
 
             override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {
