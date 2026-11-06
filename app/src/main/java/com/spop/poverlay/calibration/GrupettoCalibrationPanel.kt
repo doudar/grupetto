@@ -39,7 +39,7 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
     captureSettings: CalibrationStreamSettings = CalibrationStreamSettings(),
     onCaptureSettings: ((CalibrationStreamSettings) -> Unit)? = null,
     temperature: FlywheelTemperatureState? = null, onRoomTemperature: ((Double) -> Unit)? = null,
-    onRefit: (() -> Unit)? = null) {
+    onTemperatureUnit: ((TemperatureUnit) -> Unit)? = null, onRefit: (() -> Unit)? = null) {
     var confirmClear by remember { mutableStateOf(false) }
     var showInformation by remember { mutableStateOf(false) }
     var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
@@ -47,8 +47,10 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
     val selectedTab = tab.coerceIn(0, 1)
     var settingsOpen by remember { mutableStateOf(false) }
     if (settingsOpen) CalibrationStreamSettingsDialog(captureSettings, { onCaptureSettings?.invoke(it) },
-        { settingsOpen = false }, roomFahrenheit = temperature?.roomFahrenheit ?: 65.0,
-        onRoomTemperature = onRoomTemperature)
+        { settingsOpen = false }, roomFahrenheit = temperature?.roomFahrenheit ?: DefaultRoomTemperatureFahrenheit,
+        onRoomTemperature = onRoomTemperature,
+        temperatureUnit = temperature?.displayUnit ?: TemperatureUnit.Fahrenheit,
+        onTemperatureUnit = onTemperatureUnit)
     if (confirmClear) {
         AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text("Clear Grupetto table?") },
             text = { Text("Delete all saved Grupetto efforts and manual edits, stop recording, and turn correction off? " +

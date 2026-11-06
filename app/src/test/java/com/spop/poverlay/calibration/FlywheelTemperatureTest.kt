@@ -4,21 +4,20 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class FlywheelTemperatureTest {
-    private val ambient = (65.0 - 32) / 1.8
+    private val ambient = (72.0 - 32) / 1.8
 
     @Test fun coldStartAndZeroPowerRemainAtRoomTemperature() {
         val m = FlywheelTemperatureModel(0, 1000)
         m.observe(0, 0.0)
-        assertEquals(65.0, m.advance(1000).fahrenheit, 1e-9)
+        assertEquals(72.0, m.advance(1000).fahrenheit, 1e-9)
         assertTrue(m.state.receivingPower)
-        assertTrue(m.state.unobservedHistory)
     }
 
     @Test fun exactSolutionIsIndependentOfStepSizeAndHasNo110FDegreeCap() {
         var fine = ambient
         repeat(1800) { fine = thermalStep(fine, ambient, 200.0, 1.0) }
         assertEquals(thermalStep(ambient, ambient, 200.0, 1800.0), fine, 1e-9)
-        assertEquals(102.56155, fine * 1.8 + 32, .0001)
+        assertEquals(109.56155, fine * 1.8 + 32, .0001)
         assertTrue(thermalStep(ambient, ambient, 400.0, 3600.0) * 1.8 + 32 > 110)
         assertEquals(ambient + 25, thermalStep(ambient, ambient, 200.0, 1e8), 1e-9)
     }
@@ -29,7 +28,6 @@ class FlywheelTemperatureTest {
         val expected = thermalStep(thermalStep(ambient, ambient, 300.0, 3.0), ambient, 0.0, 57.0)
         assertEquals(expected, m.advance(60_000).celsius, 1e-9)
         assertFalse(m.state.receivingPower)
-        assertTrue(m.state.unobservedHistory)
     }
 
     @Test fun duplicateAndOutOfOrderFramesCannotExtendHeatOrReplacePower() {
@@ -51,14 +49,13 @@ class FlywheelTemperatureTest {
         }
     }
 
-    @Test fun restartCoolsWithoutReplayingOldPowerAndFlagsUnknownRiding() {
+    @Test fun restartCoolsWithoutReplayingOldPower() {
         val m = FlywheelTemperatureModel(0, 1000)
         m.observe(0, 300.0); m.advance(2000)
         val checkpoint = m.checkpoint(3000)
         val restored = FlywheelTemperatureModel(17, 63_000, checkpoint)
         assertEquals(thermalStep(checkpoint.celsius, ambient, 0.0, 60.0), restored.state.celsius, 1e-9)
         assertFalse(restored.state.receivingPower)
-        assertTrue(restored.state.unobservedHistory)
         assertEquals(checkpoint.celsius, FlywheelTemperatureModel(0, 1, checkpoint).state.celsius, 0.0)
     }
 
@@ -71,6 +68,7 @@ class FlywheelTemperatureTest {
     }
 
     @Test fun warmRoomEditPreservesRiseAndAdvancesOldBaselineFirst() {
+        val ambient = (65.0 - 32) / 1.8
         val m = FlywheelTemperatureModel(0, 1000, ThermalCheckpoint(1, (100.0-32)/1.8, 65.0, 1000))
         m.observe(0, 200.0)
         val expected = thermalStep((100.0-32)/1.8, ambient, 200.0, 1.0)
@@ -96,10 +94,20 @@ class FlywheelTemperatureTest {
         }
     }
 
+    @Test fun newDefaultDoesNotOverrideSavedRoomOrThermalReference() {
+        listOf(65.0, 70.0, 80.0).forEach { room ->
+            val saved = ThermalCheckpoint(1, (90.0 - 32) / 1.8, room, 1000)
+            val restored = FlywheelTemperatureModel(0, 1000, saved)
+            assertEquals(room, restored.state.roomFahrenheit, 0.0)
+            assertEquals(90.0, restored.state.fahrenheit, 1e-9)
+        }
+        assertEquals((65.0 - 32) / 1.8, CalibrationThermalCorrection.ReferenceCelsius, 0.0)
+    }
+
     @Test fun invalidOrFutureVersionCheckpointFallsBackSafely() {
         listOf(ThermalCheckpoint(2, 40.0, 65.0, 1), ThermalCheckpoint(1, Double.NaN, 65.0, 1),
             ThermalCheckpoint(1, 40.0, 111.0, 1)).forEach {
-            assertEquals(65.0, FlywheelTemperatureModel(0, 1000, it).state.fahrenheit, 1e-9)
+            assertEquals(72.0, FlywheelTemperatureModel(0, 1000, it).state.fahrenheit, 1e-9)
         }
         assertFalse(validRoomTemperature(Double.NaN))
         assertFalse(validRoomTemperature(31.0))

@@ -35,9 +35,13 @@ internal fun outlierWattExample(input: String): String {
 @Composable
 internal fun CalibrationStreamSettingsDialog(settings: CalibrationStreamSettings,
     onSave: (CalibrationStreamSettings) -> Unit, onClose: () -> Unit,
-    roomFahrenheit: Double = 65.0, onRoomTemperature: ((Double) -> Unit)? = null) {
-    var room by remember { mutableStateOf(captureSettingNumber(roomFahrenheit)) }
-    val parsedRoom = room.toDoubleOrNull()?.takeIf(::validRoomTemperature)
+    roomFahrenheit: Double = DefaultRoomTemperatureFahrenheit, onRoomTemperature: ((Double) -> Unit)? = null,
+    temperatureUnit: TemperatureUnit = TemperatureUnit.Fahrenheit,
+    onTemperatureUnit: ((TemperatureUnit) -> Unit)? = null) {
+    var unit by remember { mutableStateOf(temperatureUnit) }
+    var draftFahrenheit by remember { mutableStateOf<Double?>(roomFahrenheit) }
+    var room by remember { mutableStateOf(roomTemperatureInput(roomFahrenheit, unit)) }
+    val parsedRoom = draftFahrenheit?.takeIf(::validRoomTemperature)
     var settle by remember { mutableStateOf(settings.settleSeconds.toString()) }
     var cadence by remember { mutableStateOf(settings.cadenceWindowRpm.toString()) }
     var resistance by remember { mutableStateOf(settings.resistanceWindowPercent.toString()) }
@@ -83,9 +87,23 @@ internal fun CalibrationStreamSettingsDialog(settings: CalibrationStreamSettings
                         }
                         OutlinedButton({ use(CalibrationStreamSettings.Stricter) }) { Text("Stricter settings", fontSize = 12.sp) }
                         TextButton({ use(CalibrationStreamSettings()) }) { Text("Defaults", fontSize = 12.sp) }
-                        if (onRoomTemperature != null) OutlinedTextField(room, { room = it },
+                        if (onRoomTemperature != null) OutlinedTextField(room, {
+                            room = it
+                            draftFahrenheit = it.toDoubleOrNull()?.takeIf { value -> value.isFinite() }?.let(unit::toFahrenheit)
+                        },
                             Modifier.width(135.dp).testTag("room-temperature-input"),
-                            label = { Text("Room temp (°F)", fontSize = 11.sp) }, singleLine = true,
+                            label = { Text("Room temp", fontSize = 11.sp) }, singleLine = true,
+                            trailingIcon = {
+                                TextButton({
+                                    unit = unit.other()
+                                    draftFahrenheit?.let { room = roomTemperatureInput(it, unit) }
+                                    onTemperatureUnit?.invoke(unit)
+                                }, Modifier.size(48.dp).testTag("room-temperature-unit")
+                                    .semantics { contentDescription = unit.nextLabel },
+                                    contentPadding = PaddingValues(0.dp)) {
+                                    Text(unit.symbol, fontSize = 14.sp)
+                                }
+                            },
                             isError = parsedRoom == null,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
                     }

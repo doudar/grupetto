@@ -11,9 +11,8 @@ import java.util.Locale
 
 @Composable
 internal fun FlywheelTemperatureReadout(state: FlywheelTemperatureState, thermalCells: Int = 0) {
-    Text(String.format(Locale.US, "Est. flywheel %.0f°F · Experimental · %s · %d thermal cells", state.fahrenheit,
-        if (!state.receivingPower) "no live power; cooling assumed" else
-            if (state.confidence == TemperatureConfidence.InterruptedHistory) "history uncertain" else "ambient start assumed", thermalCells),
+    Text(String.format(Locale.US, "Est. flywheel %.0f%s · %d thermal cells",
+        state.displayUnit.fromFahrenheit(state.fahrenheit), state.displayUnit.symbol, thermalCells),
         fontSize = 12.sp, lineHeight = 16.sp, color = Color(0xFFF2BC75),
         modifier = Modifier.testTag("flywheel-temperature-estimate"))
 }

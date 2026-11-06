@@ -32,6 +32,23 @@ class CalibrationTemperaturePersistenceTest {
         assertTrue(kotlin.math.exp(table.gains[table.thermalCells.single()]) > 1.5)
     }
 
+    @Test fun legacyHistoryMetadataRoundTripsWithoutAFormatChange() {
+        TemperatureConfidence.values().forEach { confidence ->
+            listOf(false, true).forEach { unobserved ->
+                val old = sample.copy(temperature = temperature.copy(
+                    historyUnobserved = unobserved, confidence = confidence))
+                val p = profile(old)
+                val encoded = CalibrationBackup(p, p).encode()
+                val json = JSONObject(encoded)
+                assertEquals(3, json.getInt("schema"))
+                assertEquals(5, json.getJSONObject("draft").getInt("schema"))
+                assertEquals(6, json.getJSONObject("draft").getJSONArray("samples")
+                    .getJSONArray(0).getJSONArray(11).length())
+                assertEquals(old, CalibrationBackup.decode(encoded).draft!!.capture.samples.single())
+            }
+        }
+    }
+
     @Test fun schemaFourUpgradeKeepsUnknownTemperatureAndExactOldSurfaceWithRecoveryCopy() {
         val directory = directory()
         try {
@@ -93,6 +110,9 @@ class CalibrationTemperaturePersistenceTest {
         val now = android.os.SystemClock.elapsedRealtime()
         tracker.observe(CalibrationFrame(now, 2000, 95.0, 200.0, "bike", 1))
         val first = tracker.temperatureAt(now)!!
+        // Runtime history checks are gone; new samples retain a conservative legacy marker.
+        assertTrue(first.historyUnobserved)
+        assertEquals(TemperatureConfidence.InterruptedHistory, first.confidence)
         tracker.observe(CalibrationFrame(now + 1000, 2000, 95.0, 200.0, "bike", 1))
         assertEquals(first, tracker.temperatureAt(now))
         assertNull(tracker.temperatureAt(now - 1))

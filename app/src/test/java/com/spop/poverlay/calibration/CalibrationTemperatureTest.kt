@@ -114,15 +114,11 @@ class CalibrationTemperatureTest {
         assertEquals(200.0, accepted.single().pedalWatts, 0.0)
     }
 
-    @Test fun staleFutureInvalidTemperatureCannotBeUsedAndConfidenceMarksGaps() {
+    @Test fun staleFutureInvalidTemperatureCannotBeUsed() {
         val p = point(reference)
         assertFalse(CalibrationThermalCorrection.usable(p.copy(temperature = temperature(reference, 1001))))
         assertFalse(CalibrationThermalCorrection.usable(p.copy(temperature = temperature(reference, -1))))
         assertNull(CalibrationThermalCorrection.factor(temperature(Double.NaN, 0)))
-        val model = FlywheelTemperatureModel(0, 1000)
-        assertEquals(TemperatureConfidence.AmbientStartAssumed, model.state.confidence)
-        model.observe(0, 100.0)
-        assertEquals(TemperatureConfidence.InterruptedHistory, model.advance(5000).confidence)
     }
 
     @Test fun cadenceAndTemperatureNormalizationComposeWithoutChangingRawSample() {

@@ -3,15 +3,14 @@ package com.spop.poverlay.calibration
 import kotlin.math.exp
 import kotlin.math.expm1
 
-/** Experimental effective bulk temperature, not a surface sensor or a power correction. */
-enum class TemperatureConfidence { AmbientStartAssumed, InterruptedHistory }
+internal const val DefaultRoomTemperatureFahrenheit = 72.0
 
+/** Experimental effective bulk temperature, not a surface sensor or a power correction. */
 data class FlywheelTemperatureState(
-    val celsius: Double = (65.0 - 32) / 1.8,
-    val roomFahrenheit: Double = 65.0,
+    val celsius: Double = (DefaultRoomTemperatureFahrenheit - 32) / 1.8,
+    val roomFahrenheit: Double = DefaultRoomTemperatureFahrenheit,
     val receivingPower: Boolean = false,
-    val unobservedHistory: Boolean = true,
-    val confidence: TemperatureConfidence = TemperatureConfidence.AmbientStartAssumed,
+    val displayUnit: TemperatureUnit = TemperatureUnit.Fahrenheit,
 ) {
     val fahrenheit get() = celsius * 1.8 + 32
 }
@@ -46,8 +45,7 @@ internal class FlywheelTemperatureModel(nowMillis: Long, wallMillis: Long,
             // A backwards wall clock cannot imply heating or negative elapsed time.
             val elapsed = ((wallMillis.toDouble() - it.wallMillis) / 1000).coerceAtLeast(0.0)
             state = FlywheelTemperatureState(thermalStep(it.celsius, (it.roomFahrenheit - 32) / 1.8,
-                0.0, elapsed), it.roomFahrenheit, unobservedHistory = true,
-                confidence = TemperatureConfidence.InterruptedHistory)
+                0.0, elapsed), it.roomFahrenheit)
         }
     }
 
@@ -60,8 +58,7 @@ internal class FlywheelTemperatureModel(nowMillis: Long, wallMillis: Long,
         val heated = thermalStep(state.celsius, ambient, watts, heatMillis / 1000.0)
         val fresh = sampleAt?.let { nowMillis - it in 0..2999 } == true
         state = state.copy(celsius = thermalStep(heated, ambient, 0.0, (totalMillis - heatMillis) / 1000.0),
-            receivingPower = fresh, unobservedHistory = state.unobservedHistory || totalMillis > heatMillis,
-            confidence = if (sampleAt != null && totalMillis > heatMillis) TemperatureConfidence.InterruptedHistory else state.confidence)
+            receivingPower = fresh)
         advancedAt = nowMillis
         return state
     }
@@ -71,7 +68,7 @@ internal class FlywheelTemperatureModel(nowMillis: Long, wallMillis: Long,
         advance(nowMillis)
         if (!power.isFinite() || power !in 0.0..3000.0) {
             sampleAt = null; watts = 0.0
-            state = state.copy(receivingPower = false, unobservedHistory = true, confidence = TemperatureConfidence.InterruptedHistory)
+            state = state.copy(receivingPower = false)
             return
         }
         sampleAt = nowMillis; watts = power
@@ -85,6 +82,10 @@ internal class FlywheelTemperatureModel(nowMillis: Long, wallMillis: Long,
         // Preserve accumulated rise (including a negative offset), after advancing on the old baseline.
         state = state.copy(celsius = state.celsius + (fahrenheit - state.roomFahrenheit) / 1.8,
             roomFahrenheit = fahrenheit)
+    }
+
+    fun setDisplayUnit(unit: TemperatureUnit) {
+        state = state.copy(displayUnit = unit)
     }
 
     fun checkpoint(wallMillis: Long) = ThermalCheckpoint(1, state.celsius, state.roomFahrenheit, wallMillis)

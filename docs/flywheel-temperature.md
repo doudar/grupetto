@@ -1,12 +1,17 @@
 # Experimental flywheel temperature
 
 The calibration page shows an **estimated effective flywheel temperature**, not a sensor reading.
-Capture settings includes room temperature in Fahrenheit (default 65°F; accepted range 32–110°F).
+Capture settings includes room temperature (default 72°F; accepted range 32–110°F, or 0–43.33°C).
+The unit button inside the input converts the current unsaved number and switches the flywheel display.
+Unit choice is remembered immediately, including after Cancel; Save still applies the room edit,
+while Cancel discards that edit. Repeated toggles retain the unrounded draft, so they do not shift
+the estimate or calibration. Existing room settings, stored samples and the fixed thermal reference
+keep their original physical values. The experimental model itself continues to use Celsius internally.
 Changing room temperature is a **baseline correction**, not a simulated physical room change:
 the current flywheel estimate shifts by the same ambient delta, preserving its rise above room.
 For example, 100°F at a 65°F room becomes 107°F at a 72°F room; a cold estimate moves from
 65°F to 72°F immediately. The model first advances to the edit time on the previous baseline.
-Cooling/heating then continues against the new room setting. Existing uncertainty stays unchanged.
+Cooling/heating then continues against the new room setting.
 The live correction uses the shifted estimate immediately, but historical samples and their
 temperature provenance are never rewritten, including delayed packets captured before the edit.
 Capture presets do not change room temperature. Cancel discards unsaved room edits.
@@ -46,16 +51,23 @@ the display; Activity recreation and calibration dialogs do not restart the mode
 Monotonic elapsed time drives runtime integration. Duplicate/out-of-order timestamps are ignored.
 Only finite 0–3000 W native-source readings are accepted. Invalid input stops the heat hold. A valid
 reading is held for at most 3 seconds; after that **zero heat input is assumed**, not confirmed idle.
-The display explicitly says “no live power; cooling assumed.” Cold start assumes ambient and all
-estimates have unobserved initial history; the information dialog explains this uncertainty.
+The compact readout shows only estimated temperature and thermal-cell count. The information
+dialog explains the experimental model, ambient-start assumption and missing-telemetry limits.
+The live model no longer classifies or displays history uncertainty. Existing sample/export history
+fields remain unchanged for schema compatibility and round-trip old values. New samples use the
+conservative legacy `historyUnobserved=true` / `InterruptedHistory` marker; this means history is
+not assessed, not that a new interruption was detected. No sample is labeled as known history.
+These metadata fields do not affect heating/cooling, fitting, sample acceptance or corrected watts.
+The 72 F room default applies only when no valid checkpoint exists; saved room settings are restored.
+The fixed 65 F calibration reference is unchanged.
 
 A version-1 JSON checkpoint (temperature, ambient, wall timestamp) lives in the separate
 `experimental-flywheel-temperature` preferences. SharedPreferences atomically replaces the snapshot,
 asynchronously, every 30 seconds and on room edits. Telemetry callbacks do no disk I/O. Abrupt process
 death may lose up to 30 seconds. Restore applies zero-input cooling over wall-clock elapsed time,
-never replays last watts, and marks history unobserved. Riding while the app is closed is missed.
+and never replays last watts. Riding while the app is closed is missed.
 Backwards clock changes apply no elapsed cooling; forward clock changes may overcool the estimate.
-Invalid/unknown-version state starts at 65°F. No existing calibration/settings files are migrated,
+Invalid/unknown-version state starts at 72°F. No existing calibration/settings files are migrated,
 reset by the estimator. The separate thermal-calibration format migration now adds immutable sample
 temperatures and reference-gain metadata to calibration exports, with recovery copies of older files.
 

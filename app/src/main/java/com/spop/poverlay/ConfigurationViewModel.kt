@@ -140,6 +140,7 @@ class ConfigurationViewModel(
     val grupettoCalibrationState = grupettoCalibration.state
     val flywheelTemperature = grupettoCalibration.flywheelTemperature.state
     fun setRoomTemperature(fahrenheit: Double) = grupettoCalibration.flywheelTemperature.setRoomTemperature(fahrenheit)
+    fun setTemperatureUnit(unit: com.spop.poverlay.calibration.TemperatureUnit) = grupettoCalibration.flywheelTemperature.setDisplayUnit(unit)
     val calibrationCaptureSettings = calibration.streamSettings
     fun setCalibrationCaptureSettings(settings: com.spop.poverlay.calibration.CalibrationStreamSettings) = calibration.updateStreamSettings(settings)
     val liveCalibrationPosition = grupettoCalibration.livePosition.flatMapLatest { position ->

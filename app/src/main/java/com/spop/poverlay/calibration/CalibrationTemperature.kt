@@ -1,10 +1,15 @@
 package com.spop.poverlay.calibration
 
+/** Legacy export values only. Live estimates no longer classify observation history. */
+enum class TemperatureConfidence { AmbientStartAssumed, InterruptedHistory }
+
 /** Immutable estimate associated with the original native packet, not a measured temperature.
- * Room and estimator version retain provenance if the estimate model changes in a later build. */
+ * Room and estimator version retain provenance if the estimate model changes in a later build.
+ * History fields remain for schema compatibility and round-trip existing values unchanged.
+ * New samples use the conservative legacy unknown-history marker; it is not a new gap detection. */
 data class CalibrationTemperature(val celsius: Double, val roomFahrenheit: Double,
     val estimatedAt: Long, val estimatorVersion: Int = 1, val historyUnobserved: Boolean = true,
-    val confidence: TemperatureConfidence = TemperatureConfidence.AmbientStartAssumed) {
+    val confidence: TemperatureConfidence = TemperatureConfidence.InterruptedHistory) {
     val valid get() = celsius.isFinite() && celsius in -100.0..500.0 &&
         validRoomTemperature(roomFahrenheit) && estimatedAt >= 0 && estimatorVersion == 1
 }
