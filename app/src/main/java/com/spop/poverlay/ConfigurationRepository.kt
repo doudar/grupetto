@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner, preferencesName: String = SharedPrefsName) : AutoCloseable {
 
+    private val appContext: Context by lazy { runCatching { context.applicationContext }.getOrNull() ?: context }
+
     enum class Preferences(val key: String) {
         ShowTimerWhenMinimized("showTimerWhenMinimized"),
         ShowShifters("showShifters"),
@@ -152,10 +154,9 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner, 
         }
     }
 
-    private fun generateSerialHex(): String {
-        val value = kotlin.random.Random.nextInt(0x10000)
-        return value.toString(16).padStart(4, '0').uppercase()
-    }
+    // A serial already stored is kept, so updating never renames the device. A new install
+    // derives it from ANDROID_ID, so reinstalling the same build gives the same serial back.
+    private fun generateSerialHex(): String = com.spop.poverlay.util.DeviceSerial.generate(appContext)
 
     private fun updateFromSharedPrefs() {
         showShifters.value = sharedPreferences.getBoolean(Preferences.ShowShifters.key, true)

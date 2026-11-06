@@ -1557,8 +1557,7 @@ class BleServer(
         val key = com.spop.poverlay.ConfigurationRepository.Preferences.SerialNumber.key
         var existing = prefs.getString(key, null)
         if (existing.isNullOrEmpty()) {
-            val value = kotlin.random.Random.nextInt(0x10000)
-            existing = value.toString(16).padStart(4, '0').uppercase()
+            existing = com.spop.poverlay.util.DeviceSerial.generate(context)
             prefs.edit { putString(key, existing) }
         }
         return existing

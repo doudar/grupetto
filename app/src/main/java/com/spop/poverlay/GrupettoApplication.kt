@@ -53,8 +53,18 @@ class GrupettoApplication : Application() {
     val grupettoCalibration by lazy { com.spop.poverlay.calibration.GrupettoCalibrationManager(this) }
     private val sensorScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
 
+    val serialNameUpgradeNotice by lazy {
+        SerialNameUpgradeNotice(getSharedPreferences("upgrade-notices", MODE_PRIVATE))
+    }
+
     override fun onCreate() {
         super.onCreate()
+        // Inspect the old preferences before the activity, overlay or BLE server can
+        // generate a serial. This also keeps a boot-started upgrade notice pending.
+        serialNameUpgradeNotice.initialize(
+            !getSharedPreferences(ConfigurationRepository.SharedPrefsName, MODE_PRIVATE)
+                .getString(ConfigurationRepository.Preferences.SerialNumber.key, null).isNullOrEmpty()
+        )
         if (BuildConfig.DEBUG) {
             Timber.plant(Timber.DebugTree())
         }
