@@ -108,6 +108,7 @@ class FlywheelTemperatureUiTest {
             CalibrationStreamSettingsDialog(CalibrationStreamSettings(), {}, {}, onRoomTemperature = {})
         } }
         compose.onNodeWithTag("room-temperature-input").assertIsDisplayed()
+        compose.onNodeWithTag("room-baseline-explanation").assertIsDisplayed()
         val viewport = compose.onNodeWithTag("capture-settings-body").getUnclippedBoundsInRoot()
         listOf("settle", "cadence", "resistance", "tolerance", "noise", "confirmation").forEach {
             val bounds = compose.onNodeWithTag("capture-hint-$it").getUnclippedBoundsInRoot()
