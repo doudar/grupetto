@@ -185,4 +185,56 @@ class PowerMeterManagerTest {
         assertNull(manager.connectedDevice.value)
         verify(exactly = 1) { access.disconnect(gatt); access.close(gatt) }
     }
+    @Test fun closedPickerWithNoSavedMeterNeverScans() {
+        every { access.canScan() } returns true
+        manager.start()
+        repeat(5) { now += 20000; manager.checkConnection() }
+        manager.manage(false)
+        assertFalse(manager.scanning.value)
+        verify(exactly = 0) { access.startScan(any(), any(), any()); access.connect(any(), any()) }
+    }
+
+    @Test fun openingPickerDuringPendingOrConnectedGattNeverStartsCompetingScan() {
+        every { access.canScan() } returns true
+        manager.connect(info)
+        assertEquals(info, manager.connectingDevice.value)
+        manager.manage(true)
+        manager.checkConnection()
+        callback.captured.onDescriptorWrite(gatt, descriptor, BluetoothGatt.GATT_SUCCESS)
+        assertNull(manager.connectingDevice.value)
+        manager.manage(false)
+        manager.manage(true)
+        manager.checkConnection()
+        verify(exactly = 0) { access.startScan(any(), any(), any()) }
+        verify(exactly = 1) { access.connect(device, any()) }
+    }
+
+    @Test fun timeoutAndCancelRejectLatePendingConnectionCallbacks() {
+        manager.connect(info)
+        now += 30001
+        manager.checkConnection()
+        assertNull(manager.connectingDevice.value)
+        callback.captured.onDescriptorWrite(gatt, descriptor, BluetoothGatt.GATT_SUCCESS)
+        assertNull(manager.connectedDevice.value)
+        manager.disconnect()
+        now += 40000
+        manager.checkConnection()
+        callback.captured.onConnectionStateChange(gatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_CONNECTED)
+        assertNull(manager.connectingDevice.value)
+        assertNull(manager.connectedDevice.value)
+        verify(exactly = 1) { access.connect(device, any()) }
+    }
+
+    @Test fun staleTapCannotReplacePendingOrConnectedMeter() {
+        manager.connect(info)
+        val other = HeartRateDevice("11:12:13:14:15:16", "Other pedals")
+        manager.connect(other)
+        assertEquals(info, manager.connectingDevice.value)
+        callback.captured.onDescriptorWrite(gatt, descriptor, BluetoothGatt.GATT_SUCCESS)
+        manager.connect(other)
+        assertEquals(info, manager.connectedDevice.value)
+        verify(exactly = 0) { access.remoteDevice(other.address); access.disconnect(any()) }
+        verify(exactly = 1) { access.connect(device, any()) }
+    }
+
 }

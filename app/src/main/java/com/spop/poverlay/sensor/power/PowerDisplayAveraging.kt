@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 
+internal const val BikeDisplayBucketMillis = 900L
+
 private sealed interface PowerBucketEvent {
     data class Reading(val value: PowerDisplay) : PowerBucketEvent
     object Tick : PowerBucketEvent
@@ -40,7 +42,7 @@ internal class PowerDisplayBucket {
 /** Non-overlapping 900 ms display/telemetry buckets; raw capture and ERG remain unaveraged. */
 internal fun Flow<PowerDisplay>.averagePowerBuckets(): Flow<PowerDisplay> = flow {
     val bucket = PowerDisplayBucket()
-    val ticks = flow { while (true) { delay(900); emit(PowerBucketEvent.Tick) } }
+    val ticks = flow { while (true) { delay(BikeDisplayBucketMillis); emit(PowerBucketEvent.Tick) } }
     merge(this@averagePowerBuckets.map { PowerBucketEvent.Reading(it) }, ticks).collect { event ->
         when (event) {
             is PowerBucketEvent.Reading -> bucket.add(event.value)

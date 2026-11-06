@@ -2,42 +2,66 @@ package com.spop.poverlay.calibration
 
 import kotlin.math.*
 
-/** Both errors use the same efforts. The candidate predicts each cell with that cell held out;
- * the incumbent uses the exact table currently applied on the bike. Never compare historical RMSEs.
- */
+/** Descriptive errors on the same saved efforts, not held-out validation or an activation gate. */
 data class ActiveCalibrationComparison(val activeRmse: Double, val candidateRmse: Double,
     val count: Int, val cadenceRegressions: Int, val appliedRmse: Double = candidateRmse) {
-    // Diagnostic only. Error comparisons no longer gate activation or automatic updates.
     val improved get() = count >= 6 && activeRmse.isFinite() && candidateRmse.isFinite() && appliedRmse.isFinite() &&
         candidateRmse >= 0 && appliedRmse >= 0 && max(candidateRmse, appliedRmse) < activeRmse
 }
 
-/** A smooth, regularized log-power correction over raw resistance and cadence.
- * Zero-mean Gaussian prior returns to native power away from observations.
- * The saved 31 x 16 surface is bilinearly interpolated during riding (no solver in the callback).
+/** One shared correction per resistance/cadence cell. Gains are stored as log multipliers for
+ * file/editor compatibility, but recordings are averaged in multiplier (not logarithmic) space.
  */
 data class GrupettoCalibrationTable(val baseline: List<Int>, val gains: List<Double>, val confidence: List<Double>,
     val sampleCount: Int, val cells: Int, val beforeRmse: Double, val afterRmse: Double, val ready: Boolean,
-    // Ephemeral: recomputed against the current active snapshot on every fit, never restored from disk.
     val activeComparison: ActiveCalibrationComparison? = null,
-    // Display-only correction percentages, with observed coverage rebuilt on load.
     val correctionPercent: List<Double?> = emptyList(),
-    // Separate from ride observations: additive log-gain edits survive subsequent fits.
-    val manualOffsets: List<Double> = emptyList(),
+    val recordedThrough: Long = Long.MIN_VALUE,
     val manualCoverage: Set<Int> = emptySet(),
-    // Display-only, rebuilt from real efforts, never treated as measured data by the fitter.
-    val recordedCoverage: Set<Int> = emptySet()) {
+    val recordedCoverage: Set<Int> = emptySet(),
+    // Capped averaging weight, not an audit count. Zero means this cell has no correction yet.
+    val cellSampleCounts: List<Int> = emptyList(),
+    val streamSeconds: Int = 0, val legacyEffortCount: Int = 0) {
+    /** Empty counts only occur in legacy/programmatic tables. Their saved surface is a seed,
+     * never a large invented recording count. Newly fitted tables always carry explicit counts. */
+    internal fun effectiveCellSampleCounts(): List<Int> = if (cellSampleCounts.size == 496) cellSampleCounts
+        else List(496) { 1 }
+
+    /** Direct-cell lookup needs one populated cell, not the former coverage threshold.
+     * Do not trust an old serialized ready bit to enable an empty or malformed table.
+     */
+    val canActivate get() = ready && hasUsableCells
+
+    internal val hasUsableCells get() = sampleCount > 0 && cells in 1..496 && validCalibrationTable(baseline) &&
+        gains.size == 496 && gains.all { it.isFinite() && it in CalibrationCorrectionLimits.logRange } &&
+        confidence.size == 496 && confidence.all { it.isFinite() && it in 0.0..1.0 } &&
+        (cellSampleCounts.isEmpty() || cellSampleCounts.size == 496 && cellSampleCounts.all { it in 0..10 }) &&
+        effectiveCellSampleCounts().any { it > 0 }
+
+    fun currentCellIndex(ad: Double, rpm: Double): Int? = calibrationCellIndex(baseline, ad, rpm)
+
+    // Distance is squared Euclidean grid distance: one resistance column and one 5-rpm
+    // row each count as one step. Scan at most 496 values, with no allocations or deferred
+    // cache construction in the sensor callback. Ties keep the first (lowest) flat index.
+    fun lookupCellIndex(ad: Double, rpm: Double): Int? {
+        val cell = currentCellIndex(ad, rpm) ?: return null
+        if (cellSampleCounts.size != 496 || cellSampleCounts[cell] > 0) return cell
+        var closest = -1
+        var shortest = Int.MAX_VALUE
+        for (source in 0 until 496) {
+            if (cellSampleCounts[source] == 0) continue
+            val dx = source / 16 - cell / 16
+            val dy = source % 16 - cell % 16
+            val distance = dx * dx + dy * dy
+            if (distance < shortest) { shortest = distance; closest = source }
+        }
+        return closest.takeIf { it >= 0 }
+    }
+
     fun corrected(watts: Double, ad: Double, rpm: Double): Double {
-        if (!watts.isFinite() || watts <= 0 || !ad.isFinite() || rpm !in 45.0..120.0) return watts
-        val x = calibrationCoordinate(baseline, ad) ?: return watts
-        val y = (rpm - 45) / 5
-        val i = floor(x).toInt().coerceIn(0, 29)
-        val j = floor(y).toInt().coerceIn(0, 14)
-        fun at(a: Int, b: Int) = gains[a * 16 + b]
-        val low = at(i, j) * (1 - (x - i)) + at(i + 1, j) * (x - i)
-        val high = at(i, j + 1) * (1 - (x - i)) + at(i + 1, j + 1) * (x - i)
-        val logGain = (low * (1 - (y - j)) + high * (y - j)).coerceIn(ln(.65), ln(1.35))
-        return watts * exp(logGain)
+        if (!watts.isFinite() || watts <= 0) return watts
+        val cell = lookupCellIndex(ad, rpm) ?: return watts
+        return watts * exp(gains[cell].coerceIn(CalibrationCorrectionLimits.logRange))
     }
 }
 
@@ -47,98 +71,60 @@ internal fun calibrationCoordinate(table: List<Int>, ad: Double): Double? {
     return i + (ad - table[i]) / (table[i + 1] - table[i])
 }
 
-object GrupettoCalibrationFitter {
-    private data class Node(val x: Double, val rpm: Double, val value: Double,
-        val noise: Double, val samples: List<CalibrationSample>)
-    private fun kernel(x: Double, rpm: Double, b: Node): Double =
-        exp(-.5 * (((x - b.x) / 2.5).pow(2) + ((rpm - b.rpm) / 15).pow(2)))
+internal fun calibrationCellIndex(baseline: List<Int>, ad: Double, rpm: Double): Int? {
+    if (rpm !in 45.0..120.0) return null
+    val x = calibrationCoordinate(baseline, ad) ?: return null
+    return x.roundToInt().coerceIn(0, 30) * 16 + ((rpm - 45) / 5).roundToInt().coerceIn(0, 15)
+}
 
-    fun fit(baseline: List<Int>, samples: List<CalibrationSample>, active: GrupettoCalibrationTable? = null): GrupettoCalibrationTable? {
+object GrupettoCalibrationFitter {
+    fun fit(baseline: List<Int>, samples: List<CalibrationSample>, active: GrupettoCalibrationTable? = null,
+        seed: GrupettoCalibrationTable? = null, cadenceReference: PelotonCadenceReference? = null): GrupettoCalibrationTable? {
         require(validCalibrationTable(baseline))
-        val incumbent = active?.takeIf { it.baseline == baseline }
-        val usable = samples.filter { calibrationCoordinate(baseline, it.ad) != null && it.rpm in 45.0..120.0 &&
-            it.nativeWatts in CalibrationPowerRange && it.pedalWatts in CalibrationPowerRange && it.pedalWatts / it.nativeWatts in .5..2.0 }
+        val usable = samples.filter { it.usableForCalibration(baseline) }
         if (usable.isEmpty()) return null
-        // Keep every effort. Subsampling sorted cells discarded entire measured regions, including
-        // isolated low-cadence efforts. Coarsen local bins only when needed to bound the solver.
-        var cellWidth = 1.0
-        fun grouped() = usable.groupBy { (calibrationCoordinate(baseline, it.ad)!! * 2 / cellWidth).roundToInt() to
-            ((it.rpm - 45) / (5 * cellWidth)).roundToInt() }
-        var groups = grouped()
-        while (groups.size > 128) { cellWidth *= 2; groups = grouped() }
-        val nodes = groups.entries.sortedWith(compareBy({ it.key.first }, { it.key.second })).map { (_, entries) ->
-            val ratios = entries.map { ln(it.pedalWatts / it.nativeWatts) }
-            val value = median(ratios)
-            val scatter = median(ratios.map { abs(it - value) })
-            Node(median(entries.map { calibrationCoordinate(baseline, it.ad)!! }), median(entries.map { it.rpm }), value,
-                .16 / sqrt(entries.size.coerceAtMost(4).toDouble()) + (scatter / .25).pow(2), entries)
-        }
-        val n = nodes.size
-        // Cholesky solves a strictly positive definite kernel + observation-noise system.
-        val lower = Array(n) { DoubleArray(n) }
-        for (i in 0 until n) for (j in 0..i) {
-            var sum = kernel(nodes[i].x, nodes[i].rpm, nodes[j]) + if (i == j) nodes[i].noise else 0.0
-            for (k in 0 until j) sum -= lower[i][k] * lower[j][k]
-            lower[i][j] = if (i == j) sqrt(sum.coerceAtLeast(1e-9)) else sum / lower[j][j]
-        }
-        fun solve(rhs: DoubleArray): DoubleArray {
-            val out = rhs.copyOf()
-            for (i in 0 until n) { for (j in 0 until i) out[i] -= lower[i][j] * out[j]; out[i] /= lower[i][i] }
-            for (i in n - 1 downTo 0) { for (j in i + 1 until n) out[i] -= lower[j][i] * out[j]; out[i] /= lower[i][i] }
-            return out
-        }
-        val alpha = solve(DoubleArray(n) { nodes[it].value })
-        fun bounded(mean: Double, support: Double) = (mean * support).coerceIn(ln(.65), ln(1.35))
-        val gains = ArrayList<Double>(496)
-        val confidence = ArrayList<Double>(496)
-        for (x in 0..30) for (rpm in 45..120 step 5) {
-            val k = DoubleArray(n) { kernel(x.toDouble(), rpm.toDouble(), nodes[it]) }
-            val solved = solve(k)
-            val support = k.indices.sumOf { k[it] * solved[it] }.coerceIn(0.0, 1.0)
-            gains += bounded(k.indices.sumOf { k[it] * alpha[it] }, support)
-            confidence += support
-        }
-        // Leave an entire local cell out, including its repeats; no training/validation leakage.
-        val candidateTable = GrupettoCalibrationTable(baseline, gains, confidence, usable.size, n, 0.0, 0.0, false)
-        var before = 0.0
-        var after = 0.0
-        var incumbentError = 0.0
-        var appliedError = 0.0
-        var count = 0
-        val cadenceErrors = mutableMapOf<Int, DoubleArray>()
-        nodes.forEachIndexed { i, node ->
-            val inverseDiagonal = solve(DoubleArray(n) { if (it == i) 1.0 else 0.0 })[i]
-            val mean = node.value - alpha[i] / inverseDiagonal
-            val support = (1 - (1 / inverseDiagonal - node.noise)).coerceIn(0.0, 1.0)
-            val gain = exp(bounded(mean, support))
-            node.samples.forEach {
-                before += (it.nativeWatts - it.pedalWatts).pow(2)
-                val candidateError = (it.nativeWatts * gain - it.pedalWatts).pow(2)
-                after += candidateError
-                incumbent?.let { current ->
-                    val activeError = (current.corrected(it.nativeWatts, it.ad, it.rpm) - it.pedalWatts).pow(2)
-                    val tableError = (candidateTable.corrected(it.nativeWatts, it.ad, it.rpm) - it.pedalWatts).pow(2)
-                    incumbentError += activeError
-                    appliedError += tableError
-                    val band = cadenceErrors.getOrPut((it.rpm / 5).roundToInt()) { DoubleArray(4) }
-                    band[0] += activeError; band[1] += candidateError; band[2]++; band[3] += tableError
-                }
-                count++
+        val previous = seed?.takeIf { it.baseline == baseline }
+        val gains = previous?.gains?.toMutableList() ?: MutableList(496) { 0.0 }
+        val counts = previous?.effectiveCellSampleCounts()?.toMutableList() ?: MutableList(496) { 0 }
+        usable.filter { previous == null || it.capturedAt > previous.recordedThrough }
+            .sortedBy { it.capturedAt }.forEach { sample ->
+                val cell = calibrationCellIndex(baseline, sample.ad, sample.rpm)!!
+                val measurement = (sample.pedalWatts / sample.nativeWatts).coerceIn(CalibrationCorrectionLimits.minimumMultiplier, CalibrationCorrectionLimits.maximumMultiplier)
+                if (sample.observation != null) return@forEach
+                val count = counts[cell]
+                val nextCount = (count + 1).coerceAtMost(10)
+                val mean = if (count == 0) measurement
+                    else exp(gains[cell]) + (measurement - exp(gains[cell])) / nextCount
+                gains[cell] = ln(mean.coerceIn(CalibrationCorrectionLimits.minimumMultiplier, CalibrationCorrectionLimits.maximumMultiplier))
+                counts[cell] = nextCount
+            }
+        usable.filter { it.observation != null }.groupBy {
+            calibrationCellIndex(baseline, it.ad, it.rpm)!!
+        }.forEach { (cell, observations) ->
+            // No new observation means a manual edit remains authoritative, including restart.
+            if (previous == null || observations.any { it.capturedAt > previous.recordedThrough }) {
+                gains[cell] = ln(streamCellGain(observations.sortedBy { it.capturedAt }.takeLast(CalibrationCellSeconds), exp(gains[cell]), cadenceReference))
+                counts[cell] = observations.size.coerceAtMost(10)
             }
         }
-        val old = sqrt(before / count)
-        val new = sqrt(after / count)
-        val ready = count >= 6 && n >= 6 && nodes.map { it.x.roundToInt() }.distinct().size >= 3 &&
-            nodes.maxOf { it.rpm } - nodes.minOf { it.rpm } >= 10 && old.isFinite() && new.isFinite() &&
-            gains.all { it.isFinite() } && confidence.all { it.isFinite() }
-        val comparison = incumbent?.let {
-            val regressions = cadenceErrors.values.count { band ->
-                val previous = sqrt(band[0] / band[2])
-                sqrt(max(band[1], band[3]) / band[2]) - previous > max(.5, previous * .05)
+        val ready = counts.any { it > 0 }
+        var result = GrupettoCalibrationTable(baseline, gains, counts.map { it / 10.0 }, usable.size,
+            counts.count { it > 0 }, 0.0, 0.0, ready,
+            recordedThrough = max(previous?.recordedThrough ?: Long.MIN_VALUE, usable.maxOf { it.capturedAt }),
+            manualCoverage = previous?.manualCoverage ?: emptySet(), cellSampleCounts = counts)
+        val before = sqrt(usable.map { (it.nativeWatts - it.measuredPedalWatts).pow(2) }.average())
+        val after = sqrt(usable.map { (result.corrected(it.nativeWatts, it.ad, it.rpm) - it.measuredPedalWatts).pow(2) }.average())
+        val comparison = active?.takeIf { it.baseline == baseline }?.let { incumbent ->
+            fun error(table: GrupettoCalibrationTable, sample: CalibrationSample) =
+                (table.corrected(sample.nativeWatts, sample.ad, sample.rpm) - sample.measuredPedalWatts).pow(2)
+            val regressions = usable.groupBy { (it.rpm / 5).roundToInt() }.values.count { band ->
+                val old = sqrt(band.map { error(incumbent, it) }.average())
+                sqrt(band.map { error(result, it) }.average()) - old > max(.5, old * .05)
             }
-            ActiveCalibrationComparison(sqrt(incumbentError / count), new, count, regressions, sqrt(appliedError / count))
+            ActiveCalibrationComparison(sqrt(usable.map { error(incumbent, it) }.average()), after,
+                usable.size, regressions, after)
         }
-        val result = GrupettoCalibrationTable(baseline, gains, confidence, usable.size, n, old, new, ready, comparison)
+        result = result.copy(beforeRmse = before, afterRmse = after, activeComparison = comparison)
         return result.withCalibrationCoverage(usable)
     }
 }

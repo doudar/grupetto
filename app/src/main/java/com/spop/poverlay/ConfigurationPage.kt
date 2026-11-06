@@ -1,5 +1,11 @@
 package com.spop.poverlay
 
+import com.spop.poverlay.ui.components.GrupettoTabs
+import com.spop.poverlay.ui.components.SavedSensorList
+import com.spop.poverlay.ui.components.SensorPickerScanEffect
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+
 import android.os.Build
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -244,9 +250,16 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                             canLoad = !grupettoTable.recording && !calibration.enabled,
                             export = viewModel::exportCalibrationBackup, load = viewModel::loadCalibrationBackup)
                     }, onManualEdit = { dialog = "manual-calibration" }, livePosition = livePosition,
-                    captureSettings = captureSettings, onCaptureSettings = viewModel::setCalibrationCaptureSettings)
+                    captureSettings = captureSettings, onCaptureSettings = viewModel::setCalibrationCaptureSettings,
+                    onRefit = { dialog = "refit-calibration" })
             }
         }
+        "refit-calibration" -> com.spop.poverlay.calibration.CalibrationRefitDialog(
+            recording = grupettoTable.recording || calibration.enabled,
+            onPreview = viewModel::previewCalibrationRefit,
+            onApply = viewModel::applyCalibrationRefit,
+            onUndo = viewModel::undoCalibrationRefit,
+            onClose = { dialog = "grupetto-calibration" })
         "manual-calibration" -> {
             val session = viewModel.manualCalibrationSession ?: (grupettoTable.displayTable ?: grupettoTable.table)?.let {
                 com.spop.poverlay.calibration.CalibrationEditHistory(it).also { session -> viewModel.manualCalibrationSession = session }
@@ -297,10 +310,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
         }
         "bike" -> if (bike.connected) SettingsDialog("Bike+ / CrossTrainer", { dialog = null }) {
             var tab by remember { mutableStateOf(0) }
-            TabRow(tab, backgroundColor = Color.Transparent) {
-                Tab(tab == 0, { tab = 0 }, text = { Text("Trainer") })
-                Tab(tab == 1, { tab = 1 }, text = { Text("Shifters") })
-            }
+            GrupettoTabs(tab, listOf("Trainer", "Shifters"), { tab = it })
             Spacer(Modifier.height(8.dp))
             if (tab == 0) TrainerControls(bike, viewModel::startErg, viewModel::startSimulation,
                 viewModel::stopBikeControl, viewModel::setBikeResistance, viewModel::setBikeTuning)
@@ -403,40 +413,30 @@ private fun PowerMeterDialog(viewModel: ConfigurationViewModel, onDismiss: () ->
     val discovered by viewModel.powerMeterDiscovered.collectAsStateWithLifecycle()
     val saved by viewModel.powerMeterSaved.collectAsStateWithLifecycle()
     val scanning by viewModel.powerMeterScanning.collectAsStateWithLifecycle()
-    var tab by remember { mutableStateOf(0) }
+    val connecting by viewModel.powerMeterConnecting.collectAsStateWithLifecycle()
     var page by remember { mutableStateOf(0) }
-    androidx.compose.runtime.DisposableEffect(Unit) {
-        viewModel.managePowerMeters(true)
-        onDispose { viewModel.managePowerMeters(false) }
-    }
-    SettingsDialog("External Sensors · Power", onDismiss) {
+    SensorPickerScanEffect(true, viewModel::managePowerMeters)
+    SettingsDialog("External Sensors · Power", onDismiss, scrollable = true) {
         SensorSummary("Power meter",
             connected?.let { it.name ?: it.address } ?: status,
             "${reading?.watts?.coerceAtLeast(0) ?: "—"} W", Color(0xFFFBBF24))
-        if (connected != null) Row {
-            TextButton(viewModel::disconnectPowerMeter) { Text("Disconnect") }
-            TextButton({ connected?.let { viewModel.forgetPowerMeter(it.address) } }) { Text("Forget") }
-        }
+        SavedSensorList(saved, connected?.address, connecting?.address,
+            viewModel::connectPowerMeter, viewModel::disconnectPowerMeter, viewModel::forgetPowerMeter)
         Text(if (viewModel.isPreview) "Model emulation: pairing is disabled" else status,
             fontSize = 12.sp, color = Color(0xFF9EAEC0))
-        TabRow(tab, backgroundColor = Color.Transparent) {
-            listOf("Discover", "Saved").forEachIndexed { index, name ->
-                Tab(tab == index, { tab = index; page = 0 }, text = { Text(name) })
-            }
-        }
-        val devices = (if (tab == 0) discovered else saved).filter { it.address != connected?.address }
+        Text("Discover power meters", fontWeight = FontWeight.SemiBold)
+        val devices = discovered.filter { candidate -> saved.none { it.address == candidate.address } && candidate.address != connected?.address }
         val pages = maxOf(1, (devices.size + 1) / 2)
         val current = page.coerceAtMost(pages - 1)
         Column(Modifier.height(128.dp).padding(top = 8.dp)) {
-            if (devices.isEmpty()) Text(if (scanning) "Scanning… Wake your power meter by pedaling." else "No power meters found")
+            if (devices.isEmpty()) Text(if (scanning) "Scanning… Wake your power meter by pedaling." else if (connected != null) "Disconnect the current meter to discover another." else "No new power meters found")
             devices.drop(current * 2).take(2).forEach { device ->
                 Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(device.name ?: "Power meter", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(device.address, fontSize = 12.sp, color = Color(0xFF9EAEC0))
                     }
-                    TextButton({ viewModel.connectPowerMeter(device) }) { Text("Connect") }
-                    if (tab == 1) TextButton({ viewModel.forgetPowerMeter(device.address) }) { Text("Forget") }
+                    TextButton({ viewModel.connectPowerMeter(device) }, enabled = connected == null && connecting == null) { Text("Connect") }
                 }
             }
         }
@@ -451,7 +451,7 @@ private fun PowerMeterDialog(viewModel: ConfigurationViewModel, onDismiss: () ->
 }
 
 @Composable
-internal fun SettingsDialog(title: String, onDismiss: () -> Unit, compact: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+internal fun SettingsDialog(title: String, onDismiss: () -> Unit, compact: Boolean = false, scrollable: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     androidx.compose.ui.window.Dialog(onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.widthIn(max = if (compact) 1000.dp else 760.dp).fillMaxWidth(.94f),
             shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp), color = Color(0xFF1B2430), contentColor = Color(0xFFE8EEF5)) {
@@ -461,7 +461,8 @@ internal fun SettingsDialog(title: String, onDismiss: () -> Unit, compact: Boole
                     TextButton(onDismiss) { Text("Done") }
                 }
                 Spacer(Modifier.height(8.dp))
-                content()
+                if (scrollable) Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) { content() }
+                else content()
             }
         }
     }
@@ -506,66 +507,41 @@ private fun HeartRateManagerDialog(
     val zone23 by HeartRateManager.zone23.collectAsStateWithLifecycle()
     val zone34 by HeartRateManager.zone34.collectAsStateWithLifecycle()
     val zone45 by HeartRateManager.zone45.collectAsStateWithLifecycle()
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        onStartDiscovery()
-        HeartRateManager.setManaging(true)
-    }
-    androidx.compose.runtime.DisposableEffect(Unit) {
-        onDispose { onStopDiscovery(); HeartRateManager.setManaging(false) }
-    }
-    SettingsDialog("Heart rate", onDismiss) {
+    val connecting by HeartRateManager.connectingDevice.collectAsStateWithLifecycle()
+    SensorPickerScanEffect(tab == 0, HeartRateManager::setManaging)
+    SettingsDialog("Heart rate", onDismiss, scrollable = true) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(connectedDevice?.name ?: connectedDevice?.address ?: "No monitor connected",
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("${bpm ?: "—"} bpm", color = Color(0xFFFB7185))
             }
-            if (connectedDevice != null) {
-                TextButton(onDisconnectConnectedDevice) { Text("Disconnect") }
-                TextButton({ onForgetDevice(connectedDevice.address) }) { Text("Forget") }
-            }
         }
         Spacer(Modifier.height(8.dp))
-        TabRow(tab, backgroundColor = Color.Transparent) {
-            listOf("Discover", "Saved", "Zones").forEachIndexed { index, label ->
-                Tab(tab == index, { tab = index; page = 0 }, text = { Text(label) })
-            }
-        }
+        SavedSensorList(savedDevices, connectedDevice?.address, connecting?.address,
+            onConnectDevice, onDisconnectConnectedDevice, onForgetDevice)
+        Spacer(Modifier.height(8.dp))
+        GrupettoTabs(tab, listOf("Discover", "Zones"), { tab = it; page = 0 })
         Spacer(Modifier.height(12.dp))
-        if (tab == 2) {
-            Text("Zone boundaries (bpm)", fontWeight = FontWeight.SemiBold)
-            Text("Leave a boundary blank to use the default.", fontSize = 13.sp)
-            val stored = listOf(zone12, zone23, zone34, zone45)
-            val values = remember(zone12, zone23, zone34, zone45) {
-                androidx.compose.runtime.mutableStateListOf(*stored.map { it?.toString() ?: "" }.toTypedArray())
-            }
-            Row(Modifier.fillMaxWidth().padding(vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                values.forEachIndexed { index, value ->
-                    OutlinedTextField(value, { input ->
-                        values[index] = input.filter(Char::isDigit).take(3)
-                        HeartRateManager.setHeartRateZones(values[0].toIntOrNull(), values[1].toIntOrNull(),
-                            values[2].toIntOrNull(), values[3].toIntOrNull())
-                    }, label = { Text("${index + 1} → ${index + 2}") }, singleLine = true,
-                        modifier = Modifier.weight(1f),
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
-                }
+        if (tab == 1) {
+            HeartRateZoneSettings(listOf(zone12, zone23, zone34, zone45)) { values ->
+                HeartRateManager.setHeartRateZones(values[0], values[1], values[2], values[3])
             }
         } else {
-            val devices = (if (tab == 0) discoveredDevices else savedDevices)
-                .filter { it.address != connectedDevice?.address }
+            val devices = discoveredDevices.filter { candidate ->
+                candidate.address != connectedDevice?.address && savedDevices.none { it.address == candidate.address }
+            }
             val pages = maxOf(1, (devices.size + 2) / 3)
             val current = page.coerceAtMost(pages - 1)
             Column(Modifier.height(180.dp)) {
-                if (devices.isEmpty()) Text(if (tab == 0 && isScanning) "Scanning for monitors…" else "No monitors")
+                if (devices.isEmpty()) Text(if (isScanning) "Scanning for monitors…" else if (connectedDevice != null) "Disconnect the current monitor to discover another." else "No new monitors found")
                 devices.drop(current * 3).take(3).forEach { device ->
                     Row(Modifier.fillMaxWidth().height(60.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(device.name ?: "Unknown monitor", maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(device.address, fontSize = 12.sp, color = Color(0xFF9EAEC0))
                         }
-                        TextButton({ onConnectDevice(device) }) { Text("Connect") }
-                        if (tab == 1) TextButton({ onForgetDevice(device.address) }) { Text("Forget") }
+                        TextButton({ onConnectDevice(device) }, enabled = connectedDevice == null && connecting == null) { Text("Connect") }
                     }
                 }
             }

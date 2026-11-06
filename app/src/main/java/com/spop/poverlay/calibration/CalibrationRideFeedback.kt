@@ -54,6 +54,8 @@ private fun RideMetric(label: String, value: Double?, unit: String, color: Color
 }
 
 internal fun captureProgressColor(progress: CaptureProgress): Color = when {
+    progress.phase == CapturePhase.Collecting -> Color(0xFF6EE7B7)
+    progress.phase == CapturePhase.Outlier -> Color(0xFFFBBF24)
     progress.phase == CapturePhase.Saved -> Color(0xFF34D399)
     progress.phase == CapturePhase.Settling -> Color(0xFFFB923C)
     progress.phase == CapturePhase.Holding && progress.remaining <= 2 -> Color(0xFFFDE047)
@@ -75,6 +77,7 @@ internal fun CaptureErrorNotice(capture: CalibrationUiState) {
 @Composable
 internal fun CaptureHoldFeedback(capture: CalibrationUiState, recording: Boolean) {
     if (capture.error != null) return // The prominent notice carries the actual reason.
+    if (capture.progress.streaming) { CalibrationStreamBucket(capture, recording); return }
     val collecting = recording && capture.enabled && !capture.resting && capture.frame != null &&
         capture.pedalWatts != null && capture.progress.phase in listOf(CapturePhase.Settling, CapturePhase.Holding, CapturePhase.Saved)
     val progress = capture.progress

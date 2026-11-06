@@ -173,4 +173,75 @@ class HeartRateManagerPermissionTest {
         HeartRateManager.stopDiscovery()
         verify(exactly = 1) { scanner.stopScan(scanCallback) }
     }
+    @Test fun `pending identity clears on connect and cancel ignores late callback`() {
+        HeartRateManager.connectTo(HeartRateDevice(address, "Strap"))
+        assertEquals(address, HeartRateManager.connectingDevice.value?.address)
+        HeartRateManager.disconnectCurrent()
+        assertNull(HeartRateManager.connectingDevice.value)
+        callback.captured.onConnectionStateChange(gatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_CONNECTED)
+        assertNull(HeartRateManager.connectedDevice.value)
+        connectAndReceive()
+        assertNull(HeartRateManager.connectingDevice.value)
+    }
+
+    @Test fun `no saved HR monitor and closed picker never accesses scanner`() {
+        HeartRateManager::class.java.getDeclaredField("stopped").apply {
+            isAccessible = true
+            (get(HeartRateManager) as java.util.concurrent.atomic.AtomicBoolean).set(false)
+        }
+        field("isManaging", false)
+        HeartRateManager::class.java.getDeclaredField("_savedDevices").apply {
+            isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            (get(HeartRateManager) as MutableStateFlow<List<HeartRateDevice>>).value = emptyList()
+        }
+        HeartRateManager.startDiscovery()
+        HeartRateManager.checkConnection()
+        assertFalse(HeartRateManager.isScanning.value)
+        verify(exactly = 0) { adapter.bluetoothLeScanner }
+    }
+
+    @Test fun `opening picker cannot scan while a connection is pending or connected`() {
+        HeartRateManager::class.java.getDeclaredField("stopped").apply {
+            isAccessible = true
+            (get(HeartRateManager) as java.util.concurrent.atomic.AtomicBoolean).set(false)
+        }
+        HeartRateManager.connectTo(HeartRateDevice(address, "Strap"))
+        HeartRateManager.setManaging(true)
+        HeartRateManager.startDiscovery()
+        callback.captured.onConnectionStateChange(gatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_CONNECTED)
+        HeartRateManager.setManaging(false)
+        HeartRateManager.setManaging(true)
+        HeartRateManager.checkConnection()
+        verify(exactly = 0) { adapter.bluetoothLeScanner }
+        verify(exactly = 1) { device.connectGatt(context, false, any()) }
+    }
+
+    @Test fun `stale tap cannot replace pending or connected strap`() {
+        HeartRateManager.connectTo(HeartRateDevice(address, "Strap"))
+        val other = HeartRateDevice("11:12:13:14:15:16", "Other strap")
+        HeartRateManager.connectTo(other)
+        assertEquals(address, HeartRateManager.connectingDevice.value?.address)
+        callback.captured.onConnectionStateChange(gatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_CONNECTED)
+        HeartRateManager.connectTo(other)
+        assertEquals(address, HeartRateManager.connectedDevice.value?.address)
+        verify(exactly = 0) { adapter.getRemoteDevice(other.address); gatt.disconnect() }
+        verify(exactly = 1) { device.connectGatt(context, false, any()) }
+    }
+
+    @Test fun `expired pending strap cannot regain ownership through late callback`() {
+        HeartRateManager::class.java.getDeclaredField("stopped").apply {
+            isAccessible = true
+            (get(HeartRateManager) as java.util.concurrent.atomic.AtomicBoolean).set(false)
+        }
+        HeartRateManager.connectTo(HeartRateDevice(address, "Strap"))
+        field("pendingSinceMs", System.nanoTime() / 1_000_000L - 30001L)
+        HeartRateManager.checkConnection()
+        assertNull(HeartRateManager.connectingDevice.value)
+        callback.captured.onConnectionStateChange(gatt, BluetoothGatt.GATT_SUCCESS, BluetoothProfile.STATE_CONNECTED)
+        callback.captured.onCharacteristicChanged(gatt, measurement)
+        assertNull(HeartRateManager.connectedDevice.value)
+        assertNull(HeartRateManager.heartRate.value)
+    }
+
 }

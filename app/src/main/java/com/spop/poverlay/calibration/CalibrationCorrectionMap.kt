@@ -10,31 +10,30 @@ internal val CorrectionZeroColor = Color(0xFFE2E8F0)
 internal val CorrectionUnderColor = Color(0xFF1239B5)
 internal val CorrectionUnknownColor = Color(0xFF273443)
 
-/** Percentage change relative to raw bike watts, on a fixed -10%..+10% color scale. */
+/** Percentage change relative to raw bike watts, on a fixed -20%..+20% color scale. */
 internal fun correctionColor(percent: Double?): Color {
     if (percent == null || !percent.isFinite()) return CorrectionUnknownColor
-    val fraction = (percent / 10).coerceIn(-1.0, 1.0).toFloat()
+    val fraction = (percent / 20).coerceIn(-1.0, 1.0).toFloat()
     return if (fraction < 0) lerp(CorrectionZeroColor, CorrectionOverColor, -fraction)
         else lerp(CorrectionZeroColor, CorrectionUnderColor, fraction)
 }
 
-/** The fitted gain supplies the exact correction percentage; nearby efforts mark observed coverage. */
+/** Only populated cells are colored. Lookup fallback does not invent observed coverage. */
 internal fun calibrationCorrectionPercent(table: GrupettoCalibrationTable, samples: List<CalibrationSample>,
     includeManual: Boolean = true): List<Double?> {
-    data class Reference(val x: Double, val rpm: Double)
-    val references = samples.filter { it.nativeWatts in CalibrationPowerRange && it.rpm in 45.0..120.0 }
-        .mapNotNull { sample -> calibrationCoordinate(table.baseline, sample.ad)?.let { Reference(it, sample.rpm) } }
-        .distinct()
+    val counts = table.effectiveCellSampleCounts()
+    val recorded = samples.filter { it.usableForCalibration(table.baseline) }
+        .mapNotNull { calibrationCellIndex(table.baseline, it.ad, it.rpm) }.toSet()
     return List(496) { index ->
-        val x = (index / 16).toDouble()
-        val rpm = 45.0 + index % 16 * 5
-        if ((includeManual && index in table.manualCoverage) || references.any { abs(it.x - x) <= 2 && abs(it.rpm - rpm) <= 10 })
+        if (counts[index] > 0 && (includeManual || index in recorded))
             100 * (exp(table.gains[index]) - 1) else null
     }
 }
 
 internal fun GrupettoCalibrationTable.withCalibrationCoverage(samples: List<CalibrationSample>): GrupettoCalibrationTable {
     val measured = calibrationCorrectionPercent(this, samples, includeManual = false)
-    return copy(correctionPercent = calibrationCorrectionPercent(this, samples),
+    return copy(streamSeconds = samples.count { it.observation != null },
+        legacyEffortCount = samples.count { it.observation == null },
+        correctionPercent = calibrationCorrectionPercent(this, samples),
         recordedCoverage = measured.indices.filterTo(mutableSetOf()) { measured[it] != null })
 }

@@ -1,6 +1,6 @@
 package com.spop.poverlay.calibration
 
-/** Keep five distinct settled readings regardless of the configurable meter-lag period. */
+/** Legacy board-candidate window only. Tablet streams use the fixed two-second stable gate. */
 data class CalibrationCaptureSettings(val settleSeconds: Int = 3, val resistanceMovementPercent: Int = 10) {
     init {
         require(settleSeconds in 0..15)

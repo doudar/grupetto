@@ -6,7 +6,7 @@ import org.junit.Test
 
 class CalibrationModelsTest {
     private val baseline = List(31) { 1000 + it * 100 }
-    @Test fun localModelLearnsCadenceDependentCorrectionAndFadesOutsideCoverage() {
+    @Test fun cellModelLearnsCadenceCorrectionAndUsesNearestOutsideCoverage() {
         val samples = (8..16 step 2).flatMap { x -> listOf(65, 80, 95).map { rpm ->
             val watts = 80.0 + x * 8
             CalibrationSample(baseline[x].toDouble(), rpm.toDouble(), watts, watts * (1.10 + (rpm - 80) * .001), (x * 100 + rpm).toLong())
@@ -14,17 +14,30 @@ class CalibrationModelsTest {
         val table = GrupettoCalibrationFitter.fit(baseline, samples)!!
         assertTrue("${table.beforeRmse} -> ${table.afterRmse}", table.ready)
         assertTrue(table.corrected(200.0, 2200.0, 95.0) > table.corrected(200.0, 2200.0, 65.0))
-        assertEquals(200.0, table.corrected(200.0, 4000.0, 80.0), .1)
+        assertEquals(220.0, table.corrected(200.0, 4000.0, 80.0), 1e-8)
         assertEquals(0.0, table.corrected(0.0, 2200.0, 80.0), 0.0)
         assertEquals(200.0, table.corrected(200.0, 2200.0, 10.0), 0.0)
         assertEquals(496, table.gains.size)
         assertTrue(table.confidence.all { it in 0.0..1.0 })
     }
-    @Test fun sparseAndAlreadyAccurateDataCannotActivateAnUnsupportedModel() {
+    @Test fun onePointAndAlreadyAccurateDataCanActivateTheDirectCellModel() {
         val sample = CalibrationSample(2000.0, 80.0, 200.0, 220.0, 1)
-        assertFalse(GrupettoCalibrationFitter.fit(baseline, listOf(sample))!!.ready)
-        assertFalse(GrupettoCalibrationFitter.fit(baseline, List(20) { sample.copy(pedalWatts = 200.0, capturedAt = it.toLong()) })!!.ready)
+        assertTrue(GrupettoCalibrationFitter.fit(baseline, listOf(sample))!!.canActivate)
+        assertTrue(GrupettoCalibrationFitter.fit(baseline, List(20) { sample.copy(pedalWatts = 200.0, capturedAt = it.toLong()) })!!.canActivate)
     }
+    @Test fun activationDoesNotRequireAdditionalCellsResistanceColumnsOrCadenceSpan() {
+        fun points(xs: List<Int>, rpms: List<Int>) = xs.flatMap { x -> rpms.map { rpm ->
+            CalibrationSample(baseline[x].toDouble(), rpm.toDouble(), 200.0, 220.0, (x * 100 + rpm).toLong())
+        } }
+        val enough = points(listOf(8, 12, 16), listOf(75, 85))
+        assertTrue(GrupettoCalibrationFitter.fit(baseline, enough)!!.ready)
+        assertTrue(GrupettoCalibrationFitter.fit(baseline, enough.take(1))!!.canActivate)
+        assertTrue(GrupettoCalibrationFitter.fit(baseline, points(listOf(8, 12), listOf(65, 75, 85)))!!.canActivate)
+        assertTrue(GrupettoCalibrationFitter.fit(baseline, points(listOf(8, 12, 16), listOf(75, 80)))!!.canActivate)
+        val repeated = List(12) { enough[it % 5].copy(capturedAt = it.toLong()) }
+        assertTrue(GrupettoCalibrationFitter.fit(baseline, repeated)!!.canActivate)
+    }
+
     @Test fun guidedTargetsAcceptOffCenterShiftsWithoutChangingMeasurements() {
         val guide = CalibrationGuide(baseline, 2000)
         val samples = List(3) { CalibrationSample(1875.0, 75.0, 150.0, 160.0, it.toLong()) }
@@ -64,10 +77,17 @@ class CalibrationModelsTest {
             listOf(720.0,80.0,130.5,128.0), listOf(733.0,80.5,150.0,166.5), listOf(733.0,91.0,186.0,207.5), listOf(830.0,92.0,329.0,363.5))
         val samples = values.mapIndexed { i, v -> CalibrationSample(v[0],v[1],v[2],v[3],i.toLong()) }
         val table = GrupettoCalibrationFitter.fit(actual, samples)!!
-        println("Rider local fit: ${table.sampleCount} efforts, ${table.cells} cells; CV RMSE ${table.beforeRmse} -> ${table.afterRmse}; ready=${table.ready}")
+        println("Rider local fit: ${table.sampleCount} efforts, ${table.cells} cells; saved-effort RMSE ${table.beforeRmse} -> ${table.afterRmse}; ready=${table.ready}")
         assertTrue(table.ready)
-        assertTrue(table.beforeRmse - table.afterRmse < 1.0)
-        assertTrue(table.afterRmse > table.beforeRmse * .95)
+        // AD559/78rpm and AD559/81rpm share one cell. Their ratios average;
+        // all seven other efforts remain exact, with no cross-cell influence.
+        assertEquals(8, table.cells)
+        val sharedMultiplier = (51.0 / 59.0 + 55.5 / 63.5) / 2
+        samples.forEachIndexed { index, sample ->
+            val expected = if (index == 1 || index == 3) sample.nativeWatts * sharedMultiplier else sample.pedalWatts
+            assertEquals(expected, table.corrected(sample.nativeWatts, sample.ad, sample.rpm), 1e-8)
+        }
+        assertEquals(.13881597042344304, table.afterRmse, 1e-10)
         assertTrue(table.gains.all { it.isFinite() })
         for (ad in 173..996 step 7) for (rpm in 45..120 step 5) assertTrue(table.corrected(200.0,ad.toDouble(),rpm.toDouble()) in 129.99..270.01)
         assertFalse(CalibrationFitter.fit(actual, samples).ready)

@@ -27,7 +27,7 @@ class CalibrationErrorComparisonTest {
         val preview = calibrationErrorComparison(draft, null, saved)!!
         assertEquals(25.0, preview.afterWatts!!, .0001)
         assertTrue(preview.preview)
-        val unfinished = draft.copy(table = draft.table!!.copy(ready = false))
+        val unfinished = draft.copy(table = draft.table!!.copy(cells = 0, sampleCount = 0, ready = false))
         assertEquals(15.0, calibrationErrorComparison(unfinished, null, saved)!!.afterWatts!!, .0001)
         assertEquals(25.0, calibrationErrorComparison(unfinished, null, null)!!.afterWatts!!, .0001)
     }
@@ -52,5 +52,14 @@ class CalibrationErrorComparisonTest {
         assertEquals(3.0, errors.beforeWatts, .0001)
         assertEquals(0.0, errors.afterWatts!!, .0001)
         assertNull(calibrationErrorComparison(profile.copy(capture = capture.copy(samples = emptyList())), null, null))
+    }
+    @Test fun worseCorrectedErrorIsReportedHonestlyRatherThanClampedOrHidden() {
+        val profile = profile(1.3)
+        val errors = calibrationErrorComparison(profile, profile, null)!!
+        assertEquals(20.0, errors.beforeWatts, 1e-9)
+        assertEquals(55.0, errors.afterWatts!!, 1e-9)
+        assertTrue(errors.afterWatts!! > errors.beforeWatts)
+        // Stored fitter diagnostics are intentionally unrelated to this retrospective MAE.
+        assertNotEquals(profile.table!!.afterRmse, errors.afterWatts!!, 1e-9)
     }
 }

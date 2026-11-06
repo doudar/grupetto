@@ -11,14 +11,14 @@ class CalibrationManualEditTest {
     } }
     private fun table() = GrupettoCalibrationFitter.fit(baseline, samples)!!
 
-    @Test fun manualCellIsExactBlendsSmoothlyAndDoesNotInventEvidence() {
+    @Test fun manualCellIsExactNeverChangesNeighborsAndDoesNotInventEvidence() {
         val original = table()
         val cell = 8 * 16 + 7
         val edited = CalibrationManualEdit.setPercent(original, setOf(cell), -12.5, true)
         assertEquals(175.0, edited.corrected(200.0, baseline[8].toDouble(), 80.0), 1e-9)
-        val centerDelta = edited.gains[cell] - original.gains[cell]
-        assertEquals(centerDelta * exp(-.5 / 2.5.pow(2)), edited.gains[cell + 16] - original.gains[cell + 16], 1e-9)
-        assertEquals(centerDelta * exp(-.5 / 3.0.pow(2)), edited.gains[cell + 1] - original.gains[cell + 1], 1e-9)
+        original.gains.indices.filter { it != cell }.forEach {
+            assertEquals(original.gains[it], edited.gains[it], 0.0)
+        }
         assertEquals(original.sampleCount, edited.sampleCount)
         assertEquals(original.confidence, edited.confidence)
         assertEquals(original.cells, edited.cells)
@@ -33,19 +33,22 @@ class CalibrationManualEditTest {
         val cell = 0
         CalibrationEditScope.values().forEach { scope ->
             val selection = scope.indices(cell)
-            val edited = CalibrationManualEdit.setPercent(original, selection, 35.0, false)
+            val edited = CalibrationManualEdit.setPercent(original, selection, 50.0, false)
             original.gains.indices.forEach { index ->
-                assertEquals(if (index in selection) ln(1.35) else original.gains[index], edited.gains[index], 1e-12)
+                assertEquals(if (index in selection) ln(1.5) else original.gains[index], edited.gains[index], 1e-12)
             }
         }
         assertEquals(1, CalibrationEditScope.Cell.indices(cell).size)
         assertEquals(31, CalibrationEditScope.Cadence.indices(cell).size)
         assertEquals(16, CalibrationEditScope.Resistance.indices(cell).size)
         assertEquals(496, CalibrationEditScope.All.indices(cell).size)
-        val lowered = CalibrationManualEdit.nudge(CalibrationManualEdit.setPercent(original, setOf(cell), -35.0, false), setOf(cell), -1.0, false)
-        assertEquals(ln(.65), lowered.gains[cell], 1e-12)
+        val lowered = CalibrationManualEdit.nudge(CalibrationManualEdit.setPercent(original, setOf(cell), -50.0, false), setOf(cell), -1.0, false)
+        assertEquals(ln(.5), lowered.gains[cell], 1e-12)
+        val raised = CalibrationManualEdit.nudge(CalibrationManualEdit.setPercent(original, setOf(cell), 50.0, false), setOf(cell), 1.0, false)
+        assertEquals(ln(1.5), raised.gains[cell], 1e-12)
         assertTrue(runCatching { CalibrationManualEdit.setPercent(original, setOf(cell), Double.NaN, true) }.isFailure)
-        assertTrue(runCatching { CalibrationManualEdit.setPercent(original, setOf(cell), 35.1, true) }.isFailure)
+        assertTrue(runCatching { CalibrationManualEdit.setPercent(original, setOf(cell), 50.1, true) }.isFailure)
+        assertTrue(runCatching { CalibrationManualEdit.setPercent(original, setOf(cell), -50.1, true) }.isFailure)
     }
 
     @Test fun fillingPreservesKnownCellsAndExtendsConstantCalibrationToEveryEdge() {
@@ -77,20 +80,34 @@ class CalibrationManualEditTest {
         assertTrue(CalibrationManualEdit.smooth(original, (0 until 496).toSet()).gains.all { it in ln(.65)..ln(1.35) })
     }
 
-    @Test fun restoreAndRefitPreserveTheRecordedFitAndManualLayerSeparately() {
+    @Test fun resetClearsTheUnifiedCorrectionWithoutReconstructingAnOldLayer() {
         val original = table()
         val edited = CalibrationManualEdit.fillGaps(CalibrationManualEdit.setPercent(original, setOf(15 * 16 + 7), -8.0, true))
-        val restored = CalibrationManualEdit.resetToRecorded(edited)
-        original.gains.indices.forEach { assertEquals(original.gains[it], restored.gains[it], 1e-12) }
-        assertTrue(restored.manualCoverage.isEmpty())
-        assertEquals(original.correctionPercent.map { it != null }, restored.correctionPercent.map { it != null })
-        val nextFit = GrupettoCalibrationFitter.fit(baseline, samples.map { it.copy(pedalWatts = 210.0) })!!
-        val reapplied = CalibrationManualEdit.reapply(nextFit, edited)
-        nextFit.gains.indices.forEach {
-            assertEquals((nextFit.gains[it] + edited.manualOffsets[it]).coerceIn(ln(.65), ln(1.35)), reapplied.gains[it], 1e-12)
-        }
-        assertEquals(edited.manualCoverage, reapplied.manualCoverage)
-        assertEquals(nextFit, CalibrationManualEdit.reapply(nextFit, edited.copy(baseline = baseline.map { it + 1 })))
+        val reset = CalibrationManualEdit.resetCorrections(edited)
+        assertTrue(reset.gains.all { it == 0.0 })
+        assertTrue(reset.ready)
+        assertEquals(original.sampleCount, reset.sampleCount)
+        assertEquals(original.recordedCoverage, reset.recordedCoverage)
+        assertEquals(reset, CalibrationManualEdit.resetCorrections(reset))
+    }
+
+    @Test fun settingMinusTenTwiceDoesNotAccumulateAnotherMinusTen() {
+        val cell = 15 * 16 + 7
+        val first = CalibrationManualEdit.setPercent(table(), setOf(cell), -10.0, true)
+        val second = CalibrationManualEdit.setPercent(first, setOf(cell), -10.0, true)
+        assertEquals(-10.0, CalibrationManualEdit.percent(second.gains[cell]), 1e-10)
+        first.gains.indices.forEach { assertEquals(first.gains[it], second.gains[it], 1e-12) }
+    }
+
+    @Test fun smoothingAndResetParticipateInUndoRedoHistory() {
+        val history = CalibrationEditHistory(table())
+        val painted = history.commit(CalibrationManualEdit.setPercent(history.current, setOf(247), 30.0, false))
+        val smoothed = history.commit(CalibrationManualEdit.smooth(painted, setOf(247)))
+        val reset = history.commit(CalibrationManualEdit.resetCorrections(smoothed))
+        assertEquals(smoothed, history.undo())
+        assertEquals(painted, history.undo())
+        assertEquals(smoothed, history.redo())
+        assertEquals(reset, history.redo())
     }
 
     @Test fun undoRedoAndNewBranchRestoreCompleteSurfaces() {

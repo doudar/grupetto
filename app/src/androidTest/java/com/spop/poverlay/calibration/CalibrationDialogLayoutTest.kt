@@ -1,6 +1,9 @@
 package com.spop.poverlay.calibration
 
 import androidx.compose.material.*
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.*
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -10,9 +13,12 @@ import com.spop.poverlay.SettingsDialog
 import com.spop.poverlay.ui.theme.Typography
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
+import com.spop.poverlay.UiTestDiagnostics
 
 class CalibrationDialogLayoutTest {
-    @get:Rule val compose = createComposeRule()
+    private val compose = createComposeRule()
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(compose).around(UiTestDiagnostics(compose))
     private val baseline = List(31) { 1000 + it * 100 }
     private val samples = (8..16 step 2).flatMap { x -> listOf(65, 80, 95).map { rpm ->
         CalibrationSample(baseline[x].toDouble(), rpm.toDouble(), 200.0, 220.0, (x * 100 + rpm).toLong())
@@ -25,32 +31,73 @@ class CalibrationDialogLayoutTest {
     }
     private fun visible(vararg labels: String) = labels.forEach { compose.onNodeWithText(it).assertIsDisplayed() }
 
-    @Test fun tableDetailsBackupsAndSettingsFitWithoutScrolling() {
+    @Test fun tableBackupsAndSettingsFitWithoutScrolling() {
         compose.setContent { MaterialTheme(typography = Typography) {
             SettingsDialog("Calibrate using power pedals", {}, compact = true) {
                 GrupettoCalibrationPanel(GrupettoCalibrationUiState(count = 235, table = table), {}, {}, {}, {},
-                    meterReady = false, onManualEdit = {}, onCaptureSettings = {}, fileControls = {
+                    meterReady = false, onManualEdit = {}, onCaptureSettings = {}, onRefit = {}, fileControls = {
                         CalibrationFileControls(true, true, { "{}" }, { error("Not used") })
                     })
             }
         } }
-        visible("Record", "Activate", "Manual editor", "Capture settings", "Guided capture", "Done")
+        visible("Record", "Activate", "Manual editor", "Capture settings", "Guided capture", "Calculate New Solution", "Done")
         noVerticalScrolling()
-        compose.onNodeWithText("Fit details").performClick()
+        compose.onNodeWithText("Fit details").assertDoesNotExist()
         visible("Clear table...", "Done")
+        compose.onNodeWithContentDescription("Calibration information").performClick()
+        visible("Calibration information", "Close")
+        compose.onNodeWithText("Close").performClick()
         noVerticalScrolling()
         compose.onNodeWithText("Backups").performClick()
         visible("Save", "Load", "Share", "Done")
         noVerticalScrolling()
         compose.onNodeWithText("Table").performClick()
         compose.onNodeWithText("Capture settings").performClick()
-        visible("Seconds", "Percent", "Restore defaults", "Cancel", "Save settings")
-        noVerticalScrolling()
-        compose.onNodeWithText("Seconds").performTextReplacement("5")
-        visible("Save settings", "Cancel")
-        noVerticalScrolling()
-        compose.onNodeWithText("Save settings").performClick()
+        compose.onNodeWithTag("stream-capture-settings-title").assertIsDisplayed()
+        visible("Cancel", "Save settings")
+        compose.onNodeWithText("Cadence window (± rpm)").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Cancel").performClick()
         visible("Manual editor", "Capture settings")
+    }
+
+    @Test fun clearRequiresExplicitConfirmationAndCancelPreservesTable() {
+        var clearCalls = 0
+        compose.setContent { MaterialTheme {
+            GrupettoCalibrationPanel(GrupettoCalibrationUiState(count = 235, table = table), {}, {}, { clearCalls++ }, {})
+        } }
+        compose.onNodeWithText("Clear table...").performClick()
+        compose.runOnIdle { org.junit.Assert.assertEquals(0, clearCalls) }
+        visible("Clear Grupetto table?", "Keep table", "Clear Grupetto table")
+        compose.onNodeWithText("Keep table").assertIsFocused().performClick()
+        compose.onNodeWithText("Clear Grupetto table?").assertDoesNotExist()
+        compose.runOnIdle { org.junit.Assert.assertEquals(0, clearCalls) }
+        compose.onNodeWithText("Clear table...").performClick()
+        compose.onNodeWithText("Keep table").assertIsFocused()
+        // Espresso's default root may select the unfocused activity beneath this dialog.
+        // Send a real BACK event to the focused Android window instead; do not bypass dismiss.
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+            .sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        compose.waitForIdle()
+        compose.onNodeWithText("Clear Grupetto table?").assertDoesNotExist()
+        compose.runOnIdle { org.junit.Assert.assertEquals(0, clearCalls) }
+        compose.onNodeWithText("Clear table...").performClick()
+        compose.onNodeWithText("Clear Grupetto table").performClick()
+        compose.runOnIdle { org.junit.Assert.assertEquals(1, clearCalls) }
+        compose.onNodeWithText("Clear Grupetto table?").assertDoesNotExist()
+    }
+
+    @Test fun compactActionsWrapAndKeepTouchTargets() {
+        compose.setContent { MaterialTheme {
+            androidx.compose.foundation.layout.Box(Modifier.width(300.dp)) {
+                CalibrationTableActions({}, {}, {}, {}, manualEnabled = true)
+            }
+        } }
+        listOf("Guided capture", "Manual editor", "Capture settings", "Clear table...").forEach {
+            compose.onNodeWithText(it).assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+        }
+        val guide = compose.onNodeWithText("Guided capture").fetchSemanticsNode().boundsInRoot
+        val clear = compose.onNodeWithText("Clear table...").fetchSemanticsNode().boundsInRoot
+        org.junit.Assert.assertTrue(clear.top >= guide.bottom)
     }
 
     @Test fun guidedRideRecoveryAndReviewActionsFitWithoutScrolling() {

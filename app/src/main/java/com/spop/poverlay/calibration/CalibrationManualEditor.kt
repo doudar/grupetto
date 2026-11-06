@@ -1,5 +1,7 @@
 package com.spop.poverlay.calibration
 
+import com.spop.poverlay.ui.components.GrupettoTabs
+
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
@@ -37,6 +39,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 private val EditorBackground = Color(0xFF0C1420)
 private val EditorPanel = Color(0xFF142132)
@@ -51,7 +54,6 @@ internal fun CalibrationManualEditor(initial: GrupettoCalibrationTable, active: 
     var table by remember { mutableStateOf(history.current) }
     var selected by rememberSaveable { mutableIntStateOf(15 * 16 + 7) }
     var editScope by rememberSaveable { mutableStateOf(CalibrationEditScope.Cell) }
-    var blend by rememberSaveable { mutableStateOf(true) }
     var zoom by rememberSaveable { mutableStateOf(false) }
     var compare by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
@@ -128,14 +130,14 @@ internal fun CalibrationManualEditor(initial: GrupettoCalibrationTable, active: 
                     onFill = { commit(CalibrationManualEdit.fillGaps(table), "Filled every unknown cell from existing calibration. Covered values kept.") },
                     onSmooth = { commit(CalibrationManualEdit.smooth(table, table.gains.indices.toSet()), "Smoothed the whole table toward neighboring values.") },
                     onSoften = { commit(CalibrationManualEdit.soften(table, table.gains.indices.toSet()), "Reduced every correction by 20% toward zero.") },
-                    onReset = { commit(CalibrationManualEdit.resetToRecorded(table), "Removed all manual edits; recorded fit restored.") })
+                    onReset = { commit(CalibrationManualEdit.resetCorrections(table), "Reset all corrections to zero. Undo is available until saving.") })
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                     val wide = maxWidth >= 840.dp
                     val inspector: @Composable () -> Unit = {
-                        EditorInspector(table, selected, editScope, { editScope = it }, blend, { blend = it }, editable, compactInput = keyboardOpen,
+                        EditorInspector(table, selected, editScope, { editScope = it }, editable, compactInput = keyboardOpen,
                             onInputFocus = { inputFocused = it },
-                            onSet = { value -> commit(CalibrationManualEdit.setPercent(table, selection, value, blend), "Set ${selection.size} selected cell(s) to ${percentLabel(value)}${if (blend) " with blending" else ""}.") },
-                            onNudge = { amount -> commit(CalibrationManualEdit.nudge(table, selection, amount, blend), "Adjusted selection by ${percentLabel(amount)} percentage points.") },
+                            onSet = { value -> commit(CalibrationManualEdit.setPercent(table, selection, value, false), "Set ${selection.size} selected cell(s) to ${percentLabel(value)}.") },
+                            onNudge = { amount -> commit(CalibrationManualEdit.nudge(table, selection, amount, false), "Adjusted selection by ${percentLabel(amount)} percentage points.") },
                             onSmooth = { commit(CalibrationManualEdit.smooth(table, selection), "Smoothed ${selection.size} cell(s) toward their neighbors.") },
                             onSoften = { commit(CalibrationManualEdit.soften(table, selection), "Reduced selected corrections by 20% toward zero.") },
                             onRevert = { commit(initial, "Restored the table from when this editor opened.") }, dirty = dirty)
@@ -154,7 +156,11 @@ internal fun CalibrationManualEditor(initial: GrupettoCalibrationTable, active: 
                 }
                 Text(error ?: notice, color = if (error != null) Color(0xFFFBBF24) else EditorMuted, fontSize = 12.sp)
             }
-            if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text("Discard unsaved edits?") },
+            if (discard) AlertDialog(onDismissRequest = { discard = false },
+                modifier = Modifier.widthIn(max = 620.dp).fillMaxWidth(.9f).testTag("manual-edit-discard-confirmation")
+                    .border(1.5.dp, EditorAccent.copy(alpha = .7f), RoundedCornerShape(16.dp)),
+                shape = RoundedCornerShape(16.dp), properties = DialogProperties(usePlatformDefaultWidth = false),
+                title = { Text("Discard unsaved edits?") },
                 text = { Text("Your saved power table has not changed.") },
                 confirmButton = { TextButton(onClose) { Text("Discard edits") } },
                 dismissButton = { TextButton({ discard = false }) { Text("Keep editing") } })
@@ -166,7 +172,7 @@ internal fun CalibrationManualEditor(initial: GrupettoCalibrationTable, active: 
 
 @Composable
 private fun EditorInspector(table: GrupettoCalibrationTable, selected: Int, scope: CalibrationEditScope,
-    onScope: (CalibrationEditScope) -> Unit, blend: Boolean, onBlend: (Boolean) -> Unit, enabled: Boolean,
+    onScope: (CalibrationEditScope) -> Unit, enabled: Boolean,
     compactInput: Boolean,
     onInputFocus: (Boolean) -> Unit,
     onSet: (Double) -> Unit, onNudge: (Double) -> Unit, onSmooth: () -> Unit,
@@ -180,16 +186,12 @@ private fun EditorInspector(table: GrupettoCalibrationTable, selected: Int, scop
     }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var input by rememberSaveable(selected, percent) { mutableStateOf(String.format(Locale.US, "%.1f", percent)) }
-    val parsed = input.replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it in -35.0..35.0 }
+    val parsed = input.replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it in -CalibrationCorrectionLimits.maximumPercent..CalibrationCorrectionLimits.maximumPercent }
     Column(Modifier.fillMaxWidth().focusRequester(completedInputFocus).focusable()
-        .background(EditorPanel, RoundedCornerShape(12.dp)).padding(10.dp),
+        .background(EditorPanel, RoundedCornerShape(12.dp)).verticalScroll(rememberScrollState()).padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("${45 + selected % 16 * 5} rpm / point ${selected / 16} / ${percentLabel(percent)}", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        if (!compactInput) TabRow(tab, backgroundColor = Color.Transparent) {
-            listOf("Edit", "Scope", "Tools").forEachIndexed { index, label ->
-                Tab(tab == index, { tab = index }, modifier = Modifier.height(36.dp), text = { Text(label, fontSize = 12.sp) })
-            }
-        }
+        if (!compactInput) GrupettoTabs(tab, listOf("Edit", "Scope", "Tools"), { tab = it }, fontSize = 12.sp)
         if (tab == 1 && !compactInput) {
         Text("Apply to", fontWeight = FontWeight.Bold, fontSize = 13.sp)
         CalibrationEditScope.values().toList().chunked(2).forEach { options ->
@@ -204,11 +206,7 @@ private fun EditorInspector(table: GrupettoCalibrationTable, selected: Int, scop
                 }
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(blend, onBlend, enabled = enabled, colors = SwitchDefaults.colors(checkedThumbColor = EditorAccent))
-            Text("Blend into neighbors", fontSize = 14.sp)
-        }
-        Text("Blends over 2.5 resistance points and 15 rpm. Turn off for exact cells only.", fontSize = 11.sp, color = EditorMuted)
+        Text("Changes affect only the selected cells. Use Smooth explicitly to average neighboring values.", fontSize = 11.sp, color = EditorMuted)
         Text("Raw resistance AD ${table.baseline[selected / 16]}", color = EditorMuted, fontSize = 12.sp)
         }
         if (tab == 0 || compactInput) {
@@ -219,18 +217,26 @@ private fun EditorInspector(table: GrupettoCalibrationTable, selected: Int, scop
             modifier = Modifier.fillMaxWidth().onFocusChanged { onInputFocus(it.isFocused) },
             colors = TextFieldDefaults.outlinedTextFieldColors(textColor = Color.White, unfocusedBorderColor = EditorMuted,
                 focusedBorderColor = EditorAccent, focusedLabelColor = EditorAccent, unfocusedLabelColor = EditorMuted, cursorColor = EditorAccent))
+        Slider(value = (parsed ?: percent).coerceIn(-50.0, 50.0).toFloat(),
+            onValueChange = { input = String.format(Locale.US, "%.1f", (it * 10).roundToInt() / 10.0) },
+            onValueChangeFinished = { parsed?.let(onSet); finishInput() },
+            valueRange = -50f..50f, enabled = enabled,
+            colors = SliderDefaults.colors(thumbColor = EditorAccent, activeTrackColor = EditorAccent),
+            modifier = Modifier.fillMaxWidth().testTag("manual-correction-slider")
+                .semantics { contentDescription = "Adjust selected correction from minus 50 to plus 50 percent" })
+        Text("Drag to adjust · Release to apply · Undo available", color = EditorMuted, fontSize = 10.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton({ input = if (input.startsWith("-")) input.removePrefix("-") else "-" + input.removePrefix("+") }, enabled = enabled) { Text("+/-") }
             Button({ parsed?.let(onSet); finishInput() }, enabled = enabled && parsed != null, modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.buttonColors(backgroundColor = EditorAccent, contentColor = EditorBackground)) { Text("Set correction") }
         }
-        Text(if (parsed == null) "Enter a number from -35 to +35%." else "Relative to raw bike watts / negative lowers power.",
+        Text(if (parsed == null) "Enter a number from -50 to +50%." else "Relative to raw bike watts / negative lowers power.",
             fontSize = 11.sp, color = if (parsed == null) Color(0xFFFBBF24) else EditorMuted)
         if (!compactInput) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton({ onNudge(-1.0) }, enabled = enabled, modifier = Modifier.weight(1f)) { Text("-1%") }
             OutlinedButton({ onNudge(1.0) }, enabled = enabled, modifier = Modifier.weight(1f)) { Text("+1%") }
         }
-        Text("${scope.label} / ${if (blend) "Blending on" else "Exact cells only"}", fontSize = 11.sp, color = EditorMuted)
+        Text("${scope.label} / Exact cells only", fontSize = 11.sp, color = EditorMuted)
         }
         if (tab == 2 && !compactInput) {
         Text("Selection tools", fontWeight = FontWeight.Bold, fontSize = 16.sp)
@@ -255,7 +261,7 @@ private fun EditorQuickFixes(table: GrupettoCalibrationTable, enabled: Boolean,
                     table.correctionPercent.any { it != null } && table.correctionPercent.any { it == null }, onFill) },
                 { EditorTool("Smooth whole table", "Soften abrupt changes between neighbors.", enabled, onSmooth) },
                 { EditorTool("Reduce all 20%", "Bring every correction closer to zero.", enabled, onSoften) },
-                { EditorTool("Restore recorded fit", "Remove manual edits; keep recorded data.", enabled && table.manualOffsets.isNotEmpty(), onReset) }
+                { EditorTool("Reset corrections", "Set the shared table to zero; keep original observations.", enabled, onReset) }
             )
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 buttons.chunked(columns).forEach { row ->
@@ -324,7 +330,7 @@ private fun EditorGrid(table: GrupettoCalibrationTable, selection: Set<Int>, sel
                                         if (index == selected) EditorAccent else Color.White, RoundedCornerShape(3.dp)) else Modifier)
                                     .selectable(index in selection, onClick = { onSelect(index) })
                                     .semantics { contentDescription = "Point $x, ${45 + y * 5} rpm, " +
-                                        (value?.let(::percentLabel) ?: "no nearby data") + if (manual) ", manual" else "" },
+                                        (value?.let(::percentLabel) ?: "no saved cell data") + if (manual) ", manual" else "" },
                                     contentAlignment = Alignment.Center) {
                                     if (zoom) Text(value?.let(::percentLabel) ?: "--", fontSize = 12.sp,
                                         color = if (value != null && abs(value) < 5) Color(0xFF101827) else Color.White)
