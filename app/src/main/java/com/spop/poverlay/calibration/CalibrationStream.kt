@@ -10,6 +10,21 @@ data class CalibrationObservation(val nativeAt: Long, val pedalAt: Long,
 internal const val CalibrationCellSeconds = 100
 internal const val MaxCalibrationSamples = 3600 + 496 * CalibrationCellSeconds
 
+/** Ephemeral receipt from retention, never a timer or a saved calibration value. */
+data class CalibrationRollingReplacement(val cell: Int, val at: Long, val count: Int)
+
+internal fun calibrationRollingReplacement(baseline: List<Int>, before: List<CalibrationSample>,
+    retained: List<CalibrationSample>, cell: Int?, now: Long): CalibrationRollingReplacement? {
+    if (cell == null) return null
+    fun key(s: CalibrationSample) = Triple(s.capturedAt, s.observation!!.nativeAt, s.observation.pedalAt)
+    val current = retained.filter { it.observation != null && calibrationCellIndex(baseline, it.ad, it.rpm) == cell }
+    if (current.size < CalibrationCellSeconds) return null
+    val keys = current.map(::key).toHashSet()
+    val removed = before.filter { it.observation != null && calibrationCellIndex(baseline, it.ad, it.rpm) == cell }
+        .distinctBy(::key).count { key(it) !in keys }
+    return if (removed > 0) CalibrationRollingReplacement(cell, now, removed) else null
+}
+
 /** Accepted seconds belong to a cell, not to a global wall-clock window. Legacy effort evidence
  * is retained separately, once per original effort, and never expanded into invented samples. */
 internal fun retainCalibrationObservations(baseline: List<Int>, samples: List<CalibrationSample>): List<CalibrationSample> {

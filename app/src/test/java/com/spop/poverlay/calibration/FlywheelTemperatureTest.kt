@@ -62,12 +62,38 @@ class FlywheelTemperatureTest {
         assertEquals(checkpoint.celsius, FlywheelTemperatureModel(0, 1, checkpoint).state.celsius, 0.0)
     }
 
-    @Test fun roomEditPreservesAbsoluteTemperatureAndChangesCoolingDestination() {
+    @Test fun coldRoomEditImmediatelyTracksBaselineAndPersistsIt() {
         val m = FlywheelTemperatureModel(0, 1000)
         m.setRoomTemperature(80.0, 0)
-        assertEquals(65.0, m.state.fahrenheit, 1e-9)
+        assertEquals(80.0, m.state.fahrenheit, 1e-9)
         assertEquals(80.0, m.advance(100_000_000).fahrenheit, 1e-9)
         assertEquals(80.0, FlywheelTemperatureModel(0, 1000, m.checkpoint(1000)).state.roomFahrenheit, 0.0)
+    }
+
+    @Test fun warmRoomEditPreservesRiseAndAdvancesOldBaselineFirst() {
+        val m = FlywheelTemperatureModel(0, 1000, ThermalCheckpoint(1, (100.0-32)/1.8, 65.0, 1000))
+        m.observe(0, 200.0)
+        val expected = thermalStep((100.0-32)/1.8, ambient, 200.0, 1.0)
+        m.setRoomTemperature(72.0, 1000)
+        assertEquals(expected + 7.0/1.8, m.state.celsius, 1e-9)
+        assertEquals(expected-ambient, m.state.celsius-(72.0-32)/1.8, 1e-9)
+        val shifted = m.state
+        m.setRoomTemperature(72.0, 1000)
+        assertEquals(shifted, m.state)
+        m.setRoomTemperature(60.0, 1000)
+        assertEquals(expected-5.0/1.8, m.state.celsius, 1e-9)
+        assertEquals(thermalStep(m.state.celsius,(60.0-32)/1.8,200.0,1.0), m.advance(2000).celsius,1e-9)
+    }
+
+    @Test fun roomEditPreservesNegativeOffsetAndRejectsInvalidWithoutMutation() {
+        val m = FlywheelTemperatureModel(0, 1000, ThermalCheckpoint(1, (60.0-32)/1.8,65.0,1000))
+        m.setRoomTemperature(75.0,0)
+        assertEquals(70.0,m.state.fahrenheit,1e-9)
+        val before = m.state
+        listOf(Double.NaN, Double.POSITIVE_INFINITY,31.0,111.0).forEach {
+            assertThrows(IllegalArgumentException::class.java) { m.setRoomTemperature(it,1000) }
+            assertEquals(before,m.state)
+        }
     }
 
     @Test fun invalidOrFutureVersionCheckpointFallsBackSafely() {

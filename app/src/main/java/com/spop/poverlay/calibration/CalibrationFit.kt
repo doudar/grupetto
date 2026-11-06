@@ -48,7 +48,8 @@ enum class CapturePhase(val cue: String) {
 
 data class CaptureProgress(val phase: CapturePhase = CapturePhase.Waiting, val seconds: Int = 0,
     val totalSeconds: Int = 8, val settleSeconds: Int = 3,
-    val streaming: Boolean = false, val cell: Int? = null, val bucketSeconds: Int = 0, val detail: String? = null) {
+    val streaming: Boolean = false, val cell: Int? = null, val bucketSeconds: Int = 0, val detail: String? = null,
+    val rollingReplacement: CalibrationRollingReplacement? = null) {
     val fraction get() = (seconds / totalSeconds.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
     val remaining get() = (totalSeconds - seconds).coerceAtLeast(0)
     val settleRemaining get() = (settleSeconds - seconds).coerceAtLeast(0)

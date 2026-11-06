@@ -81,7 +81,10 @@ internal class FlywheelTemperatureModel(nowMillis: Long, wallMillis: Long,
     fun setRoomTemperature(fahrenheit: Double, nowMillis: Long) {
         require(validRoomTemperature(fahrenheit))
         advance(nowMillis)
-        state = state.copy(roomFahrenheit = fahrenheit) // Preserve absolute flywheel temperature.
+        // A setup edit corrects the ambient baseline, rather than simulating a physical room change.
+        // Preserve accumulated rise (including a negative offset), after advancing on the old baseline.
+        state = state.copy(celsius = state.celsius + (fahrenheit - state.roomFahrenheit) / 1.8,
+            roomFahrenheit = fahrenheit)
     }
 
     fun checkpoint(wallMillis: Long) = ThermalCheckpoint(1, state.celsius, state.roomFahrenheit, wallMillis)

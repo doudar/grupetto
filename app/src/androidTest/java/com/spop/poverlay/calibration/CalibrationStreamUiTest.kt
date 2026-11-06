@@ -192,6 +192,39 @@ class CalibrationStreamUiTest {
         assertEquals(550.0, original.pedalWatts, 0.0)
     }
 
+    @Test fun fullBucketSignalsOnlyFreshReplacementAndStopsForPauseOrCellChange() {
+        val receipt = CalibrationRollingReplacement(167,1000,1)
+        val state = mutableStateOf(CalibrationUiState(enabled = true,
+            frame = CalibrationFrame(0,2000,80.0,200.0,"bike",1),
+            progress = CaptureProgress(CapturePhase.Collecting,streaming = true,cell = 167,
+                bucketSeconds = 100,rollingReplacement = receipt)))
+        compose.mainClock.autoAdvance = false
+        compose.setContent { MaterialTheme { CalibrationStreamBucket(state.value,true) } }
+        compose.onNodeWithText("Refreshing:",substring = true).assertDoesNotExist()
+        compose.runOnIdle { state.value = state.value.copy(progress = state.value.progress.copy(
+            rollingReplacement = receipt.copy(at = 2000,count = 3))) }
+        compose.mainClock.advanceTimeBy(100)
+        compose.onNodeWithText("Refreshing: +3 new / 3 oldest out").assertExists()
+        compose.runOnIdle { state.value = state.value.copy(enabled = false) }
+        compose.mainClock.advanceTimeBy(32)
+        compose.onNodeWithText("Refreshing:",substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Paused").assertExists()
+        compose.runOnIdle { state.value = state.value.copy(enabled = true,progress = state.value.progress.copy(
+            rollingReplacement = null,phase = CapturePhase.Waiting)) }
+        compose.mainClock.advanceTimeBy(32)
+        compose.runOnIdle { state.value = state.value.copy(progress = state.value.progress.copy(
+            rollingReplacement = receipt.copy(at = 2000,count = 3),phase = CapturePhase.Collecting)) }
+        compose.mainClock.advanceTimeBy(100)
+        compose.onNodeWithText("Refreshing:",substring = true).assertDoesNotExist()
+        compose.runOnIdle { state.value = state.value.copy(progress = state.value.progress.copy(
+            rollingReplacement = receipt.copy(at = 3000))) }
+        compose.mainClock.advanceTimeBy(100)
+        compose.onNodeWithText("Refreshing: +1 new / 1 oldest out").assertExists()
+        compose.runOnIdle { state.value = state.value.copy(progress = state.value.progress.copy(cell = 183)) }
+        compose.mainClock.advanceTimeBy(32)
+        compose.onNodeWithText("Refreshing:",substring = true).assertDoesNotExist()
+    }
+
     @Test fun bucketReportsTrueCellSecondsDuringFillCrossfadeOutlierWaitingAndPause() {
         val state = mutableStateOf(CalibrationUiState(enabled = true, frame = CalibrationFrame(0, 2000, 80.0,
             200.0, "bike", 1), progress = CaptureProgress(CapturePhase.Collecting,

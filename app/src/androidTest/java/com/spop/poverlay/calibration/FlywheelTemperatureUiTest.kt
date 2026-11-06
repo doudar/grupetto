@@ -22,6 +22,7 @@ class FlywheelTemperatureUiTest {
             CalibrationStreamSettingsDialog(CalibrationStreamSettings(), {}, {}, onRoomTemperature = { room = it })
         } }
         compose.onNodeWithTag("room-temperature-input").assertTextContains("65")
+        compose.onNodeWithTag("room-baseline-explanation").assertTextContains("keeping its rise above room", substring = true)
         compose.onNodeWithTag("room-temperature-input").performTextReplacement("NaN")
         compose.onNodeWithText("Save settings").assertIsNotEnabled()
         compose.onNodeWithTag("room-temperature-input").performTextReplacement("72")
@@ -71,6 +72,35 @@ class FlywheelTemperatureUiTest {
         } finally {
             firstScope.cancel(); secondScope.cancel(); prefs.edit().clear().commit()
         }
+    }
+
+    @Test fun baselineEditUpdatesLiveOutputButKeepsHistoricalPacketTemperatures() {
+        val base = InstrumentationRegistry.getInstrumentation().targetContext
+        val prefs = base.getSharedPreferences("thermal-baseline-fixture", Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+        val context = object : ContextWrapper(base) {
+            override fun getSharedPreferences(name: String, mode: Int) = prefs
+        }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        var now = 1000L
+        try {
+            val tracker = FlywheelTemperatureTracker(context,scope,{ now },{ 100000L+now })
+            tracker.observe(CalibrationFrame(now,2000,80.0,200.0,"bike",1))
+            val original = tracker.temperatureAt(now)!!
+            tracker.outputTemperatureAt(now)
+            tracker.setRoomTemperature(72.0)
+            assertEquals(72.0,tracker.state.value.fahrenheit,1e-9)
+            assertEquals(original,tracker.temperatureAt(now))
+            val live = tracker.outputTemperatureAt(now)!!
+            assertEquals(original.celsius+7/1.8,live.celsius,1e-9)
+            assertEquals(72.0,live.roomFahrenheit,0.0)
+            assertEquals(65.0,original.roomFahrenheit,0.0)
+            now += 1000
+            tracker.observe(CalibrationFrame(now,2000,80.0,200.0,"bike",1))
+            assertEquals(72.0,tracker.temperatureAt(now)!!.roomFahrenheit,0.0)
+            assertEquals(original,tracker.temperatureAt(1000))
+            assertEquals(setOf("checkpoint"),prefs.all.keys)
+        } finally { scope.cancel(); prefs.edit().clear().commit() }
     }
 
     @Test fun roomControlAndAllCaptureSlidersFitTabletViewport() {

@@ -2,12 +2,20 @@ package com.spop.poverlay.calibration
 
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -26,11 +34,40 @@ import androidx.compose.ui.unit.sp
 @Composable
 internal fun CalibrationStreamBucket(capture: CalibrationUiState, recording: Boolean) {
     val progress = capture.progress
+    val replacement = progress.rollingReplacement
+    val eligible = recording && capture.enabled && !capture.resting && capture.frame != null &&
+        progress.phase == CapturePhase.Collecting && progress.bucketSeconds >= CalibrationCellSeconds &&
+        replacement?.cell == progress.cell
+    // Opening/reopening a full bucket must not replay an old replacement receipt.
+    var seen by remember { mutableStateOf(replacement) }
+    var replacing by remember { mutableStateOf(false) }
+    val pulse = remember { Animatable(0f) }
+    LaunchedEffect(replacement, eligible) {
+        val fresh = replacement != null && replacement != seen
+        if (replacement != null) seen = replacement
+        replacing = false
+        pulse.snapTo(0f)
+        if (fresh && eligible) {
+            replacing = true
+            try {
+                coroutineScope {
+                    launch {
+                        pulse.snapTo(1f)
+                        pulse.animateTo(0f, tween(850))
+                    }
+                    // The text remains readable even with Android's animation scale at zero.
+                    delay(900)
+                }
+            } finally { replacing = false }
+        }
+    }
+    val showReplacement = replacing && eligible
     val label = when {
         !recording || !capture.enabled -> "Paused"
         capture.resting -> "Rest — resume when ready"
         capture.frame == null -> "Waiting for bike + pedals"
         progress.phase == CapturePhase.Settling -> "${progress.detail ?: "Settling"} - ${progress.settleRemaining}s"
+        showReplacement -> "Refreshing: +${replacement!!.count} new / ${replacement.count} oldest out"
         else -> progress.detail ?: progress.phase.cue
     }
     val seconds = progress.bucketSeconds.coerceIn(0, CalibrationCellSeconds)
@@ -59,6 +96,15 @@ internal fun CalibrationStreamBucket(capture: CalibrationUiState, recording: Boo
                     // A restrained light edge gives each incoming second a tangible finish.
                     drawLine(Color(0xFFD0F8E9).copy(alpha = .5f), Offset(width, 2.dp.toPx()),
                         Offset(width, size.height - 2.dp.toPx()), 1.dp.toPx())
+                    if (showReplacement && displayedCell == cell) {
+                        // Paired, finite edge fades: oldest leaves left, newest arrives right.
+                        // Animatable honors reduced-motion duration scale; no perpetual shimmer.
+                        val edge = minOf(24.dp.toPx(), width / 4)
+                        drawRoundRect(Color(0xFFFFD29A).copy(alpha = .45f * pulse.value),
+                            size = Size(edge, size.height), cornerRadius = radius)
+                        drawRoundRect(Color(0xFFE1FFF2).copy(alpha = .7f * pulse.value),
+                            topLeft = Offset(width - edge, 0f), size = Size(edge, size.height), cornerRadius = radius)
+                    }
                 }
             }
         }

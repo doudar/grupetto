@@ -2,7 +2,13 @@
 
 The calibration page shows an **estimated effective flywheel temperature**, not a sensor reading.
 Capture settings includes room temperature in Fahrenheit (default 65°F; accepted range 32–110°F).
-Changing room temperature preserves the absolute flywheel estimate and changes subsequent cooling.
+Changing room temperature is a **baseline correction**, not a simulated physical room change:
+the current flywheel estimate shifts by the same ambient delta, preserving its rise above room.
+For example, 100°F at a 65°F room becomes 107°F at a 72°F room; a cold estimate moves from
+65°F to 72°F immediately. The model first advances to the edit time on the previous baseline.
+Cooling/heating then continues against the new room setting. Existing uncertainty stays unchanged.
+The live correction uses the shifted estimate immediately, but historical samples and their
+temperature provenance are never rewritten, including delayed packets captured before the edit.
 Capture presets do not change room temperature. Cancel discards unsaved room edits.
 New temperature-tagged calibration cells now use the experimental normalization described in
 [thermal calibration](thermal-calibration.md). Old unknown-temperature cells retain their prior behavior.

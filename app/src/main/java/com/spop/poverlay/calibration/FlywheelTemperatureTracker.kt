@@ -11,10 +11,12 @@ import org.json.JSONObject
  * One small atomic preference snapshot every 30 seconds, never disk work on telemetry callbacks.
  */
 class FlywheelTemperatureTracker(context: Context,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)) {
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    private val elapsedMillis: () -> Long = SystemClock::elapsedRealtime,
+    private val wallMillis: () -> Long = System::currentTimeMillis) {
     private val preferences = context.getSharedPreferences("experimental-flywheel-temperature", Context.MODE_PRIVATE)
     private val lock = Any()
-    private val model = FlywheelTemperatureModel(SystemClock.elapsedRealtime(), System.currentTimeMillis(),
+    private val model = FlywheelTemperatureModel(elapsedMillis(), wallMillis(),
         runCatching {
             val j = JSONObject(preferences.getString("checkpoint", null) ?: return@runCatching null)
             ThermalCheckpoint(j.getInt("version"), j.getDouble("celsius"), j.getDouble("roomFahrenheit"), j.getLong("wallMillis"))
@@ -22,6 +24,7 @@ class FlywheelTemperatureTracker(context: Context,
     private val mutableState = MutableStateFlow(model.state)
     private val recent = ArrayDeque<CalibrationTemperature>()
     private var lastOutputTemperature: CalibrationTemperature? = null
+    private var outputBaselineAt = Long.MIN_VALUE
     val state = mutableState.asStateFlow()
 
     init {
@@ -30,7 +33,7 @@ class FlywheelTemperatureTracker(context: Context,
             while (isActive) {
                 delay(1000)
                 synchronized(lock) {
-                    mutableState.value = model.advance(SystemClock.elapsedRealtime())
+                    mutableState.value = model.advance(elapsedMillis())
                     if (++ticks % 30 == 0) persist()
                 }
             }
@@ -54,18 +57,26 @@ class FlywheelTemperatureTracker(context: Context,
 
     /** Output may hold the last applied estimate during a gap; recordings must never retimestamp it. */
     fun outputTemperatureAt(nativeAt: Long): CalibrationTemperature? = synchronized(lock) {
-        temperatureAt(nativeAt)?.let { lastOutputTemperature = it }
+        temperatureAt(nativeAt)?.takeIf { it.estimatedAt > outputBaselineAt }?.let { lastOutputTemperature = it }
         lastOutputTemperature
     }
 
     fun setRoomTemperature(fahrenheit: Double) = synchronized(lock) {
-        model.setRoomTemperature(fahrenheit, SystemClock.elapsedRealtime())
+        val now = elapsedMillis()
+        val changed = fahrenheit != model.state.roomFahrenheit
+        model.setRoomTemperature(fahrenheit, now)
+        if (changed) {
+            outputBaselineAt = now
+            // Update live correction immediately, without rewriting the immutable packet history.
+            lastOutputTemperature = CalibrationTemperature(model.state.celsius, model.state.roomFahrenheit,
+                now, historyUnobserved = model.state.unobservedHistory, confidence = model.state.confidence)
+        }
         mutableState.value = model.state
         persist()
     }
 
     private fun persist() {
-        val s = model.checkpoint(System.currentTimeMillis())
+        val s = model.checkpoint(wallMillis())
         preferences.edit().putString("checkpoint", JSONObject().put("version", s.version)
             .put("celsius", s.celsius).put("roomFahrenheit", s.roomFahrenheit)
             .put("wallMillis", s.wallMillis).toString()).apply()

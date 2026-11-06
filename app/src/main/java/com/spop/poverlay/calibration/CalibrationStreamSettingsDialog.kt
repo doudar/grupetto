@@ -114,6 +114,9 @@ internal fun CalibrationStreamSettingsDialog(settings: CalibrationStreamSettings
                 }
                 Text("Calculations use cell RPM and a fixed 65°F thermal reference. Pedal watts stay raw; saved data is kept.",
                     fontSize = 11.sp, color = muted)
+                if (onRoomTemperature != null) Text(
+                    "Room edits correct the baseline: flywheel shifts equally, keeping its rise above room. Past samples stay unchanged.",
+                    fontSize = 11.sp, color = accent, modifier = Modifier.testTag("room-baseline-explanation"))
             }
         },
         confirmButton = { Button({ parsed?.let {
