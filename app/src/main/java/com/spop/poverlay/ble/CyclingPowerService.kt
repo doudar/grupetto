@@ -59,9 +59,10 @@ class CyclingPowerService(server: BleServer) : BaseBleService(server) {
 
         val powerValue = com.spop.poverlay.sensor.power.telemetryWatts(power)
 
-        // Use shared CSC counters from server (1/1024s timers, LE wrapping)
+        // Shared CSC counters from the server use 1/1024 s timers (LE wrapping).
+        // The Cycling Power wheel event time is in 1/2048 s, so the wheel time must be converted.
         val wheelRevs = server.cscCumulativeWheelRev
-        val wheelTime = server.cscLastWheelEvtTime and 0xFFFF
+        val wheelTime = cyclingPowerWheelEventTime(server.cscLastWheelEvtTime)
         val crankRevs = server.cscCumulativeCrankRev and 0xFFFF
         val crankTime = server.cscLastCrankEvtTime and 0xFFFF
 
@@ -96,3 +97,9 @@ class CyclingPowerService(server: BleServer) : BaseBleService(server) {
         }
     }
 }
+
+/**
+ * Converts a wheel event time in 1/1024 s ticks (as used by the CSC service) to the 1/2048 s
+ * resolution required by the Cycling Power Measurement characteristic, wrapping at 16 bits.
+ */
+internal fun cyclingPowerWheelEventTime(ticks1024: Int): Int = (ticks1024 * 2) and 0xFFFF
