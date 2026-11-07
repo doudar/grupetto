@@ -101,7 +101,8 @@ internal fun CalibrationManualEditor(initial: GrupettoCalibrationTable, active: 
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Column(Modifier.weight(1f)) {
                         Text("Power table studio", fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                        Text("MANUAL CALIBRATION  /  31 x 16", fontSize = 11.sp, color = EditorAccent)
+                        Text(if (table.thermalCells.isEmpty()) "MANUAL CALIBRATION  /  31 x 16"
+                            else "THERMAL CELLS: 65°F REFERENCE / OUTPUT LIMITED TO ±50%", fontSize = 11.sp, color = EditorAccent)
                     }
                     TextButton({ close() }, enabled = !saving) { Text("Close", color = EditorMuted) }
                     Button(onClick = {
@@ -178,6 +179,8 @@ private fun EditorInspector(table: GrupettoCalibrationTable, selected: Int, scop
     onSet: (Double) -> Unit, onNudge: (Double) -> Unit, onSmooth: () -> Unit,
     onSoften: () -> Unit, onRevert: () -> Unit, dirty: Boolean) {
     val percent = CalibrationManualEdit.percent(table.gains[selected])
+    val range = CalibrationManualEdit.percentRange(table, scope.indices(selected))
+    val thermal = selected in table.thermalCells
     val completedInputFocus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     fun finishInput() {
@@ -186,7 +189,7 @@ private fun EditorInspector(table: GrupettoCalibrationTable, selected: Int, scop
     }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var input by rememberSaveable(selected, percent) { mutableStateOf(String.format(Locale.US, "%.1f", percent)) }
-    val parsed = input.replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it in -CalibrationCorrectionLimits.maximumPercent..CalibrationCorrectionLimits.maximumPercent }
+    val parsed = input.replace(',', '.').toDoubleOrNull()?.takeIf { it.isFinite() && it in range }
     Column(Modifier.fillMaxWidth().focusRequester(completedInputFocus).focusable()
         .background(EditorPanel, RoundedCornerShape(12.dp)).verticalScroll(rememberScrollState()).padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -210,27 +213,29 @@ private fun EditorInspector(table: GrupettoCalibrationTable, selected: Int, scop
         Text("Raw resistance AD ${table.baseline[selected / 16]}", color = EditorMuted, fontSize = 12.sp)
         }
         if (tab == 0 || compactInput) {
-        OutlinedTextField(input, { input = it }, enabled = enabled, label = { Text("Correction (%)") },
+        OutlinedTextField(input, { input = it }, enabled = enabled, label = { Text(if (thermal) "Reference gain (%)" else "Correction (%)") },
             placeholder = { Text("e.g. -5 or +8.5") }, singleLine = true, isError = parsed == null,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { finishInput() }),
             modifier = Modifier.fillMaxWidth().onFocusChanged { onInputFocus(it.isFocused) },
             colors = TextFieldDefaults.outlinedTextFieldColors(textColor = Color.White, unfocusedBorderColor = EditorMuted,
                 focusedBorderColor = EditorAccent, focusedLabelColor = EditorAccent, unfocusedLabelColor = EditorMuted, cursorColor = EditorAccent))
-        Slider(value = (parsed ?: percent).coerceIn(-50.0, 50.0).toFloat(),
+        Slider(value = (parsed ?: percent).coerceIn(range).toFloat(),
             onValueChange = { input = String.format(Locale.US, "%.1f", (it * 10).roundToInt() / 10.0) },
             onValueChangeFinished = { parsed?.let(onSet); finishInput() },
-            valueRange = -50f..50f, enabled = enabled,
+            valueRange = range.start.toFloat()..range.endInclusive.toFloat(), enabled = enabled,
             colors = SliderDefaults.colors(thumbColor = EditorAccent, activeTrackColor = EditorAccent),
             modifier = Modifier.fillMaxWidth().testTag("manual-correction-slider")
-                .semantics { contentDescription = "Adjust selected correction from minus 50 to plus 50 percent" })
+                .semantics { contentDescription = "Adjust selected correction from ${range.start} to ${range.endInclusive} percent" })
         Text("Drag to adjust · Release to apply · Undo available", color = EditorMuted, fontSize = 10.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton({ input = if (input.startsWith("-")) input.removePrefix("-") else "-" + input.removePrefix("+") }, enabled = enabled) { Text("+/-") }
             Button({ parsed?.let(onSet); finishInput() }, enabled = enabled && parsed != null, modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.buttonColors(backgroundColor = EditorAccent, contentColor = EditorBackground)) { Text("Set correction") }
         }
-        Text(if (parsed == null) "Enter a number from -50 to +50%." else "Relative to raw bike watts / negative lowers power.",
+        Text(if (parsed == null) "Enter a number from ${range.start} to ${range.endInclusive}%."
+            else if (thermal) "65°F reference gain / final output limited to ±50%."
+            else "Relative to raw bike watts / negative lowers power.",
             fontSize = 11.sp, color = if (parsed == null) Color(0xFFFBBF24) else EditorMuted)
         if (!compactInput) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton({ onNudge(-1.0) }, enabled = enabled, modifier = Modifier.weight(1f)) { Text("-1%") }

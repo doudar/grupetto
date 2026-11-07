@@ -136,6 +136,34 @@ class CalibrationManualEditorTest {
         return GrupettoCalibrationFitter.fit(baseline, samples)!!
     }
 
+    @Test fun thermalReferenceSliderAndNudgePreserveGainsBeyondFinalOutputLimit() {
+        val cell = 15 * 16 + 7
+        val original = CalibrationManualEdit.setPercent(table(), setOf(cell), 0.0, false).let { t -> t.copy(
+            gains = t.gains.mapIndexed { i, gain -> if (i == cell) kotlin.math.ln(1.7) else gain },
+            thermalCells = setOf(cell), thermalAnchors = mapOf(cell to .85)) }
+        val history = CalibrationEditHistory(original)
+        compose.setContent { MaterialTheme(colors = darkColors()) {
+            CalibrationManualEditor(original, false, { _, _ -> }, {}, history)
+        } }
+        compose.onNodeWithText("Reference gain (%)").assertIsDisplayed()
+        compose.onNodeWithText("+1%").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(1.71, kotlin.math.exp(history.current.gains[cell]), 1e-9) }
+        val slider = compose.onNodeWithTag("manual-correction-slider")
+        slider.performScrollTo().performTouchInput {
+            down(center)
+            moveTo(Offset(width * .98f, centerY), 300)
+        }
+        compose.runOnIdle { assertEquals(1.71, kotlin.math.exp(history.current.gains[cell]), 1e-9) }
+        slider.performTouchInput { up() }
+        compose.runOnIdle {
+            assertTrue(kotlin.math.exp(history.current.gains[cell]) > 1.71)
+            assertTrue(history.current.corrected(200.0, original.baseline[15].toDouble(), 80.0,
+                CalibrationTemperature(CalibrationThermalCorrection.ReferenceCelsius, 65.0, 0)) <= 300.0)
+        }
+        compose.onNodeWithText("Undo").performClick()
+        compose.runOnIdle { assertEquals(1.71, kotlin.math.exp(history.current.gains[cell]), 1e-9) }
+    }
+
     @Test fun draggingCorrectionCommitsOnceOnReleaseOnlyToSelectionAndSupportsUndo() {
         val original = table()
         val history = CalibrationEditHistory(original)

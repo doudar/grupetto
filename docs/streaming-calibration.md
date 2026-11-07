@@ -3,6 +3,13 @@
 Recording now uses paired observations instead of overlapping five-reading effort medians.
 The sensor-board candidate/write workflow remains separate and does not learn from raw stream seconds.
 
+At 100/100, a brief paired edge fade and `Refreshing: +N new / N oldest out` receipt indicate
+actual rolling replacement. The cue is emitted only when retention removes old observations
+from that cell; reaching capacity, duplicate/rejected packets and idle polling do not trigger it.
+It stops when paused, waiting or changing cells and does not replay when reopening the page.
+Android's reduced-animation scale controls the finite fade; the text still conveys the update
+when motion is disabled. No calibration values or neighboring cells are animated or blended.
+
 ## Admission and settling
 
 The fitting cell still uses the existing nearest 5-rpm row. The capture gate instead

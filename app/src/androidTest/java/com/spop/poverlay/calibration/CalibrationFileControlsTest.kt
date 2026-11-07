@@ -35,11 +35,14 @@ class CalibrationFileControlsTest {
             baseline, listOf(sample)), GrupettoCalibrationFitter.fit(baseline, listOf(sample)))
         val backup = CalibrationBackup(profile, null)
         val actions = mutableListOf<String>()
+        val saveIntents = mutableListOf<Intent>()
         val owner = object : ActivityResultRegistryOwner {
             override val activityResultRegistry = object : ActivityResultRegistry() {
                 override fun <I, O> onLaunch(requestCode: Int, contract: ActivityResultContract<I, O>,
                     input: I, options: ActivityOptionsCompat?) {
-                    actions += contract.createIntent(context, input).action!!
+                    val intent = contract.createIntent(context, input)
+                    actions += intent.action!!
+                    if (intent.action == Intent.ACTION_CREATE_DOCUMENT) saveIntents += intent
                     dispatchResult(requestCode, android.app.Activity.RESULT_OK, Intent().setData(uri))
                 }
             }
@@ -64,11 +67,19 @@ class CalibrationFileControlsTest {
         }
         try {
             compose.onNodeWithText("Load").assertIsNotEnabled()
+            val nameBeforeSave = calibrationBackupFilename()
             compose.onNodeWithText("Save").assertIsEnabled().performClick()
             compose.waitUntil(10000) { file.length() > 0 }
             compose.waitForIdle()
             assertEquals(profile.capture, file.inputStream().use(CalibrationBackup::read).draft!!.capture)
             compose.onNodeWithText("Calibration backup saved.").assertExists()
+            val saveIntent = saveIntents.single()
+            assertEquals("application/json", saveIntent.type)
+            assertTrue(saveIntent.getStringExtra(Intent.EXTRA_TITLE) in
+                setOf(nameBeforeSave, calibrationBackupFilename()))
+            assertTrue(saveIntent.getStringExtra(Intent.EXTRA_TITLE)!!.matches(Regex("grupettoTable[0-9]{6}\\.json")))
+            // The picker-returned URI wins, even when its filename differs from the suggestion.
+            assertNotEquals(saveIntent.getStringExtra(Intent.EXTRA_TITLE), file.name)
             compose.onNodeWithText("Share").assertIsEnabled().performClick()
             compose.waitUntil(10000) { chooser != null }
             assertEquals(Intent.ACTION_CHOOSER, chooser!!.action)
@@ -116,6 +127,50 @@ class CalibrationFileControlsTest {
             assertTrue(runCatching {
                 FileProvider.getUriForFile(context, "${context.packageName}.calibration-files", File(context.filesDir, "private.json"))
             }.isFailure)
+        } finally { file.delete() }
+    }
+
+    @Test fun cancellingSaveLeavesExportUntouchedAndAllowsRetryWithEditedName() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val directory = File(context.cacheDir, "calibration-shares").apply { mkdirs() }
+        val file = File.createTempFile("my-renamed-table-", ".json", directory)
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.calibration-files", file)
+        var launches = 0
+        var exports = 0
+        val payload = "{\"test\":\"unchanged export bytes\"}"
+        val owner = object : ActivityResultRegistryOwner {
+            override val activityResultRegistry = object : ActivityResultRegistry() {
+                override fun <I, O> onLaunch(requestCode: Int, contract: ActivityResultContract<I, O>,
+                    input: I, options: ActivityOptionsCompat?) {
+                    val intent = contract.createIntent(context, input)
+                    assertEquals(Intent.ACTION_CREATE_DOCUMENT, intent.action)
+                    assertTrue(intent.getStringExtra(Intent.EXTRA_TITLE)!!.matches(Regex("grupettoTable[0-9]{6}\\.json")))
+                    launches++
+                    if (launches == 1) dispatchResult(requestCode, android.app.Activity.RESULT_CANCELED, null)
+                    else dispatchResult(requestCode, android.app.Activity.RESULT_OK, Intent().setData(uri))
+                }
+            }
+        }
+        compose.setContent {
+            CompositionLocalProvider(LocalActivityResultRegistryOwner provides owner) {
+                MaterialTheme { CalibrationFileControls(true, true, { exports++; payload }, { error("Not used") }) }
+            }
+        }
+        try {
+            compose.onNodeWithText("Save").performClick()
+            compose.waitForIdle()
+            assertEquals(1, launches)
+            assertEquals(0, exports)
+            assertEquals(0L, file.length())
+            compose.onNodeWithText("Calibration backup saved.").assertDoesNotExist()
+            compose.onNodeWithText("Save").assertIsEnabled().performClick()
+            compose.waitUntil(10000) { file.length() > 0 }
+            compose.waitForIdle()
+            assertEquals(2, launches)
+            assertEquals(1, exports)
+            assertEquals(payload, file.readText(Charsets.UTF_8))
+            compose.onNodeWithText("Calibration backup saved.").assertExists()
+            compose.onNodeWithText("Save").assertIsEnabled()
         } finally { file.delete() }
     }
 }

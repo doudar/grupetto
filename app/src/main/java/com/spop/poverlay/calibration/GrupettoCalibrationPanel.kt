@@ -38,14 +38,19 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
     livePosition: CalibrationTablePosition? = null,
     captureSettings: CalibrationStreamSettings = CalibrationStreamSettings(),
     onCaptureSettings: ((CalibrationStreamSettings) -> Unit)? = null,
-    onRefit: (() -> Unit)? = null) {
+    temperature: FlywheelTemperatureState? = null, onRoomTemperature: ((Double) -> Unit)? = null,
+    onTemperatureUnit: ((TemperatureUnit) -> Unit)? = null, onRefit: (() -> Unit)? = null) {
     var confirmClear by remember { mutableStateOf(false) }
     var showInformation by remember { mutableStateOf(false) }
     var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     // Older versions saved Backups as index 2 before the Fit details tab was removed.
     val selectedTab = tab.coerceIn(0, 1)
     var settingsOpen by remember { mutableStateOf(false) }
-    if (settingsOpen) CalibrationStreamSettingsDialog(captureSettings, { onCaptureSettings?.invoke(it) }) { settingsOpen = false }
+    if (settingsOpen) CalibrationStreamSettingsDialog(captureSettings, { onCaptureSettings?.invoke(it) },
+        { settingsOpen = false }, roomFahrenheit = temperature?.roomFahrenheit ?: DefaultRoomTemperatureFahrenheit,
+        onRoomTemperature = onRoomTemperature,
+        temperatureUnit = temperature?.displayUnit ?: TemperatureUnit.Fahrenheit,
+        onTemperatureUnit = onTemperatureUnit)
     if (confirmClear) {
         AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text("Clear Grupetto table?") },
             text = { Text("Delete all saved Grupetto efforts and manual edits, stop recording, and turn correction off? " +
@@ -66,9 +71,16 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
             Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(state.message)
+                Text("Experimental flywheel estimate: raw bike watts approximate brake heat; no temperature sensor is read. " +
+                    "Assumes 8000 J/K effective heat capacity and 8 W/K cooling with a constant fan. Starts at room temperature; " +
+                    "missing telemetry and app-off periods assume zero heat input, so riding during gaps is missed. " +
+                    "Surface temperature may differ. New temperature-tagged cells use provisional thermal correction; old cells keep their existing behavior. " +
+                    "Reference gains are at fixed 65°F, independent of room temperature. Only final output is limited to ±50%. " +
+                    "The 0.004/K inverse-resistivity coefficient is an unvalidated low-speed hypothesis, with a thermal factor bounded to 0.85–1.10. " +
+                    "Temperature never feeds corrected watts back into the heat model. Room temperature is in Capture settings.")
                 Text("Record + Activate: each usable saved effort updates the active table automatically. " +
                     "One valid saved effort is enough to activate. Activate is still required the first time and after loading a backup.")
-                Text("Colors show the ${if (state.active) "active" else "preview"} correction as a percentage of raw bike watts. " +
+                Text("Colors show the ${if (state.active) "active" else "preview"} stored gain: thermal cells use a fixed 65°F reference; legacy cells keep their original basis. " +
                     "Red: bike overestimated. Blue: bike underestimated. Scale saturates at -20% / +20%.")
                 state.errors?.let {
                     Text("Average absolute error compares the same ${it.count} saved pedal measurements, not live wattage. Corrected error uses " +
@@ -81,6 +93,7 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
                     if (!table.canActivate) Text("Record at least one valid effort to activate.")
                 }
                 Text("In exported files, pedalWatts is the editable calibration target. recordedPedalWatts keeps the original pedal measurement after an edit; when absent, pedalWatts is still the original. Error scores and refitting use the original measurement.")
+                Text("New pairs also preserve estimated flywheel temperature, ambient, model version and uncertainty. Error scores replay each saved temperature; unknown-temperature efforts are excluded when their lookup uses a thermal cell.")
                 Text("Error scores describe the saved efforts and are informational. Streaming: hold the knob and cadence within your capture windows for the selected settle time. Collect distinct paired readings about once a second; each cell retains its latest 100 accepted seconds across visits. Legacy efforts remain aggregates, not raw seconds. Your outlier settings decide when consistent shifted ratios establish a new level; isolated outliers are held aside. The bar transition is visual only. Pulse: cyan shows your current cell even when not recording; orange settles, yellow holds, green saves. A separate pulsing green border marks the nearest filled cell used when your current cell has no data.")
             }
         }, confirmButton = { TextButton({ showInformation = false }) { Text("Close") } })
@@ -103,6 +116,7 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
         if (selectedTab == 0) {
         if (!meterReady) Text("Connect a power meter to record", fontSize = 14.sp, lineHeight = 18.sp, color = Color(0xFFFBBF24))
         CalibrationMetrics(metrics, showCorrected = true)
+        temperature?.let { FlywheelTemperatureReadout(it, (state.displayTable ?: state.table)?.thermalCells?.size ?: 0) }
         (state.displayTable ?: state.table)?.takeIf { it.streamSeconds > 0 }?.let {
             Text("${it.streamSeconds} paired seconds · ${it.legacyEffortCount} legacy effort aggregates", fontSize = 11.sp,
                 color = Color(0xFF9EAEC0))

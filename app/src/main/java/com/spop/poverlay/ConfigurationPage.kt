@@ -72,6 +72,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
     val grupettoTable by viewModel.grupettoCalibrationState.collectAsStateWithLifecycle()
     val calibrationMeterReady by viewModel.calibrationMeterReady.collectAsStateWithLifecycle(initialValue = false)
     val captureSettings by viewModel.calibrationCaptureSettings.collectAsStateWithLifecycle()
+    val flywheelTemperature by viewModel.flywheelTemperature.collectAsStateWithLifecycle()
     var dialog by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     androidx.compose.runtime.LaunchedEffect(dialog) {
         if (dialog == "grupetto-calibration") viewModel.showCalibrationTable()
@@ -147,9 +148,9 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                     SettingsTile("External Sensors", Modifier.weight(1f).fillMaxHeight(), Color(0xFFFB7185)) {
                         SensorSummary("Heart rate", hr?.let { it.name ?: it.address } ?: "Not connected",
                             bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185), heartStatus)
-                        SensorSummary("Power meter", com.spop.poverlay.sensor.power.calibrationSensorLabel(
-                            grupettoTable.active, grupettoTable.recording, meter?.let { it.name ?: it.address }),
-                            externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", Color(0xFFFBBF24), powerStatus)
+                        CalibrationSensorSummary(
+                            grupettoTable.active, grupettoTable.recording, meter?.let { it.name ?: it.address },
+                            externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", powerStatus)
                         if (viewModel.calibrationSupported) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                             OutlinedButton({ viewModel.showCalibrationTable(); dialog = "grupetto-calibration" }) { Text("Calibration") }
                         }
@@ -231,9 +232,9 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                 bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185), heartStatus)
             OutlinedButton({ dialog = "heart" }, Modifier.fillMaxWidth()) { Text("Heart-rate monitors & zones") }
             Divider(Modifier.padding(vertical = 12.dp))
-            SensorSummary("Power meter", com.spop.poverlay.sensor.power.calibrationSensorLabel(
-                grupettoTable.active, grupettoTable.recording, meter?.let { it.name ?: it.address }),
-                externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", Color(0xFFFBBF24), powerStatus)
+            CalibrationSensorSummary(
+                grupettoTable.active, grupettoTable.recording, meter?.let { it.name ?: it.address },
+                externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", powerStatus)
             OutlinedButton({ dialog = "power" }, Modifier.fillMaxWidth()) { Text("Pair & manage power meters") }
             if (viewModel.calibrationSupported) {
                 OutlinedButton({ dialog = "grupetto-calibration" }, Modifier.fillMaxWidth()) { Text("Calibrate using power pedals") }
@@ -259,6 +260,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                             export = viewModel::exportCalibrationBackup, load = viewModel::loadCalibrationBackup)
                     }, onManualEdit = { dialog = "manual-calibration" }, livePosition = livePosition,
                     captureSettings = captureSettings, onCaptureSettings = viewModel::setCalibrationCaptureSettings,
+                    temperature = flywheelTemperature, onRoomTemperature = viewModel::setRoomTemperature,
+                    onTemperatureUnit = viewModel::setTemperatureUnit,
                     onRefit = { dialog = "refit-calibration" })
             }
         }
@@ -402,11 +405,21 @@ private fun ConnectionSummary(name: String, detail: String, enabled: Boolean) {
 }
 
 @Composable
-private fun SensorSummary(label: String, name: String, value: String, accent: Color, status: String? = null) {
+internal fun CalibrationSensorSummary(active: Boolean, recording: Boolean, meterName: String?,
+    value: String, status: String? = null) {
+    SensorSummary("Power meter",
+        com.spop.poverlay.sensor.power.calibrationSensorLabel(active, recording, meterName),
+        value, Color(0xFFFBBF24), status,
+        nameColor = if (active || (recording && meterName != null)) Color(0xFF6EE7B7) else Color(0xFF8796A8))
+}
+
+@Composable
+private fun SensorSummary(label: String, name: String, value: String, accent: Color, status: String? = null,
+    nameColor: Color = Color(0xFF8796A8)) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(label, fontSize = 13.sp, lineHeight = 16.sp, color = Color(0xFFBAC6D3))
-            Text(name, fontSize = 12.sp, lineHeight = 15.sp, color = Color(0xFF8796A8), maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Text(name, fontSize = 12.sp, lineHeight = 15.sp, color = nameColor, maxLines = 3, overflow = TextOverflow.Ellipsis)
             status?.let { Text(it, fontSize = 11.sp, lineHeight = 14.sp, color = accent, maxLines = 2, overflow = TextOverflow.Ellipsis) }
         }
         Text(value, color = accent, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)

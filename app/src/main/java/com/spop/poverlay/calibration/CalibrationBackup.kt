@@ -38,7 +38,7 @@ internal data class CalibrationBackup(
     val resetAt: Long = 0,
 ) {
     val hasData get() = draft != null || saved != null
-    fun encode(): String = JSONObject().put("format", "grupetto-calibration-backup").put("schema", 2)
+    fun encode(): String = JSONObject().put("format", "grupetto-calibration-backup").put("schema", 3)
         .put("draft", draft?.let(GrupettoCalibrationStore::encode) ?: JSONObject.NULL)
         .put("saved", saved?.let(GrupettoCalibrationStore::encode) ?: JSONObject.NULL)
         .also { if (resetAt > 0) it.put("resetAt", resetAt) }.toString()
@@ -56,7 +56,7 @@ internal data class CalibrationBackup(
             require(text.toByteArray(Charsets.UTF_8).size <= MAX_BYTES) { "Calibration file is too large." }
             val json = JSONObject(text)
             val schema = json.getInt("schema")
-            require(json.getString("format") == "grupetto-calibration-backup" && schema in 1..2) {
+            require(json.getString("format") == "grupetto-calibration-backup" && schema in 1..3) {
                 "Unsupported calibration file format."
             }
             fun profile(key: String): GrupettoCalibrationProfile? {
@@ -69,7 +69,7 @@ internal data class CalibrationBackup(
             require(draft == null || saved == null || saved.matches(draft.capture)) {
                 "Draft and saved table belong to different calibrations."
             }
-            require(schema == 2 || !json.has("resetAt")) { "Unsupported reset marker." }
+            require(schema >= 2 || !json.has("resetAt")) { "Unsupported reset marker." }
             val resetAt = if (json.has("resetAt")) json.getLong("resetAt") else 0L
             require(resetAt >= 0 && (resetAt == 0L || draft == null && saved == null)) { "Invalid reset marker." }
             return CalibrationBackup(draft, saved, resetAt)
@@ -95,8 +95,8 @@ internal class CalibrationBackupStore(private val directory: File) {
             val text = stream.use(::boundedCalibrationText)
             val json = JSONObject(text)
             val backup = CalibrationBackup.decode(text)
-            val legacy = json.getInt("schema") == 1 || listOf("draft", "saved").any { key ->
-                !json.isNull(key) && json.getJSONObject(key).getInt("schema") < 4
+            val legacy = json.getInt("schema") < 3 || listOf("draft", "saved").any { key ->
+                !json.isNull(key) && json.getJSONObject(key).getInt("schema") < 5
             }
             backup to legacy
         } catch (e: Exception) {

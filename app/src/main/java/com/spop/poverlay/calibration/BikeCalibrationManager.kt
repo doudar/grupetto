@@ -125,6 +125,7 @@ class BikeCalibrationManager(
                 val stream = grupettoCalibration?.let { CalibrationStream(baseline, capture?.samples.orEmpty(), mutableStreamSettings.value) }
                 var dirty = false
                 var lastFlush = 0L
+                var lastReplacement: CalibrationRollingReplacement? = null
                 var bucketCounts = withContext(Dispatchers.Default) { capture?.samples.orEmpty().filter { it.observation != null }
                     .groupingBy { calibrationCellIndex(baseline, it.ad, it.rpm) }.eachCount() }
                 var guideCells = emptyList<CalibrationTarget>()
@@ -194,7 +195,8 @@ class BikeCalibrationManager(
                             continue
                         }
                         if (stream != null) {
-                            val accepted = stream.add(frame, pedal.watts, pedal.timestamp, pedal.address, now, System.currentTimeMillis())
+                            val accepted = stream.add(frame, pedal.watts, pedal.timestamp, pedal.address, now, System.currentTimeMillis(),
+                                grupettoCalibration?.flywheelTemperature?.temperatureAt(frame.timestamp))
                             if (accepted.isNotEmpty()) {
                                 // Once admitted, finish staging this batch even if Pause arrives
                                 // during background retention; finally then flushes every accepted pair.
@@ -202,6 +204,9 @@ class BikeCalibrationManager(
                                 val retained = withContext(Dispatchers.Default) {
                                     retainCalibrationObservations(baseline, current.samples + accepted)
                                 }
+                                withContext(Dispatchers.Default) {
+                                    calibrationRollingReplacement(baseline, current.samples, retained, stream.progress.cell, now)
+                                }?.let { lastReplacement = it }
                                 bucketCounts = withContext(Dispatchers.Default) { retained.filter { it.observation != null }
                                     .groupingBy { calibrationCellIndex(baseline, it.ad, it.rpm) }.eachCount() }
                                 capture = current.copy(samples = retained)
@@ -212,7 +217,7 @@ class BikeCalibrationManager(
                             val bucket = bucketCounts[stream.progress.cell] ?: 0
                             mutableState.value = mutableState.value.copy(sampleCount = samples.size,
                                 status = stream.progress.phase.cue, recent = samples.takeLast(30),
-                                progress = stream.progress.copy(bucketSeconds = bucket),
+                                progress = stream.progress.copy(bucketSeconds = bucket, rollingReplacement = lastReplacement),
                                 savedAt = if (accepted.isNotEmpty()) now else mutableState.value.savedAt)
                             if (dirty && (lastFlush == 0L || now - lastFlush >= 5000)) flush()
                             delay(250)

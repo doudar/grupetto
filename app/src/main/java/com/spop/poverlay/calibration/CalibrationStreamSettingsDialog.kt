@@ -34,7 +34,14 @@ internal fun outlierWattExample(input: String): String {
 
 @Composable
 internal fun CalibrationStreamSettingsDialog(settings: CalibrationStreamSettings,
-    onSave: (CalibrationStreamSettings) -> Unit, onClose: () -> Unit) {
+    onSave: (CalibrationStreamSettings) -> Unit, onClose: () -> Unit,
+    roomFahrenheit: Double = DefaultRoomTemperatureFahrenheit, onRoomTemperature: ((Double) -> Unit)? = null,
+    temperatureUnit: TemperatureUnit = TemperatureUnit.Fahrenheit,
+    onTemperatureUnit: ((TemperatureUnit) -> Unit)? = null) {
+    var unit by remember { mutableStateOf(temperatureUnit) }
+    var draftFahrenheit by remember { mutableStateOf<Double?>(roomFahrenheit) }
+    var room by remember { mutableStateOf(roomTemperatureInput(roomFahrenheit, unit)) }
+    val parsedRoom = draftFahrenheit?.takeIf(::validRoomTemperature)
     var settle by remember { mutableStateOf(settings.settleSeconds.toString()) }
     var cadence by remember { mutableStateOf(settings.cadenceWindowRpm.toString()) }
     var resistance by remember { mutableStateOf(settings.resistanceWindowPercent.toString()) }
@@ -80,6 +87,25 @@ internal fun CalibrationStreamSettingsDialog(settings: CalibrationStreamSettings
                         }
                         OutlinedButton({ use(CalibrationStreamSettings.Stricter) }) { Text("Stricter settings", fontSize = 12.sp) }
                         TextButton({ use(CalibrationStreamSettings()) }) { Text("Defaults", fontSize = 12.sp) }
+                        if (onRoomTemperature != null) OutlinedTextField(room, {
+                            room = it
+                            draftFahrenheit = it.toDoubleOrNull()?.takeIf { value -> value.isFinite() }?.let(unit::toFahrenheit)
+                        },
+                            Modifier.width(135.dp).testTag("room-temperature-input"),
+                            label = { Text("Room temp", fontSize = 11.sp) }, singleLine = true,
+                            trailingIcon = {
+                                TextButton({
+                                    unit = unit.other()
+                                    draftFahrenheit?.let { room = roomTemperatureInput(it, unit) }
+                                    onTemperatureUnit?.invoke(unit)
+                                }, Modifier.size(48.dp).testTag("room-temperature-unit")
+                                    .semantics { contentDescription = unit.nextLabel },
+                                    contentPadding = PaddingValues(0.dp)) {
+                                    Text(unit.symbol, fontSize = 14.sp)
+                                }
+                            },
+                            isError = parsedRoom == null,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
                     }
                 }
                 CaptureSettingsSection("01", "Settle & collect", accent) {
@@ -104,11 +130,16 @@ internal fun CalibrationStreamSettingsDialog(settings: CalibrationStreamSettings
                         StreamSettingField("confirmation", "New level confirmation (readings)", confirmation, { confirmation = it },
                             "Consistent shifted readings", 2.0, 10.0, 1.0, rejection)))
                 }
-                Text("Calculations use cell RPM; displayed watts stay raw. Saving restarts settling and keeps accepted data.",
-                    fontSize = 11.sp, color = muted)
+                Text(if (onRoomTemperature != null)
+                    "Room edits shift flywheel equally, keeping its rise above room. Past samples stay unchanged; pedal watts stay raw."
+                    else "Calculations use cell RPM and a fixed 65°F thermal reference. Pedal watts stay raw; saved data is kept.",
+                    fontSize = 11.sp, color = muted, modifier = Modifier.testTag("room-baseline-explanation"))
             }
         },
-        confirmButton = { Button({ parsed?.let { onSave(it); onClose() } }, enabled = parsed != null,
+        confirmButton = { Button({ parsed?.let {
+            if (onRoomTemperature != null) parsedRoom?.let(onRoomTemperature)
+            onSave(it); onClose()
+        } }, enabled = parsed != null && (onRoomTemperature == null || parsedRoom != null),
             colors = ButtonDefaults.buttonColors(backgroundColor = accent, contentColor = Color(0xFF101B2B))) { Text("Save settings") } },
         dismissButton = { TextButton(onClose) { Text("Cancel") } })
 }

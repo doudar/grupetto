@@ -11,7 +11,8 @@ data class CalibrationSample(val ad: Double, val rpm: Double, val nativeWatts: D
     val pedalWatts: Double, val capturedAt: Long,
     // Immutable original pedal observation when the calibration target is edited. Audit only.
     val recordedPedalWatts: Double? = null,
-    val observation: CalibrationObservation? = null) {
+    val observation: CalibrationObservation? = null,
+    val temperature: CalibrationTemperature? = null) {
     val measuredPedalWatts: Double get() = recordedPedalWatts ?: pedalWatts
 }
 
@@ -23,7 +24,7 @@ internal fun CalibrationSample.usableForCalibration(baseline: List<Int>): Boolea
         nativeWatts in CalibrationPowerRange && measuredPedalWatts in CalibrationPowerRange &&
         pedalWatts / nativeWatts in .5..2.0 && (observation?.let {
             it.nativeAt >= 0 && it.pedalAt >= 0 && abs(it.nativeAt - it.pedalAt) <= 1500 && it.durationMillis == 1000
-        } != false)
+        } != false) && (temperature == null || CalibrationThermalCorrection.usable(this))
 
 data class CalibrationFit(val points: List<Int>, val supportedPoints: List<Int>,
     val conflicts: Int = 0, val validationCount: Int = 0,
@@ -47,7 +48,8 @@ enum class CapturePhase(val cue: String) {
 
 data class CaptureProgress(val phase: CapturePhase = CapturePhase.Waiting, val seconds: Int = 0,
     val totalSeconds: Int = 8, val settleSeconds: Int = 3,
-    val streaming: Boolean = false, val cell: Int? = null, val bucketSeconds: Int = 0, val detail: String? = null) {
+    val streaming: Boolean = false, val cell: Int? = null, val bucketSeconds: Int = 0, val detail: String? = null,
+    val rollingReplacement: CalibrationRollingReplacement? = null) {
     val fraction get() = (seconds / totalSeconds.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
     val remaining get() = (totalSeconds - seconds).coerceAtLeast(0)
     val settleRemaining get() = (settleSeconds - seconds).coerceAtLeast(0)

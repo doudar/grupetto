@@ -21,7 +21,8 @@ data class GrupettoCalibrationTable(val baseline: List<Int>, val gains: List<Dou
     val recordedCoverage: Set<Int> = emptySet(),
     // Capped averaging weight, not an audit count. Zero means this cell has no correction yet.
     val cellSampleCounts: List<Int> = emptyList(),
-    val streamSeconds: Int = 0, val legacyEffortCount: Int = 0) {
+    val streamSeconds: Int = 0, val legacyEffortCount: Int = 0,
+    val thermalCells: Set<Int> = emptySet(), val thermalAnchors: Map<Int, Double> = emptyMap()) {
     /** Empty counts only occur in legacy/programmatic tables. Their saved surface is a seed,
      * never a large invented recording count. Newly fitted tables always carry explicit counts. */
     internal fun effectiveCellSampleCounts(): List<Int> = if (cellSampleCounts.size == 496) cellSampleCounts
@@ -33,10 +34,14 @@ data class GrupettoCalibrationTable(val baseline: List<Int>, val gains: List<Dou
     val canActivate get() = ready && hasUsableCells
 
     internal val hasUsableCells get() = sampleCount > 0 && cells in 1..496 && validCalibrationTable(baseline) &&
-        gains.size == 496 && gains.all { it.isFinite() && it in CalibrationCorrectionLimits.logRange } &&
+        gains.size == 496 && gains.indices.all { gains[it].isFinite() && gains[it] in gainRange(it) } &&
         confidence.size == 496 && confidence.all { it.isFinite() && it in 0.0..1.0 } &&
         (cellSampleCounts.isEmpty() || cellSampleCounts.size == 496 && cellSampleCounts.all { it in 0..10 }) &&
-        effectiveCellSampleCounts().any { it > 0 }
+        effectiveCellSampleCounts().any { it > 0 } &&
+        thermalCells.all { it in 0 until 496 && effectiveCellSampleCounts()[it] > 0 } &&
+        thermalAnchors.keys == thermalCells && thermalAnchors.values.all { it.isFinite() && it in .85..1.10 }
+
+    internal fun gainRange(cell: Int) = if (cell in thermalCells) CalibrationThermalCorrection.referenceLogRange else CalibrationCorrectionLimits.logRange
 
     fun currentCellIndex(ad: Double, rpm: Double): Int? = calibrationCellIndex(baseline, ad, rpm)
 
@@ -58,11 +63,17 @@ data class GrupettoCalibrationTable(val baseline: List<Int>, val gains: List<Dou
         return closest.takeIf { it >= 0 }
     }
 
-    fun corrected(watts: Double, ad: Double, rpm: Double): Double {
+    fun corrected(watts: Double, ad: Double, rpm: Double, temperature: CalibrationTemperature? = null): Double {
         if (!watts.isFinite() || watts <= 0) return watts
         val cell = lookupCellIndex(ad, rpm) ?: return watts
-        return watts * exp(gains[cell].coerceIn(CalibrationCorrectionLimits.logRange))
+        val thermal = if (cell in thermalCells) CalibrationThermalCorrection.factor(temperature) ?: thermalAnchors.getValue(cell) else 1.0
+        return watts * (exp(gains[cell].coerceIn(gainRange(cell))) * thermal)
+            .coerceIn(CalibrationCorrectionLimits.minimumMultiplier, CalibrationCorrectionLimits.maximumMultiplier)
     }
+
+    internal fun canEvaluate(sample: CalibrationSample) = lookupCellIndex(sample.ad, sample.rpm) !in thermalCells ||
+        CalibrationThermalCorrection.usable(sample)
+    internal fun correctedSample(sample: CalibrationSample) = corrected(sample.nativeWatts, sample.ad, sample.rpm, sample.temperature)
 }
 
 internal fun calibrationCoordinate(table: List<Int>, ad: Double): Double? {
@@ -86,11 +97,14 @@ object GrupettoCalibrationFitter {
         val previous = seed?.takeIf { it.baseline == baseline }
         val gains = previous?.gains?.toMutableList() ?: MutableList(496) { 0.0 }
         val counts = previous?.effectiveCellSampleCounts()?.toMutableList() ?: MutableList(496) { 0 }
+        val thermalCells = previous?.thermalCells?.toMutableSet() ?: mutableSetOf()
+        val thermalAnchors = previous?.thermalAnchors?.toMutableMap() ?: mutableMapOf()
         usable.filter { previous == null || it.capturedAt > previous.recordedThrough }
             .sortedBy { it.capturedAt }.forEach { sample ->
                 val cell = calibrationCellIndex(baseline, sample.ad, sample.rpm)!!
                 val measurement = (sample.pedalWatts / sample.nativeWatts).coerceIn(CalibrationCorrectionLimits.minimumMultiplier, CalibrationCorrectionLimits.maximumMultiplier)
                 if (sample.observation != null) return@forEach
+                if (cell in thermalCells) return@forEach // Unknown-temperature aggregates cannot change a normalized cell.
                 val count = counts[cell]
                 val nextCount = (count + 1).coerceAtMost(10)
                 val mean = if (count == 0) measurement
@@ -103,26 +117,37 @@ object GrupettoCalibrationFitter {
         }.forEach { (cell, observations) ->
             // No new observation means a manual edit remains authoritative, including restart.
             if (previous == null || observations.any { it.capturedAt > previous.recordedThrough }) {
-                gains[cell] = ln(streamCellGain(observations.sortedBy { it.capturedAt }.takeLast(CalibrationCellSeconds), exp(gains[cell]), cadenceReference))
-                counts[cell] = observations.size.coerceAtMost(10)
+                val tagged = observations.filter(CalibrationThermalCorrection::usable)
+                val thermal = cell in thermalCells || tagged.isNotEmpty()
+                val fitting = if (thermal) tagged else observations
+                if (fitting.isEmpty() || previous != null && fitting.none { it.capturedAt > previous.recordedThrough }) return@forEach
+                val old = if (thermal && cell !in thermalCells) 1.0 else exp(gains[cell])
+                gains[cell] = ln(streamCellGain(fitting.sortedBy { it.capturedAt }.takeLast(CalibrationCellSeconds), old, cadenceReference, thermal))
+                if (thermal) {
+                    thermalCells.add(cell)
+                    thermalAnchors[cell] = CalibrationThermalCorrection.factor(fitting.maxBy { it.capturedAt }.temperature)!!
+                }
+                counts[cell] = fitting.size.coerceAtMost(10)
             }
         }
         val ready = counts.any { it > 0 }
         var result = GrupettoCalibrationTable(baseline, gains, counts.map { it / 10.0 }, usable.size,
             counts.count { it > 0 }, 0.0, 0.0, ready,
             recordedThrough = max(previous?.recordedThrough ?: Long.MIN_VALUE, usable.maxOf { it.capturedAt }),
-            manualCoverage = previous?.manualCoverage ?: emptySet(), cellSampleCounts = counts)
-        val before = sqrt(usable.map { (it.nativeWatts - it.measuredPedalWatts).pow(2) }.average())
-        val after = sqrt(usable.map { (result.corrected(it.nativeWatts, it.ad, it.rpm) - it.measuredPedalWatts).pow(2) }.average())
-        val comparison = active?.takeIf { it.baseline == baseline }?.let { incumbent ->
+            manualCoverage = previous?.manualCoverage ?: emptySet(), cellSampleCounts = counts,
+            thermalCells = thermalCells, thermalAnchors = thermalAnchors)
+        val evaluated = usable.filter { result.canEvaluate(it) && (active?.canEvaluate(it) != false) }
+        val before = evaluated.takeIf { it.isNotEmpty() }?.let { sqrt(it.map { (it.nativeWatts - it.measuredPedalWatts).pow(2) }.average()) } ?: 0.0
+        val after = evaluated.takeIf { it.isNotEmpty() }?.let { sqrt(it.map { (result.correctedSample(it) - it.measuredPedalWatts).pow(2) }.average()) } ?: 0.0
+        val comparison = active?.takeIf { it.baseline == baseline && evaluated.isNotEmpty() }?.let { incumbent ->
             fun error(table: GrupettoCalibrationTable, sample: CalibrationSample) =
-                (table.corrected(sample.nativeWatts, sample.ad, sample.rpm) - sample.measuredPedalWatts).pow(2)
-            val regressions = usable.groupBy { (it.rpm / 5).roundToInt() }.values.count { band ->
+                (table.correctedSample(sample) - sample.measuredPedalWatts).pow(2)
+            val regressions = evaluated.groupBy { (it.rpm / 5).roundToInt() }.values.count { band ->
                 val old = sqrt(band.map { error(incumbent, it) }.average())
                 sqrt(band.map { error(result, it) }.average()) - old > max(.5, old * .05)
             }
-            ActiveCalibrationComparison(sqrt(usable.map { error(incumbent, it) }.average()), after,
-                usable.size, regressions, after)
+            ActiveCalibrationComparison(sqrt(evaluated.map { error(incumbent, it) }.average()), after,
+                evaluated.size, regressions, after)
         }
         result = result.copy(beforeRmse = before, afterRmse = after, activeComparison = comparison)
         return result.withCalibrationCoverage(usable)

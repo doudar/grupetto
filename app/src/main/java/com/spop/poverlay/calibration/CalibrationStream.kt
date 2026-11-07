@@ -10,6 +10,21 @@ data class CalibrationObservation(val nativeAt: Long, val pedalAt: Long,
 internal const val CalibrationCellSeconds = 100
 internal const val MaxCalibrationSamples = 3600 + 496 * CalibrationCellSeconds
 
+/** Ephemeral receipt from retention, never a timer or a saved calibration value. */
+data class CalibrationRollingReplacement(val cell: Int, val at: Long, val count: Int)
+
+internal fun calibrationRollingReplacement(baseline: List<Int>, before: List<CalibrationSample>,
+    retained: List<CalibrationSample>, cell: Int?, now: Long): CalibrationRollingReplacement? {
+    if (cell == null) return null
+    fun key(s: CalibrationSample) = Triple(s.capturedAt, s.observation!!.nativeAt, s.observation.pedalAt)
+    val current = retained.filter { it.observation != null && calibrationCellIndex(baseline, it.ad, it.rpm) == cell }
+    if (current.size < CalibrationCellSeconds) return null
+    val keys = current.map(::key).toHashSet()
+    val removed = before.filter { it.observation != null && calibrationCellIndex(baseline, it.ad, it.rpm) == cell }
+        .distinctBy(::key).count { key(it) !in keys }
+    return if (removed > 0) CalibrationRollingReplacement(cell, now, removed) else null
+}
+
 /** Accepted seconds belong to a cell, not to a global wall-clock window. Legacy effort evidence
  * is retained separately, once per original effort, and never expanded into invented samples. */
 internal fun retainCalibrationObservations(baseline: List<Int>, samples: List<CalibrationSample>): List<CalibrationSample> {
@@ -27,9 +42,14 @@ internal class CalibrationStream(private val baseline: List<Int>, history: List<
     settings: CalibrationStreamSettings = CalibrationStreamSettings()) {
     var settings = settings
         private set
-    private val recent = history.filter { it.observation != null }.groupBy {
+    private val historicalGroups = history.filter { it.observation != null }.groupBy {
         calibrationCellIndex(baseline, it.ad, it.rpm)
-    }.mapValues { (_, values) -> values.takeLast(5).map { it.measuredPedalWatts / it.nativeWatts }.toMutableList() }.toMutableMap()
+    }
+    private val recentThermal = historicalGroups.mapValues { (_, values) -> values.any(CalibrationThermalCorrection::usable) }.toMutableMap()
+    private val recent = historicalGroups.mapValues { (cell, values) ->
+        values.filter { CalibrationThermalCorrection.usable(it) == recentThermal[cell] }.takeLast(5)
+            .map(CalibrationThermalCorrection::ratio).toMutableList()
+    }.toMutableMap()
     private val pendingByCell = mutableMapOf<Int, MutableList<CalibrationSample>>()
     private val pendingLastAt = mutableMapOf<Int, Long>()
     private var cell: Int? = null
@@ -61,12 +81,13 @@ internal class CalibrationStream(private val baseline: List<Int>, history: List<
     }
 
     fun add(frame: CalibrationFrame, pedal: Int, pedalAt: Long, address: String,
-        now: Long, capturedAt: Long): List<CalibrationSample> {
+        now: Long, capturedAt: Long, temperature: CalibrationTemperature? = null): List<CalibrationSample> {
         if (lastPollAt?.let { now - it !in 0..1500 } == true) reset()
         lastPollAt = now
         val index = calibrationCellIndex(baseline, frame.ad.toDouble(), frame.rpm)
         val sample = CalibrationSample(frame.ad.toDouble(), frame.rpm, frame.nativeWatts,
-            pedal.toDouble(), capturedAt, observation = CalibrationObservation(frame.timestamp, pedalAt))
+            pedal.toDouble(), capturedAt, observation = CalibrationObservation(frame.timestamp, pedalAt),
+            temperature = temperature?.takeIf { it.valid && frame.timestamp - it.estimatedAt in 0..1500 })
         if (frame.powerSource != 1 || index == null || !sample.usableForCalibration(baseline) ||
             now - frame.timestamp !in 0..1000 || now - pedalAt !in 0..1500 || address.isBlank()) {
             reset(if (frame.nativeWatts < MinimumCalibrationWatts || pedal < MinimumCalibrationWatts)
@@ -108,16 +129,20 @@ internal class CalibrationStream(private val baseline: List<Int>, history: List<
         lastNative = frame.timestamp; lastPedal = pedalAt; lastAcceptedAt = now
         val ratios = recent.getOrPut(index) { mutableListOf() }
         val pending = pendingByCell.getOrPut(index) { mutableListOf() }
+        val thermal = CalibrationThermalCorrection.usable(sample)
+        if (recentThermal[index] != thermal) {
+            ratios.clear(); pending.clear(); recentThermal[index] = thermal
+        }
         if (pendingLastAt[index]?.let { now - it > 5000 } == true) pending.clear()
         pendingLastAt[index] = now
-        val ratio = sample.measuredPedalWatts / sample.nativeWatts
+        val ratio = CalibrationThermalCorrection.ratio(sample)
         val floor = settings.outlierTolerancePercent / 100.0
         val center = ratios.takeIf { it.isNotEmpty() }?.let(::median)
         val threshold = center?.let { max(floor, settings.outlierNoiseMultiplier * median(ratios.map { r -> abs(r - it) })) } ?: floor
         val accepted = if (!settings.outlierRejection || center == null || abs(ratio - center) <= threshold + 1e-9) {
             pending.clear(); listOf(sample)
         } else {
-            if (pending.isNotEmpty() && abs(ratio - median(pending.map { it.measuredPedalWatts / it.nativeWatts })) > floor + 1e-9) pending.clear()
+            if (pending.isNotEmpty() && abs(ratio - median(pending.map(CalibrationThermalCorrection::ratio))) > floor + 1e-9) pending.clear()
             pending += sample
             if (pending.size < settings.newLevelReadings) {
                 progress = progress.copy(phase = CapturePhase.Outlier, seconds = settings.settleSeconds,
@@ -128,7 +153,7 @@ internal class CalibrationStream(private val baseline: List<Int>, history: List<
             pending.mapIndexed { i, s -> if (i == 0) s.copy(observation = s.observation!!.copy(startsNewLevel = true)) else s }
                 .also { pending.clear() }
         }
-        ratios += accepted.map { it.measuredPedalWatts / it.nativeWatts }
+        ratios += accepted.map(CalibrationThermalCorrection::ratio)
         while (ratios.size > 5) ratios.removeAt(0)
         progress = progress.copy(phase = CapturePhase.Collecting, seconds = settings.settleSeconds, detail = null)
         return accepted
@@ -138,19 +163,20 @@ internal class CalibrationStream(private val baseline: List<Int>, history: List<
 /** Weighted median minimizes absolute watt error (same objective as Calculate New Solution).
  * Only the latest established level contributes; no neighboring cell is read or changed. */
 internal fun streamCellGain(samples: List<CalibrationSample>, old: Double,
-    cadenceReference: PelotonCadenceReference? = null): Double {
+    cadenceReference: PelotonCadenceReference? = null, thermal: Boolean = false): Double {
     val start = samples.indexOfLast { it.observation?.startsNewLevel == true }.coerceAtLeast(0)
-    val values = samples.drop(start).map { calibrationCalculationPair(it, cadenceReference) }
+    val values = samples.drop(start).map { calibrationCalculationPair(it, cadenceReference, thermal = thermal) }
         .sortedBy { it.pedalWatts / it.nativeWatts }
-    val half = values.sumOf { it.nativeWatts } / 2
+    val half = values.sumOf { it.nativeWatts * it.thermalFactor } / 2
     var cumulative = 0.0
     for ((i, sample) in values.withIndex()) {
-        cumulative += sample.nativeWatts
+        cumulative += sample.nativeWatts * sample.thermalFactor
         val atHalf = abs(cumulative - half) <= max(1e-9, half * 1e-12)
         if (cumulative >= half || atHalf) {
             val lower = sample.pedalWatts / sample.nativeWatts
             val upper = if (atHalf && i < values.lastIndex) values[i + 1].pedalWatts / values[i + 1].nativeWatts else lower
-            return old.coerceIn(lower, upper).coerceIn(CalibrationCorrectionLimits.minimumMultiplier, CalibrationCorrectionLimits.maximumMultiplier)
+            return old.coerceIn(lower, upper).coerceIn(if (thermal) CalibrationThermalCorrection.referenceRange
+                else CalibrationCorrectionLimits.minimumMultiplier..CalibrationCorrectionLimits.maximumMultiplier)
         }
     }
     return old

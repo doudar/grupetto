@@ -35,6 +35,7 @@ class CalibrationDialogLayoutTest {
         compose.setContent { MaterialTheme(typography = Typography) {
             SettingsDialog("Calibrate using power pedals", {}, compact = true) {
                 GrupettoCalibrationPanel(GrupettoCalibrationUiState(count = 235, table = table), {}, {}, {}, {},
+                    temperature = FlywheelTemperatureState(), onRoomTemperature = {},
                     meterReady = false, onManualEdit = {}, onCaptureSettings = {}, onRefit = {}, fileControls = {
                         CalibrationFileControls(true, true, { "{}" }, { error("Not used") })
                     })

@@ -39,7 +39,7 @@ internal class GrupettoCalibrationStore(directory: File, name: String) {
     }
     fun save(profile: GrupettoCalibrationProfile) {
         val stream = file.startWrite()
-        try { stream.write(encode(profile).toString(2).toByteArray(Charsets.UTF_8)); file.finishWrite(stream) }
+        try { stream.write(encode(profile).toString().toByteArray(Charsets.UTF_8)); file.finishWrite(stream) }
         catch (e: Exception) { file.failWrite(stream); throw e }
     }
     fun clear() = file.delete()
@@ -47,20 +47,22 @@ internal class GrupettoCalibrationStore(directory: File, name: String) {
     companion object {
         internal fun decode(json: JSONObject): GrupettoCalibrationProfile {
             val schema = json.getInt("schema")
-            check(schema in 1..4)
+            check(schema in 1..5)
             check(json.getString("model") == when (schema) {
                 1 -> "regularized_gaussian_log_gain_v1"
                 2 -> "unified_gaussian_log_gain_v2"
                 3 -> "direct_cell_gain_v3"
-                else -> "stable_cell_stream_v4"
+                4 -> "stable_cell_stream_v4"
+                else -> "thermal_cell_stream_v5"
             })
+            if (schema >= 5) check(json.getString("temperatureCorrectionModel") == CalibrationThermalCorrection.Model)
             val baseline = json.getJSONArray("baseline").let { a -> List(a.length()) { a.getInt(it) } }
             check(validCalibrationTable(baseline))
             val samples = json.getJSONArray("samples").let { a ->
                 check(a.length() <= MaxCalibrationSamples)
                 List(a.length()) { i ->
                     if (schema == 1) check(!a.getJSONObject(i).has("recordedPedalWatts"))
-                    decodeStoredCalibrationSample(a, i, schema >= 4)
+                    decodeStoredCalibrationSample(a, i, schema >= 4, schema >= 5)
                 }
             }
             validateObservationRetention(baseline, samples)
@@ -85,6 +87,12 @@ internal class GrupettoCalibrationStore(directory: File, name: String) {
                 check(recordedThrough >= (samples.filter { it.usableForCalibration(baseline) }
                     .maxOfOrNull { it.capturedAt } ?: Long.MIN_VALUE))
                 val cells = t.getInt("cells")
+                val thermalAnchors = if (schema < 5) emptyMap() else t.getJSONArray("thermalAnchors").let { a ->
+                    check(a.length() == 496)
+                    (0 until 496).filter { !a.isNull(it) }.associateWith { index ->
+                        a.getDouble(index).also { check(it.isFinite() && it in .85..1.10) }
+                    }
+                }
                 check(cells in 0..if (schema >= 3) 496 else 128)
                 val counts = if (schema < 3) List(496) { 1 } else t.getJSONArray("cellSampleCounts").let { a ->
                     check(a.length() == 496)
@@ -100,12 +108,13 @@ internal class GrupettoCalibrationStore(directory: File, name: String) {
                     if (schema < 3) 496 else cells,
                     t.getDouble("beforeRmse"), t.getDouble("afterRmse"), t.getBoolean("ready"),
                     recordedThrough = recordedThrough, cellSampleCounts = counts,
+                    thermalCells = thermalAnchors.keys, thermalAnchors = thermalAnchors,
                     manualCoverage = if (t.has("manualCoverage")) t.getJSONArray("manualCoverage").let { a ->
                         check(a.length() <= 496)
                         List(a.length()) { a.getInt(it) }.toSet()
                     } else emptySet()).also {
                     check(it.gains.size == 496 && it.confidence.size == 496 &&
-                        it.gains.all { value -> value.isFinite() && value in CalibrationCorrectionLimits.logRange } &&
+                        it.gains.indices.all { index -> it.gains[index].isFinite() && it.gains[index] in it.gainRange(index) } &&
                         it.confidence.all { value -> value in 0.0..1.0 } && it.beforeRmse.isFinite() && it.afterRmse.isFinite() &&
                         it.beforeRmse >= 0 && it.afterRmse >= 0 && it.cells in 0..496)
                     check(offsets.isEmpty() || (offsets.size == 496 && offsets.indices.all { i ->
@@ -114,6 +123,7 @@ internal class GrupettoCalibrationStore(directory: File, name: String) {
                     }))
                     check(it.manualCoverage.all { cell -> cell in 0 until 496 } &&
                         (schema >= 2 || it.manualCoverage.isEmpty() || legacyManualEdits))
+                    check(it.thermalCells.all { cell -> counts[cell] > 0 })
                 }
             }
             // Keep the exact visible gains. Only old profiles with a manual layer need their
@@ -140,7 +150,8 @@ internal class GrupettoCalibrationStore(directory: File, name: String) {
         }
         internal fun encode(profile: GrupettoCalibrationProfile): JSONObject {
             val capture = profile.capture
-            val json = JSONObject().put("schema", 4).put("model", "stable_cell_stream_v4")
+            val json = JSONObject().put("schema", 5).put("model", "thermal_cell_stream_v5")
+                .put("temperatureCorrectionModel", CalibrationThermalCorrection.Model)
                 .put("frameSerial", capture.frameSerial).put("meterAddress", capture.meterAddress)
                 .put("serviceVersion", capture.serviceVersion).put("baseline", JSONArray(capture.baseline))
                 .put("samples", JSONArray().also { a -> capture.samples.forEach { a.put(encodeStoredCalibrationSample(it)) } })
@@ -148,7 +159,8 @@ internal class GrupettoCalibrationStore(directory: File, name: String) {
                 json.put("table", JSONObject().put("gains", JSONArray(it.gains)).put("confidence", JSONArray(it.confidence))
                     .put("cellSampleCounts", JSONArray(it.effectiveCellSampleCounts()))
                     .put("cells", it.cells).put("beforeRmse", it.beforeRmse).put("afterRmse", it.afterRmse).put("ready", it.ready)
-                    .put("recordedThrough", it.recordedThrough).put("manualCoverage", JSONArray(it.manualCoverage.toList())))
+                    .put("recordedThrough", it.recordedThrough).put("manualCoverage", JSONArray(it.manualCoverage.toList()))
+                    .put("thermalAnchors", JSONArray().also { a -> (0 until 496).forEach { cell -> a.put(it.thermalAnchors[cell] ?: JSONObject.NULL) } }))
             }
             return json
         }

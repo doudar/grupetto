@@ -17,9 +17,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @Composable
 internal fun CalibrationFileControls(hasData: Boolean, canLoad: Boolean,
@@ -32,7 +29,6 @@ internal fun CalibrationFileControls(hasData: Boolean, canLoad: Boolean,
     var loadResult by remember { mutableStateOf<Pair<String, String>?>(null) }
     val currentExport by rememberUpdatedState(export)
     val currentLoad by rememberUpdatedState(load)
-    fun filename() = "grupetto-calibration-${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())}.json"
     fun runOperation(reportLoad: Boolean = false, action: suspend () -> Unit) {
         busy = true
         message = null
@@ -77,7 +73,7 @@ internal fun CalibrationFileControls(hasData: Boolean, canLoad: Boolean,
     }
     Column {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton({ openPicker { save.launch(filename()) } }, Modifier.weight(1f).heightIn(min = 48.dp),
+            OutlinedButton({ openPicker { save.launch(calibrationBackupFilename()) } }, Modifier.weight(1f).heightIn(min = 48.dp),
                 enabled = hasData && !busy) { Text("Save") }
             OutlinedButton({ openPicker { open.launch(arrayOf("*/*")) } }, Modifier.weight(1f).heightIn(min = 48.dp),
                 enabled = canLoad && !busy) { Text("Load") }

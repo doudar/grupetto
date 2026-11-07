@@ -10,7 +10,8 @@ import kotlin.math.floor
 class PelotonCadenceReference internal constructor(private val baseline: List<Int>, val model: Model) {
     private val baselineValid = validCalibrationTable(baseline)
     enum class Model(val id: String) { Rexon("rexon_2_4_490"), Tonic("tonic_2_4_490") }
-    data class PairAtCell(val rpm: Double, val nativeWatts: Double, val pedalWatts: Double, val factor: Double)
+    data class PairAtCell(val rpm: Double, val nativeWatts: Double, val pedalWatts: Double, val factor: Double,
+        val thermalFactor: Double = 1.0)
 
     fun normalize(sample: CalibrationSample, measured: Boolean = false): PairAtCell? {
         val cell = calibrationCellIndex(baseline, sample.ad, sample.rpm) ?: return null
@@ -133,6 +134,11 @@ class PelotonCadenceReference internal constructor(private val baseline: List<In
 
 /** Derived input only: never replace CalibrationSample fields or the live pedal reading. */
 internal fun calibrationCalculationPair(sample: CalibrationSample, reference: PelotonCadenceReference?,
-    measured: Boolean = false): PelotonCadenceReference.PairAtCell =
-    reference?.normalize(sample, measured) ?: PelotonCadenceReference.PairAtCell(sample.rpm,
+    measured: Boolean = false, thermal: Boolean = false): PelotonCadenceReference.PairAtCell {
+    val pair = reference?.normalize(sample, measured) ?: PelotonCadenceReference.PairAtCell(sample.rpm,
         sample.nativeWatts, if (measured) sample.measuredPedalWatts else sample.pedalWatts, 1.0)
+    if (!thermal) return pair
+    require(CalibrationThermalCorrection.usable(sample))
+    val factor = CalibrationThermalCorrection.factor(sample.temperature)!!
+    return pair.copy(pedalWatts = pair.pedalWatts / factor, thermalFactor = factor)
+}

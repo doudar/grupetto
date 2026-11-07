@@ -10,31 +10,47 @@ import java.util.UUID
  * Layout: kind, AD, rpm, native, target, wall time, original pedal/null, native time, pedal time,
  * accepted duration, new-level marker. Legacy aggregates retain their descriptive object layout. */
 internal fun encodeStoredCalibrationSample(sample: CalibrationSample): Any {
+    require(sample.temperature == null || CalibrationThermalCorrection.usable(sample))
     val observation = sample.observation
     if (observation != null) return JSONArray().put("paired_second").put(sample.ad).put(sample.rpm)
         .put(sample.nativeWatts).put(sample.pedalWatts).put(sample.capturedAt)
         .put(sample.recordedPedalWatts ?: JSONObject.NULL).put(observation.nativeAt).put(observation.pedalAt)
-        .put(observation.durationMillis).put(observation.startsNewLevel)
+        .put(observation.durationMillis).put(observation.startsNewLevel).put(sample.temperature?.let(::encodeCalibrationTemperature) ?: JSONObject.NULL)
     return encodeCalibrationObservation(JSONObject().put("ad", sample.ad).put("rpm", sample.rpm)
         .put("nativeWatts", sample.nativeWatts).put("pedalWatts", sample.pedalWatts).put("capturedAt", sample.capturedAt)
         .also { sample.recordedPedalWatts?.let { value -> it.put("recordedPedalWatts", value) } }, null)
 }
 
-internal fun decodeStoredCalibrationSample(samples: JSONArray, index: Int, provenance: Boolean): CalibrationSample {
+internal fun decodeStoredCalibrationSample(samples: JSONArray, index: Int, provenance: Boolean, thermal: Boolean = false): CalibrationSample {
     val value = samples.get(index)
     if (value is JSONArray) {
-        require(provenance && value.length() == 11 && value.getString(0) == "paired_second")
+        require(provenance && value.length() == (if (thermal) 12 else 11) && value.getString(0) == "paired_second")
         val observation = CalibrationObservation(value.getLong(7), value.getLong(8), value.getInt(9), value.getBoolean(10))
         require(observation.nativeAt >= 0 && observation.pedalAt >= 0 &&
             kotlin.math.abs(observation.nativeAt - observation.pedalAt) <= 1500 && observation.durationMillis == 1000)
         return CalibrationSample(value.getDouble(1), value.getDouble(2), value.getDouble(3), value.getDouble(4),
-            value.getLong(5), if (value.isNull(6)) null else value.getDouble(6), observation)
+            value.getLong(5), if (value.isNull(6)) null else value.getDouble(6), observation,
+            if (thermal && !value.isNull(11)) decodeCalibrationTemperature(value.getJSONArray(11), observation.nativeAt) else null)
     }
     require(value is JSONObject)
     return CalibrationSample(value.getDouble("ad"), value.getDouble("rpm"), value.getDouble("nativeWatts"),
         value.getDouble("pedalWatts"), value.getLong("capturedAt"),
         if (value.has("recordedPedalWatts")) value.getDouble("recordedPedalWatts") else null,
         if (provenance) decodeCalibrationObservation(value) else null)
+}
+
+/** Compact immutable provenance: estimated C, room F, elapsed timestamp, heat-model version,
+ * unobserved-history flag, confidence origin. Bound memory at 496 x 100 samples x two profiles. */
+private fun encodeCalibrationTemperature(value: CalibrationTemperature) = JSONArray()
+    .put(value.celsius).put(value.roomFahrenheit).put(value.estimatedAt).put(value.estimatorVersion)
+    .put(value.historyUnobserved).put(value.confidence.name)
+
+private fun decodeCalibrationTemperature(json: JSONArray, nativeAt: Long): CalibrationTemperature {
+    require(json.length() == 6)
+    return CalibrationTemperature(json.getDouble(0), json.getDouble(1), json.getLong(2),
+        json.getInt(3), json.getBoolean(4), TemperatureConfidence.valueOf(json.getString(5))).also {
+        require(it.valid && nativeAt - it.estimatedAt in 0..1500) { "Invalid temperature observation." }
+    }
 }
 
 internal fun encodeCalibrationObservation(json: JSONObject, observation: CalibrationObservation?): JSONObject {
@@ -59,7 +75,7 @@ internal fun decodeCalibrationObservation(json: JSONObject): CalibrationObservat
 /** Never overwrite the only copy of an older format. A successful fsynced copy is required
  * before atomic migration. This file is recovery evidence, never an automatic learning source. */
 internal fun preserveCalibrationMigrationSource(source: File) {
-    val recovery = File(source.path + ".before-stream-v4-" + UUID.randomUUID())
+    val recovery = File(source.path + ".before-thermal-v5-" + UUID.randomUUID())
     check(recovery.createNewFile())
     try {
         source.inputStream().use { input -> FileOutputStream(recovery).use { out -> input.copyTo(out); out.fd.sync() } }
