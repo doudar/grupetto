@@ -474,11 +474,22 @@ class BikeControlTest {
         repeat(50) { sample(340f, 90f) }
         assertTrue(writes.isEmpty())
     }
+    @Test fun seedCurveFitsHighLevelsAtLowCadence() {
+        // Nov 8, 71 rpm: the later (warmer) ride held 362 W at L70-71. The old seed alone asked for
+        // L73-74; the refit asks for about L70-71. (An earlier ride logged L67 for 362 W, which the
+        // refit does not reach; online learning covers that case.)
+        val level = PowerModel().nearestLevelFor(362f, 71f)!!
+        assertTrue("expected L69-71 for 362 W at 71 rpm, got $level", level in 69..71)
+        // Mid-range unchanged within a level: 165 W at 87 rpm stays about L44-45.
+        assertTrue(PowerModel().nearestLevelFor(165f, 87f)!! in 44..45)
+    }
     @Test fun deadbandStaysNarrowAtModeratePower() {
-        // Near 170 W one level is about 10 W, so a 5 W shortfall is still trimmed.
+        // Near 170 W one level is about 10 W, so the band is about 5 W and a 6 W shortfall is
+        // still trimmed. (5 W sat exactly on the band edge: 4.95 W on the old seed, 5.1 W on the
+        // Nov 2026 refit.)
         resistance = 44
         repeat(3) { sample(170f, 90f) }
-        assertTrue(control.localErg(175))
+        assertTrue(control.localErg(176))
         repeat(50) { sample(170f, 90f) }
         assertTrue(writes.isNotEmpty())
     }
