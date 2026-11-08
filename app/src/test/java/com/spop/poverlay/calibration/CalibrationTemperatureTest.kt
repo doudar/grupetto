@@ -16,6 +16,23 @@ class CalibrationTemperatureTest {
     private fun fit(points: List<CalibrationSample>, seed: GrupettoCalibrationTable? = null) =
         GrupettoCalibrationFitter.fit(baseline, points, seed = seed)!!
 
+    @Test fun legacyAndDiscEstimatesRetainTheirOwnProvenanceAndUseTheSameCorrectionContract() {
+        val current = point(reference + 10)
+        val currentTemperature = current.temperature!!
+        assertEquals(2, currentTemperature.estimatorVersion)
+        val legacy = current.copy(temperature = currentTemperature.copy(estimatorVersion = 1))
+        assertTrue(legacy.temperature!!.valid)
+        assertEquals(CalibrationThermalCorrection.factor(legacy.temperature),
+            CalibrationThermalCorrection.factor(current.temperature))
+        val table = fit(listOf(legacy, current.copy(capturedAt = 2000,
+            observation = CalibrationObservation(2000, 2000),
+            temperature = currentTemperature.copy(estimatedAt = 2000))))
+        assertEquals(legacy.measuredPedalWatts, table.correctedSample(legacy), 1e-9)
+        assertEquals(1, legacy.temperature!!.estimatorVersion)
+        assertFalse(currentTemperature.copy(estimatorVersion = 3).valid)
+        assertFalse(currentTemperature.copy(estimatorVersion = 0).valid)
+    }
+
     @Test fun coldAndWarmSamplesLearnSameReferenceGainAndReproduceEachOriginal() {
         val cold = point(reference)
         val warm = point(reference + 25, at = 2000)

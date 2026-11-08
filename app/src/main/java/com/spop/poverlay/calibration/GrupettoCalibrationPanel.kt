@@ -72,7 +72,7 @@ fun GrupettoCalibrationPanel(state: GrupettoCalibrationUiState, onRecord: (Boole
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(state.message)
                 Text("Experimental flywheel estimate: raw bike watts approximate brake heat; no temperature sensor is read. " +
-                    "Assumes 8000 J/K effective heat capacity and 8 W/K cooling with a constant fan. Starts at room temperature; " +
+                    "Assumes an aluminum brake disc coupled to a steel hub, with provisional heat transfer and constant airflow. The disc estimate is displayed. Starts at room temperature; " +
                     "missing telemetry and app-off periods assume zero heat input, so riding during gaps is missed. " +
                     "Surface temperature may differ. New temperature-tagged cells use provisional thermal correction; old cells keep their existing behavior. " +
                     "Reference gains are at fixed 65°F, independent of room temperature. Only final output is limited to ±50%. " +

@@ -5,7 +5,6 @@ import android.os.SystemClock
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import org.json.JSONObject
 
 /** Process-owned ticker, independent of calibration Record/Activate and Activity visibility.
  * One small atomic preference snapshot every 30 seconds, never disk work on telemetry callbacks.
@@ -17,10 +16,7 @@ class FlywheelTemperatureTracker(context: Context,
     private val preferences = context.getSharedPreferences("experimental-flywheel-temperature", Context.MODE_PRIVATE)
     private val lock = Any()
     private val model = FlywheelTemperatureModel(elapsedMillis(), wallMillis(),
-        runCatching {
-            val j = JSONObject(preferences.getString("checkpoint", null) ?: return@runCatching null)
-            ThermalCheckpoint(j.getInt("version"), j.getDouble("celsius"), j.getDouble("roomFahrenheit"), j.getLong("wallMillis"))
-        }.getOrNull()).apply {
+        decodeThermalCheckpoint(preferences.getString("checkpoint", null))).apply {
             setDisplayUnit(runCatching {
                 TemperatureUnit.valueOf(preferences.getString("display-unit", null) ?: "")
             }.getOrDefault(TemperatureUnit.Fahrenheit))
@@ -88,8 +84,6 @@ class FlywheelTemperatureTracker(context: Context,
 
     private fun persist() {
         val s = model.checkpoint(wallMillis())
-        preferences.edit().putString("checkpoint", JSONObject().put("version", s.version)
-            .put("celsius", s.celsius).put("roomFahrenheit", s.roomFahrenheit)
-            .put("wallMillis", s.wallMillis).toString()).apply()
+        preferences.edit().putString("checkpoint", encodeThermalCheckpoint(s)).apply()
     }
 }

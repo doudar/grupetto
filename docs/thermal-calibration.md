@@ -67,7 +67,13 @@ or null: `[estimatedCelsius, roomFahrenheit, elapsedTimestamp, heatModelVersion,
 confidenceOrigin]`. No normalized watts overwrite original bike or pedal measurements. Manual edits
 continue to retain original pedal measurements in `recordedPedalWatts`.
 
-Heat-model version 1 identifies C=8000 J/K and H=8 W/K. Confidence distinguishes `AmbientStartAssumed`
+Heat-model version 1 identifies C=8000 J/K and H=8 W/K. Version 2 records the aluminum-disc node
+of the coupled disc/hub estimator described in [flywheel temperature](flywheel-temperature.md).
+New samples use version 2. Both versions are accepted, serialized and replayed using their original
+saved temperatures; old samples, reference gains, thermal anchors and the 65 F reference are not
+rewritten. The inverse-resistivity correction itself is unchanged, so its model identifier is unchanged.
+Old app builds that only accept estimator version 1 cannot import samples recorded by version 2;
+keep a pre-update export if rollback is needed. Confidence distinguishes `AmbientStartAssumed`
 from `InterruptedHistory`; neither claims a measured or known-cold start. Missing intervals retain the
 estimator's explicitly uncertain zero-input cooling assumption. Sample provenance is immutable after
 capture. Changing heat-model parameters cannot reconstruct past temperatures from this snapshot alone;

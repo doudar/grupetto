@@ -18,6 +18,21 @@ class CalibrationTemperaturePersistenceTest {
     private fun directory() = File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir,
         "thermal-persistence-${System.nanoTime()}").apply { mkdirs() }
 
+    @Test fun thermalCheckpointRoundTripsBothNodesAndRejectsMalformedHub() {
+        val checkpoint = ThermalCheckpoint(2, 60.0, 72.0, 1000, 40.0)
+        assertEquals(checkpoint, decodeThermalCheckpoint(encodeThermalCheckpoint(checkpoint)))
+        val old = """{"version":1,"celsius":40,"roomFahrenheit":65,"wallMillis":1000}"""
+        val migrated = FlywheelTemperatureModel(0, 1000, decodeThermalCheckpoint(old)).checkpoint(1000)
+        assertEquals(2, migrated.version)
+        assertEquals(40.0, migrated.hubCelsius!!, 0.0)
+        assertEquals(migrated, decodeThermalCheckpoint(encodeThermalCheckpoint(migrated)))
+        val missingHub = JSONObject(encodeThermalCheckpoint(checkpoint)).apply { remove("hubCelsius") }
+        assertEquals(72.0, FlywheelTemperatureModel(0, 1000,
+            decodeThermalCheckpoint(missingHub.toString())).state.fahrenheit, 1e-9)
+        assertNull(decodeThermalCheckpoint("broken"))
+        assertNull(decodeThermalCheckpoint(null))
+    }
+
     @Test fun temperatureRawMeasurementsConfidenceAndReferenceGainsRoundTrip() {
         val p = profile()
         val text = CalibrationBackup(p, p).encode()
@@ -35,7 +50,7 @@ class CalibrationTemperaturePersistenceTest {
     @Test fun legacyHistoryMetadataRoundTripsWithoutAFormatChange() {
         TemperatureConfidence.values().forEach { confidence ->
             listOf(false, true).forEach { unobserved ->
-                val old = sample.copy(temperature = temperature.copy(
+                val old = sample.copy(temperature = temperature.copy(estimatorVersion = 1,
                     historyUnobserved = unobserved, confidence = confidence))
                 val p = profile(old)
                 val encoded = CalibrationBackup(p, p).encode()
@@ -112,6 +127,7 @@ class CalibrationTemperaturePersistenceTest {
         val first = tracker.temperatureAt(now)!!
         // Runtime history checks are gone; new samples retain a conservative legacy marker.
         assertTrue(first.historyUnobserved)
+        assertEquals(2, first.estimatorVersion)
         assertEquals(TemperatureConfidence.InterruptedHistory, first.confidence)
         tracker.observe(CalibrationFrame(now + 1000, 2000, 95.0, 200.0, "bike", 1))
         assertEquals(first, tracker.temperatureAt(now))

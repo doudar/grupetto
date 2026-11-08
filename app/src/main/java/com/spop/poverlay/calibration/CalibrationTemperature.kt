@@ -8,10 +8,10 @@ enum class TemperatureConfidence { AmbientStartAssumed, InterruptedHistory }
  * History fields remain for schema compatibility and round-trip existing values unchanged.
  * New samples use the conservative legacy unknown-history marker; it is not a new gap detection. */
 data class CalibrationTemperature(val celsius: Double, val roomFahrenheit: Double,
-    val estimatedAt: Long, val estimatorVersion: Int = 1, val historyUnobserved: Boolean = true,
+    val estimatedAt: Long, val estimatorVersion: Int = CurrentHeatEstimatorVersion, val historyUnobserved: Boolean = true,
     val confidence: TemperatureConfidence = TemperatureConfidence.InterruptedHistory) {
     val valid get() = celsius.isFinite() && celsius in -100.0..500.0 &&
-        validRoomTemperature(roomFahrenheit) && estimatedAt >= 0 && estimatorVersion == 1
+        validRoomTemperature(roomFahrenheit) && estimatedAt >= 0 && estimatorVersion in 1..CurrentHeatEstimatorVersion
 }
 
 /** Experimental low-speed inverse-resistivity approximation, NOT a fitted Peloton coefficient.
