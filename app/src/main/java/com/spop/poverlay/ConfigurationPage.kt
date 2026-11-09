@@ -321,10 +321,16 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
         }
         "bike" -> if (bike.connected) SettingsDialog("Bike+ / CrossTrainer", { dialog = null }) {
             var tab by remember { mutableStateOf(0) }
-            GrupettoTabs(tab, listOf("Trainer", "Shifters"), { tab = it })
+            GrupettoTabs(tab, listOf("Trainer", "Shifters", "Remotes"), { tab = it })
             Spacer(Modifier.height(8.dp))
             if (tab == 0) TrainerControls(bike, viewModel::startErg, viewModel::startSimulation,
                 viewModel::stopBikeControl, viewModel::setBikeResistance, viewModel::setBikeTuning)
+            else if (tab == 2) {
+                val remotesEnabled by viewModel.openBikeControlEnabled.collectAsStateWithLifecycle()
+                val remotes by viewModel.openBikeControlStatus.collectAsStateWithLifecycle()
+                com.spop.poverlay.openbikecontrol.OpenBikeControlSettings(remotesEnabled, remotes, viewModel.isPreview,
+                    viewModel::setOpenBikeControlEnabled)
+            }
             else ShifterSettings(showShifters, shifterInset, viewModel::setShowShifters, viewModel::setShifterInset,
                 onPreview = { previewShifters = it })
         }
