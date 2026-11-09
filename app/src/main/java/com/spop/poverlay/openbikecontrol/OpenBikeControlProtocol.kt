@@ -74,8 +74,10 @@ fun decodeObcMessage(bytes: ByteArray): ObcMessage? {
  * (`01` + id/state pairs, or `02 battery connected`), so the buffer is split into the
  * shortest valid messages. A buffer that can't be split yet waits for the next read,
  * and is dropped once it is older than [staleMs] or longer than [maxBytes].
+ * A button-state message holds at most [maxButtons] buttons, which keeps the split linear
+ * in the read size.
  */
-class ObcStreamDecoder(private val staleMs: Long = 500, private val maxBytes: Int = 64) {
+class ObcStreamDecoder(private val staleMs: Long = 500, private val maxBytes: Int = 64, private val maxButtons: Int = 16) {
     private var pending = ByteArray(0)
     private var pendingSince = 0L
 
@@ -101,7 +103,7 @@ class ObcStreamDecoder(private val staleMs: Long = 500, private val maxBytes: In
             if (start == buffer.size) return emptyList()
             if (memo.containsKey(start)) return memo[start]
             val lengths = when (buffer[start].toInt() and 255) {
-                OpenBikeControl.TypeButtonState -> (3..buffer.size - start step 2)
+                OpenBikeControl.TypeButtonState -> (3..minOf(buffer.size - start, 1 + 2 * maxButtons) step 2)
                 OpenBikeControl.TypeDeviceStatus -> (3..3)
                 else -> IntRange.EMPTY
             }

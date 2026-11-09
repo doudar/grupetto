@@ -91,6 +91,22 @@ class OpenBikeControlProtocolTest {
         assertEquals(listOf(buttons(0x02 to 1)), decoder.offer(bytes(0x01, 0x02, 0x01), 1))
     }
 
+    @Test fun `a long read of presses splits in linear time`() {
+        // 2,000 merged press/release messages, the worst case for the split search.
+        val read = ByteArray(6 * 2000) { if (it % 3 == 0) 1 else if (it % 6 == 5) 0 else 1 }
+        val started = System.nanoTime()
+        val messages = ObcStreamDecoder().offer(read, 0)
+        assertEquals(4000, messages.size)
+        assertTrue("split took too long", System.nanoTime() - started < 2_000_000_000L)
+    }
+
+    @Test fun `a button message longer than the cap is not accepted`() {
+        val decoder = ObcStreamDecoder(maxButtons = 2)
+        // Three buttons in one message (7 bytes) can't be split into valid capped messages.
+        assertEquals(emptyList<ObcMessage>(), decoder.offer(bytes(0x01, 0x30, 0x01, 0x31, 0x01, 0x14, 0x01), 0))
+        assertEquals(listOf(buttons(0x30 to 1, 0x31 to 1)), ObcStreamDecoder(maxButtons = 2).offer(bytes(0x01, 0x30, 0x01, 0x31, 0x01), 0))
+    }
+
     @Test fun `an empty button state changes nothing`() {
         assertEquals(listOf(buttons()), ObcStreamDecoder().offer(bytes(0x01), 0))
     }
