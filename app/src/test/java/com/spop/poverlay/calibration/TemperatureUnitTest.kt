@@ -34,7 +34,7 @@ class TemperatureUnitTest {
         assertEquals(checkpoint, model.checkpoint(2000))
         model.setDisplayUnit(TemperatureUnit.Fahrenheit)
         assertEquals(before, model.state)
-        assertEquals(thermalStep(before.celsius, (72.0 - 32) / 1.8, 200.0, 1.0),
+        assertEquals(thermalStep(FlywheelNodes(before.celsius, before.hubCelsius), (72.0 - 32) / 1.8, 200.0, 1.0).discCelsius,
             model.advance(2000).celsius, 1e-9)
     }
 }
