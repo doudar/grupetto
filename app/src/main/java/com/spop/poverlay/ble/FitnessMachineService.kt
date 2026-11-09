@@ -17,16 +17,17 @@ class FitnessMachineService(
 
     private val isTread = deviceType == DeviceType.Tread
     private val canControl = !isTread && control?.supported == true
-    private var lastPermissionLostCount = control?.state?.value?.permissionLostCount ?: 0
+    private val statusUpdates = FitnessMachineStatusUpdates(control?.state?.value)
 
     fun onControlStateChanged(state: com.spop.poverlay.control.ControlState) {
         if (!canControl) return
-        if (lastPermissionLostCount != state.permissionLostCount) {
-            machineStatusCharacteristic.value = byteArrayOf(0xff.toByte())
-            server.notifyDirConCharacteristicChanged(machineStatusCharacteristic)
-            connectedDevices.toList().forEach { server.notifyCharacteristicChanged(it, machineStatusCharacteristic, false) }
-        }
-        lastPermissionLostCount = state.permissionLostCount
+        statusUpdates.update(state).forEach(::notifyStatus)
+    }
+
+    private fun notifyStatus(status: ByteArray) {
+        machineStatusCharacteristic.value = status
+        server.notifyDirConCharacteristicChanged(machineStatusCharacteristic)
+        connectedDevices.toList().forEach { server.notifyCharacteristicChanged(it, machineStatusCharacteristic, false) }
     }
 
     private val indoorBikeDataCharacteristic = BluetoothGattCharacteristic(
@@ -141,16 +142,19 @@ class FitnessMachineService(
     ).apply { value = byteArrayOf(25, 0, 0xe8.toByte(), 3, 1, 0) }
 
     fun handleControl(client: String, value: ByteArray): ByteArray = synchronized(server) {
+        // Keep the procedure and its observer baseline atomic with local actions.
+        synchronized(control ?: this) { handleControlLocked(client, value) }
+    }
+
+    private fun handleControlLocked(client: String, value: ByteArray): ByteArray {
+        if (canControl) onControlStateChanged(control!!.state.value)
         val opcode = value.firstOrNull()?.toInt()?.and(255) ?: 0
         val reply = if (canControl) control!!.procedure(client, value)
         else com.spop.poverlay.control.BikeControl.Reply(
             if (value.size == 1 && opcode in listOf(0, 1, 7) ||
                 value.size == 2 && opcode == 8 && value[1].toInt() in 1..2) 1 else 2)
-        reply.status?.let { status ->
-            machineStatusCharacteristic.value = status
-            server.notifyDirConCharacteristicChanged(machineStatusCharacteristic)
-            connectedDevices.toList().forEach { server.notifyCharacteristicChanged(it, machineStatusCharacteristic, false) }
-        }
+        reply.status?.let(::notifyStatus)
+        if (canControl) statusUpdates.update(control!!.state.value, localTargets = false).forEach(::notifyStatus)
         if (reply.result == 1 && opcode in listOf(1, 7, 8)) {
             trainingStatusCharacteristic.value = byteArrayOf(0,
                 (if (opcode == 7) FitnessMachineConstants.TrainingStatus.ManualMode
@@ -158,7 +162,7 @@ class FitnessMachineService(
             server.notifyDirConCharacteristicChanged(trainingStatusCharacteristic)
             connectedDevices.forEach { server.notifyCharacteristicChanged(it, trainingStatusCharacteristic, false) }
         }
-        byteArrayOf(0x80.toByte(), opcode.toByte(), reply.result.toByte())
+        return byteArrayOf(0x80.toByte(), opcode.toByte(), reply.result.toByte())
     }
 
     override fun onDisconnected(device: BluetoothDevice) {
@@ -178,10 +182,11 @@ class FitnessMachineService(
         }
         addCharacteristic(featureCharacteristic)
         addCharacteristic(controlPointCharacteristic)
+        // FTMS Table 3.1 C.3 permits this on read-only bikes. SmartSpin2k uses
+        // the range for homing; the target feature bit still governs control.
         if (!isTread) addCharacteristic(supportedResistanceRangeCharacteristic)
         addCharacteristic(trainingStatusCharacteristic)
         if (canControl) {
-            supportedResistanceRangeCharacteristic.value = byteArrayOf(0, 0, 0xe8.toByte(), 3, 10, 0)
             addCharacteristic(machineStatusCharacteristic)
             addCharacteristic(powerRangeCharacteristic)
         }

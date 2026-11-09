@@ -13,6 +13,7 @@ import androidx.compose.ui.unit.sp
 import com.spop.poverlay.control.BikeControl
 import com.spop.poverlay.control.ControlMode
 import com.spop.poverlay.control.ControlState
+import com.spop.poverlay.control.ResistanceLimits
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -61,7 +62,9 @@ internal fun TrainerControls(
                     onTuning(state.shiftSize, state.gain, state.wattsPerShift, it, state.rampRate)
                 }
             }
-            else -> TrainerSlider("Resistance", "${state.targetResistance} points", state.targetResistance.toFloat(), 0f..100f, 99) {
+            else -> TrainerSlider("Resistance", "${state.targetResistance} points", state.targetResistance.toFloat(),
+                ResistanceLimits.MIN.toFloat()..ResistanceLimits.MAX.toFloat(),
+                (ResistanceLimits.MAX - ResistanceLimits.MIN) / ResistanceLimits.STEP - 1) {
                 onResistance(it.roundToInt())
             }
         }
