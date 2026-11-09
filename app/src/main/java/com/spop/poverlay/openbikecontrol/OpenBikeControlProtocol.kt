@@ -52,6 +52,8 @@ object OpenBikeControl {
 sealed class ObcMessage {
     data class Buttons(val states: List<Pair<Int, Int>>) : ObcMessage()
     data class DeviceStatus(val battery: Int?, val connected: Boolean) : ObcMessage()
+    /** The decoder dropped bytes it couldn't place; button states may have been lost. */
+    object Resync : ObcMessage()
 }
 
 /** One complete message, as delivered by a BLE notification. */
@@ -68,52 +70,118 @@ fun decodeObcMessage(bytes: ByteArray): ObcMessage? {
 }
 
 /**
- * Splits the TCP byte stream into messages. The protocol has no length field, and a remote
+ * Splits the TCP byte stream into messages. The protocol has no length field. A remote
  * that writes a press and its release back to back (BikeControl does) can arrive as one
- * read: `01 01 01 01 01 00`. Every message has a fixed type byte and an odd length
- * (`01` + id/state pairs, or `02 battery connected`), so the buffer is split into the
- * shortest valid messages. A buffer that can't be split yet waits for the next read,
- * and is dropped once it is older than [staleMs] or longer than [maxBytes].
- * A button-state message holds at most [maxButtons] buttons, which keeps the split linear
- * in the read size.
+ * read, `01 01 01 01 01 00`, and TCP may also split a message across reads.
+ *
+ * Every message has a type byte and an odd length (`01` + id/state pairs, or
+ * `02 battery connected`). Remotes send one message per state change, so a read is first
+ * split into one-button messages. Only if that fails is a multi-button message considered.
+ * When the bytes fit both readings, for example `01 30 01 01 01` (two buttons, or one
+ * press plus the start of the next message), the read is held: more bytes settle it,
+ * and if none come within [settleMs], [flush] reads it as a multi-button message.
+ * A button message must be plausible: no button twice, and Grupetto's digital buttons
+ * only pressed (1) or released (0).
+ *
+ * Bytes that can't be placed, or a fragment older than [staleMs] or longer than [maxBytes],
+ * are dropped and reported as [ObcMessage.Resync]. A button-state message holds at most
+ * [maxButtons] buttons, which keeps splitting linear in the read size.
  */
-class ObcStreamDecoder(private val staleMs: Long = 500, private val maxBytes: Int = 64, private val maxButtons: Int = 16) {
+class ObcStreamDecoder(
+    private val staleMs: Long = 500,
+    private val maxBytes: Int = 64,
+    private val maxButtons: Int = 16,
+    val settleMs: Long = 40
+) {
     private var pending = ByteArray(0)
     private var pendingSince = 0L
+    private var ambiguous = false
 
-    fun reset() { pending = ByteArray(0) }
+    fun reset() { pending = ByteArray(0); ambiguous = false }
+
+    /** How long the reader may wait for more bytes before calling [flush]; null = no limit. */
+    fun waitMs(now: Long): Long? = when {
+        pending.isEmpty() -> null
+        ambiguous -> settleMs
+        else -> (staleMs - (now - pendingSince)).coerceIn(1, staleMs)
+    }
 
     fun offer(bytes: ByteArray, now: Long): List<ObcMessage> {
-        if (pending.isNotEmpty() && now - pendingSince > staleMs) pending = ByteArray(0)
+        val out = mutableListOf<ObcMessage>()
+        if (pending.isNotEmpty() && !ambiguous && now - pendingSince > staleMs) { pending = ByteArray(0); out += ObcMessage.Resync }
         if (pending.isEmpty()) pendingSince = now
+        ambiguous = false
         val buffer = pending + bytes
-        val split = split(buffer)
-        if (split != null) { pending = ByteArray(0); return split }
-        val first = buffer.firstOrNull()?.toInt()?.and(255)
-        pending = if (buffer.size > maxBytes || (first != OpenBikeControl.TypeButtonState &&
-                first != OpenBikeControl.TypeDeviceStatus)) ByteArray(0) else buffer
+        pending = ByteArray(0)
+        split(buffer, 1, allowTail = false)?.let { out += it.first; return out }
+        val multi = split(buffer, maxButtons, allowTail = false)
+        val singleTail = split(buffer, 1, allowTail = true)
+        when {
+            multi != null && singleTail != null && buffer.size <= maxBytes -> { pending = buffer; ambiguous = true }
+            multi != null -> out += multi.first
+            singleTail != null -> keep(buffer, singleTail, now, out)
+            else -> split(buffer, maxButtons, allowTail = true)?.let { keep(buffer, it, now, out) } ?: run {
+                val first = buffer.firstOrNull()?.toInt()?.and(255)
+                if (buffer.size > maxBytes || (first != OpenBikeControl.TypeButtonState && first != OpenBikeControl.TypeDeviceStatus))
+                    out += ObcMessage.Resync
+                else pending = buffer
+            }
+        }
+        return out
+    }
+
+    /** No more bytes arrived in time: settle a held read, or drop a stale fragment. */
+    fun flush(now: Long): List<ObcMessage> {
+        if (ambiguous) {
+            ambiguous = false
+            val held = pending
+            pending = ByteArray(0)
+            return split(held, maxButtons, allowTail = false)?.first ?: listOf(ObcMessage.Resync)
+        }
+        if (pending.isNotEmpty() && now - pendingSince > staleMs) { pending = ByteArray(0); return listOf(ObcMessage.Resync) }
         return emptyList()
     }
 
-    private fun split(buffer: ByteArray): List<ObcMessage>? {
-        // A lone `01` is a button state naming no buttons; it changes nothing.
-        if (buffer.size == 1 && buffer[0].toInt() == OpenBikeControl.TypeButtonState) return listOf(ObcMessage.Buttons(emptyList()))
-        val memo = HashMap<Int, List<ObcMessage>?>()
-        fun from(start: Int): List<ObcMessage>? {
-            if (start == buffer.size) return emptyList()
+    private fun keep(buffer: ByteArray, parsed: Pair<List<ObcMessage>, Int>, now: Long, out: MutableList<ObcMessage>) {
+        out += parsed.first
+        pending = buffer.copyOfRange(parsed.second, buffer.size)
+        if (parsed.second > 0) pendingSince = now
+    }
+
+    private fun isType(byte: Byte) = (byte.toInt() and 255).let {
+        it == OpenBikeControl.TypeButtonState || it == OpenBikeControl.TypeDeviceStatus
+    }
+
+    private fun plausible(message: ObcMessage): Boolean {
+        if (message !is ObcMessage.Buttons) return true
+        val ids = message.states.map { it.first }
+        return ids.size == ids.toSet().size &&
+            message.states.none { (id, state) -> id in OpenBikeControl.SupportedButtons && state > 1 }
+    }
+
+    /** Messages of at most [buttons] buttons and the number of bytes they use. With
+     * [allowTail], up to two trailing bytes that start a message are left unused. */
+    private fun split(buffer: ByteArray, buttons: Int, allowTail: Boolean): Pair<List<ObcMessage>, Int>? {
+        val memo = HashMap<Int, Pair<List<ObcMessage>, Int>?>()
+        fun from(start: Int): Pair<List<ObcMessage>, Int>? {
+            if (start == buffer.size) return emptyList<ObcMessage>() to start
             if (memo.containsKey(start)) return memo[start]
-            val lengths = when (buffer[start].toInt() and 255) {
-                OpenBikeControl.TypeButtonState -> (3..minOf(buffer.size - start, 1 + 2 * maxButtons) step 2)
-                OpenBikeControl.TypeDeviceStatus -> (3..3)
-                else -> IntRange.EMPTY
-            }
-            var result: List<ObcMessage>? = null
-            for (length in lengths) {
-                if (start + length > buffer.size) break
-                val message = decodeObcMessage(buffer.copyOfRange(start, start + length)) ?: continue
-                val rest = from(start + length) ?: continue
-                result = listOf(message) + rest
-                break
+            var result: Pair<List<ObcMessage>, Int>? = null
+            if (allowTail && buffer.size - start < 3 && isType(buffer[start])) result = emptyList<ObcMessage>() to start
+            else {
+                val lengths = when (buffer[start].toInt() and 255) {
+                    OpenBikeControl.TypeButtonState -> (3..minOf(buffer.size - start, 1 + 2 * buttons) step 2)
+                    OpenBikeControl.TypeDeviceStatus -> (3..3)
+                    else -> IntRange.EMPTY
+                }
+                for (length in lengths) {
+                    if (start + length > buffer.size) break
+                    val message = decodeObcMessage(buffer.copyOfRange(start, start + length)) ?: continue
+                    if (!plausible(message)) continue
+                    val rest = from(start + length) ?: continue
+                    result = (listOf(message) + rest.first) to rest.second
+                    break
+                }
             }
             memo[start] = result
             return result
@@ -129,6 +197,7 @@ class ObcButtonTracker(private val onShift: (direction: Int, button: Int) -> Uni
     fun reset() = pressed.clear()
 
     fun handle(message: ObcMessage) {
+        if (message is ObcMessage.Resync) { reset(); return }
         if (message !is ObcMessage.Buttons) return
         for ((button, state) in message.states) {
             if (state == 0) { pressed.remove(button); continue }

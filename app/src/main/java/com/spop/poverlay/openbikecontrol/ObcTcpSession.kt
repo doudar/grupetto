@@ -8,6 +8,7 @@ import kotlinx.coroutines.withContext
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
 
 /**
  * One TCP connection to an OpenBikeControl remote. Sends App Info right after connecting,
@@ -33,9 +34,13 @@ internal class ObcTcpSession(
                 socket.getOutputStream().apply { write(appInfo); flush() }
                 onConnected()
                 val input = socket.getInputStream()
-                val buffer = ByteArray(256)
+                val buffer = ByteArray(4096)
                 while (true) {
-                    val read = input.read(buffer)
+                    // Wait without a limit, unless the decoder holds bytes it may still settle.
+                    socket.soTimeout = decoder.waitMs(clock())?.toInt() ?: 0
+                    val read = try { input.read(buffer) } catch (e: SocketTimeoutException) {
+                        decoder.flush(clock()).forEach(onMessage); continue
+                    }
                     if (read < 0) break
                     decoder.offer(buffer.copyOf(read), clock()).forEach(onMessage)
                 }

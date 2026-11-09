@@ -20,12 +20,13 @@ internal fun obcLinkLabel(link: ObcLink): String = when (link.phase) {
 }
 
 @Composable
-internal fun OpenBikeControlSettings(status: OpenBikeControlStatus, preview: Boolean, onEnabled: (Boolean) -> Unit) {
+internal fun OpenBikeControlSettings(enabled: Boolean, status: OpenBikeControlStatus, preview: Boolean, onEnabled: (Boolean) -> Unit) {
+    // The switch follows the stored setting: the manager only follows it once the overlay runs.
     Column {
-        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(status.enabled, role = Role.Switch, onValueChange = onEnabled),
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(enabled, role = Role.Switch, onValueChange = onEnabled),
             verticalAlignment = Alignment.CenterVertically) {
             Text("OpenBikeControl remotes", Modifier.weight(1f), fontSize = 16.sp)
-            Switch(status.enabled, null)
+            Switch(enabled, null)
         }
         Text("Shift with BikeControl or another OpenBikeControl remote. Grupetto looks for one on Wi-Fi and Bluetooth " +
             "and connects to the first it finds. In BikeControl, choose \"OpenBikeControl Compatible\" as the trainer app.",
@@ -33,8 +34,8 @@ internal fun OpenBikeControlSettings(status: OpenBikeControlStatus, preview: Boo
         Spacer(Modifier.height(16.dp))
         when {
             preview -> Text("Remotes are off in emulation.", fontSize = 14.sp, color = Color(0xFF9EAEC0))
-            status.enabled && !status.active -> Text("Starts with the overlay.", fontSize = 14.sp, color = Color(0xFF9EAEC0))
-            status.enabled -> {
+            enabled && !status.active -> Text("Starts with the overlay.", fontSize = 14.sp, color = Color(0xFF9EAEC0))
+            enabled -> {
                 LinkRow("Wi-Fi", status.network)
                 LinkRow("Bluetooth", status.bluetooth)
                 status.battery?.let { Detail("Remote battery", "$it%") }

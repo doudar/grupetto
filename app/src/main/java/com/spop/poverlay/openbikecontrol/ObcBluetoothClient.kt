@@ -30,12 +30,18 @@ internal class ObcBluetoothClient(
     private val clock: () -> Long,
     private val appInfo: () -> ByteArray,
     private val onLink: (ObcLink) -> Unit,
-    private val onMessage: (ObcMessage) -> Unit
+    private val onMessage: (ObcMessage) -> Unit,
+    private val scanRequest: () -> Pair<List<ScanFilter>, ScanSettings> = {
+        listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(OpenBikeControl.Service)).build()) to
+            ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_POWER).build()
+    }
 ) {
     private companion object {
         const val ScanMs = 15_000L
         const val ScanPauseMs = 15_000L
         const val RetryMs = 3_000L
+        // Connect, MTU, discovery, subscription and App Info must finish within this.
+        const val HandshakeMs = 30_000L
         // App Info is longer than the default 20-byte payload.
         const val Mtu = 64
     }
@@ -48,6 +54,8 @@ internal class ObcBluetoothClient(
     private var device: String? = null
     private var servicesRequested = false
     private var searchPaused = false
+    private var connectedAt: Long? = null
+    private var connectStartedAt = 0L
 
     @Synchronized fun start() {
         if (running) return
@@ -82,6 +90,7 @@ internal class ObcBluetoothClient(
             onLink(ObcLink(ObcLink.Phase.Unavailable, detail = "Bluetooth permission required"))
             return
         }
+        if (gatt != null && connectedAt == null && now - connectStartedAt > HandshakeMs) fail("Connection timed out")
         if (gatt != null || searchPaused) return
         if (scan != null && now - scanStartedAt > ScanMs) { stopScan(); nextScanAt = now + ScanPauseMs }
         if (scan == null && now >= nextScanAt) startScan(now)
@@ -113,8 +122,7 @@ internal class ObcBluetoothClient(
         scan = callback
         scanStartedAt = now
         onLink(ObcLink(ObcLink.Phase.Searching))
-        val filters = listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(OpenBikeControl.Service)).build())
-        val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_POWER).build()
+        val (filters, settings) = scanRequest()
         if (!access.startScan(filters, settings, callback)) {
             scan = null
             nextScanAt = now + ScanPauseMs
@@ -134,6 +142,8 @@ internal class ObcBluetoothClient(
         val name = result.scanRecord?.deviceName ?: info.name ?: info.address
         device = name
         servicesRequested = false
+        connectedAt = null
+        connectStartedAt = clock()
         onLink(ObcLink(ObcLink.Phase.Connecting, name))
         Timber.i("OpenBikeControl connecting to %s over Bluetooth", name)
         gatt = access.connect(result.device, callback)
@@ -143,6 +153,7 @@ internal class ObcBluetoothClient(
     private fun release() {
         val old = gatt ?: return
         gatt = null
+        connectedAt = null
         access.disconnect(old); access.close(old)
     }
 
@@ -152,6 +163,11 @@ internal class ObcBluetoothClient(
         release()
         nextScanAt = clock() + RetryMs
         if (running) onLink(ObcLink(ObcLink.Phase.Searching, name, "$reason · reconnecting"))
+    }
+
+    private fun connected() {
+        connectedAt = clock()
+        onLink(ObcLink(ObcLink.Phase.Connected, device))
     }
 
     private fun discoverServices(link: BluetoothGatt) {
@@ -189,10 +205,18 @@ internal class ObcBluetoothClient(
             synchronized(this@ObcBluetoothClient) {
                 if (gatt !== link || descriptor.uuid != OpenBikeControl.Cccd) return
                 if (status != BluetoothGatt.GATT_SUCCESS) { fail("Button notifications refused"); return }
-                link.getService(OpenBikeControl.Service)?.getCharacteristic(OpenBikeControl.AppInfo)?.let {
-                    if (!access.write(link, it, appInfo())) Timber.w("OpenBikeControl App Info write did not start")
-                }
-                onLink(ObcLink(ObcLink.Phase.Connected, device))
+                // BikeControl recognises the app only once App Info arrives, so the link
+                // counts as connected after that write succeeds. App Info is optional for a
+                // remote; without the characteristic, the subscription is enough.
+                val info = link.getService(OpenBikeControl.Service)?.getCharacteristic(OpenBikeControl.AppInfo)
+                if (info == null) connected()
+                else if (!access.write(link, info, appInfo())) fail("App Info write failed")
+            }
+        }
+        override fun onCharacteristicWrite(link: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            synchronized(this@ObcBluetoothClient) {
+                if (gatt !== link || characteristic.uuid != OpenBikeControl.AppInfo) return
+                if (status == BluetoothGatt.GATT_SUCCESS) connected() else fail("App Info refused ($status)")
             }
         }
         @Deprecated("Android legacy callback")

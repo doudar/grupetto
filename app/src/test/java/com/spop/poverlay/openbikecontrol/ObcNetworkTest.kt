@@ -60,6 +60,28 @@ class ObcNetworkTest {
         assertEquals(listOf(1 to 1, 1 to 0, 2 to 1, 2 to 0), buttons)
     }
 
+    @Test fun `a held two-button message is delivered while the connection stays open`() = runBlocking {
+        val messages = CopyOnWriteArrayList<ObcMessage>()
+        val delivered = CompletableDeferred<Long>()
+        val remote = scope.async {
+            server.accept().use { socket ->
+                socket.readAppInfo()
+                val sent = System.currentTimeMillis()
+                socket.getOutputStream().apply { write(bytes(1, 0x30, 1, 1, 1)); flush() }
+                withTimeout(2000) { delivered.await() } - sent
+            }
+        }
+        withTimeout(5000) {
+            ObcTcpSession(System::currentTimeMillis).run(InetAddress.getLoopbackAddress(), server.localPort, appInfo, {}) {
+                messages += it
+                delivered.complete(System.currentTimeMillis())
+            }
+        }
+        val latency = remote.await()
+        assertEquals(listOf(ObcMessage.Buttons(listOf(0x30 to 1, 0x01 to 1))), messages)
+        assertTrue("settled after $latency ms", latency < 1000)
+    }
+
     @Test fun `cancelling a session closes the connection`() = runBlocking {
         val accepted = LinkedBlockingQueue<Socket>()
         scope.launch { accepted.put(server.accept()) }

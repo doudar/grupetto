@@ -58,8 +58,28 @@ class OpenBikeControlProtocolTest {
             decoder.offer(bytes(0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x01, 0x02, 0x01, 0x01, 0x02, 0x00), 0))
     }
 
-    @Test fun `a message with two buttons stays one message`() {
-        assertEquals(listOf(buttons(0x30 to 1, 0x01 to 1)), ObcStreamDecoder().offer(bytes(0x01, 0x30, 0x01, 0x01, 0x01), 0))
+    @Test fun `a two-button message waits briefly, then stays one message`() {
+        // Also readable as a press plus the start of the next message: held until settled.
+        val decoder = ObcStreamDecoder()
+        assertEquals(emptyList<ObcMessage>(), decoder.offer(bytes(0x01, 0x30, 0x01, 0x01, 0x01), 0))
+        assertEquals(decoder.settleMs, decoder.waitMs(0))
+        assertEquals(listOf(buttons(0x30 to 1, 0x01 to 1)), decoder.flush(40))
+        assertNull(decoder.waitMs(40))
+    }
+
+    @Test fun `a held read is settled by the bytes that follow`() {
+        val decoder = ObcStreamDecoder()
+        assertEquals(emptyList<ObcMessage>(), decoder.offer(bytes(0x01, 0x30, 0x01, 0x01, 0x01), 0))
+        assertEquals(listOf(buttons(0x30 to 1), buttons(0x01 to 1)), decoder.offer(bytes(0x01), 5))
+    }
+
+    @Test fun `a fragment waits until it goes stale`() {
+        val decoder = ObcStreamDecoder(staleMs = 500)
+        decoder.offer(bytes(0x01, 0x02), 0)
+        assertEquals(400L, decoder.waitMs(100))
+        assertEquals(emptyList<ObcMessage>(), decoder.flush(100))
+        assertEquals(listOf(ObcMessage.Resync), decoder.flush(501))
+        assertNull(decoder.waitMs(501))
     }
 
     @Test fun `status between button messages`() {
@@ -76,18 +96,19 @@ class OpenBikeControlProtocolTest {
     @Test fun `a stale fragment is dropped`() {
         val decoder = ObcStreamDecoder(staleMs = 500)
         decoder.offer(bytes(0x01, 0x02), 0)
-        assertEquals(listOf(buttons(0x01 to 1)), decoder.offer(bytes(0x01, 0x01, 0x01), 1000))
+        assertEquals(listOf(ObcMessage.Resync, buttons(0x01 to 1)), decoder.offer(bytes(0x01, 0x01, 0x01), 1000))
     }
 
     @Test fun `unknown data is discarded and the stream recovers`() {
         val decoder = ObcStreamDecoder()
-        assertEquals(emptyList<ObcMessage>(), decoder.offer(bytes(0x7F, 0x01, 0x01), 0))
+        assertEquals(listOf(ObcMessage.Resync), decoder.offer(bytes(0x7F, 0x01, 0x01), 0))
         assertEquals(listOf(buttons(0x01 to 1)), decoder.offer(bytes(0x01, 0x01, 0x01), 1))
     }
 
     @Test fun `an oversized fragment is discarded`() {
         val decoder = ObcStreamDecoder(maxBytes = 8)
-        decoder.offer(ByteArray(10) { 1 }, 0)
+        // `01` followed by zeros: no plausible split, and longer than the cap.
+        assertEquals(listOf(ObcMessage.Resync), decoder.offer(ByteArray(10) { if (it == 0) 1 else 0 }, 0))
         assertEquals(listOf(buttons(0x02 to 1)), decoder.offer(bytes(0x01, 0x02, 0x01), 1))
     }
 
@@ -107,8 +128,61 @@ class OpenBikeControlProtocolTest {
         assertEquals(listOf(buttons(0x30 to 1, 0x31 to 1)), ObcStreamDecoder(maxButtons = 2).offer(bytes(0x01, 0x30, 0x01, 0x31, 0x01), 0))
     }
 
-    @Test fun `an empty button state changes nothing`() {
-        assertEquals(listOf(buttons()), ObcStreamDecoder().offer(bytes(0x01), 0))
+    @Test fun `a lone type byte waits for the rest of the message`() {
+        val decoder = ObcStreamDecoder()
+        assertEquals(emptyList<ObcMessage>(), decoder.offer(bytes(0x01), 0))
+        assertEquals(listOf(buttons(0x02 to 1)), decoder.offer(bytes(0x02, 0x01), 5))
+    }
+
+    // Codex review on #101: TCP may split anywhere, not only at write boundaries.
+    @Test fun `a release split after its button id is not read as a second button`() {
+        val decoder = ObcStreamDecoder()
+        assertEquals(listOf(buttons(0x02 to 1)), decoder.offer(bytes(0x01, 0x02, 0x01, 0x01, 0x02), 0))
+        assertEquals(listOf(buttons(0x02 to 0)), decoder.offer(bytes(0x00), 1))
+    }
+
+    @Test fun `a release split after its type byte waits`() {
+        val decoder = ObcStreamDecoder()
+        assertEquals(listOf(buttons(0x01 to 1)), decoder.offer(bytes(0x01, 0x01, 0x01, 0x01), 0))
+        assertEquals(listOf(buttons(0x01 to 0)), decoder.offer(bytes(0x01, 0x00), 1))
+    }
+
+    @Test fun `the same button twice is not one message`() {
+        val decoder = ObcStreamDecoder()
+        assertEquals(listOf(buttons(0x01 to 1)), decoder.offer(bytes(0x01, 0x01, 0x01, 0x01, 0x01), 0))
+        assertEquals(listOf(buttons(0x01 to 0)), decoder.offer(bytes(0x00), 1))
+    }
+
+    @Test fun `every split point of press and release gives the same presses`() {
+        val stream = bytes(0x01, 0x02, 0x01, 0x01, 0x02, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00,
+            0x01, 0x30, 0x01, 0x01, 0x30, 0x00, 0x01, 0x31, 0x01, 0x01, 0x31, 0x00)
+        for (cut in 1 until stream.size) {
+            val shifts = mutableListOf<Int>()
+            val tracker = ObcButtonTracker { direction, _ -> shifts += direction }
+            val decoder = ObcStreamDecoder()
+            decoder.offer(stream.copyOfRange(0, cut), 0).forEach(tracker::handle)
+            decoder.offer(stream.copyOfRange(cut, stream.size), 1).forEach(tracker::handle)
+            assertEquals("cut at $cut", listOf(-1, 1, 1, -1), shifts)
+        }
+        for (first in 1 until stream.size - 1) for (second in first + 1 until stream.size) {
+            val shifts = mutableListOf<Int>()
+            val tracker = ObcButtonTracker { direction, _ -> shifts += direction }
+            val decoder = ObcStreamDecoder()
+            decoder.offer(stream.copyOfRange(0, first), 0).forEach(tracker::handle)
+            decoder.offer(stream.copyOfRange(first, second), 1).forEach(tracker::handle)
+            decoder.offer(stream.copyOfRange(second, stream.size), 2).forEach(tracker::handle)
+            decoder.flush(100).forEach(tracker::handle)
+            assertEquals("cuts at $first, $second", listOf(-1, 1, 1, -1), shifts)
+        }
+    }
+
+    @Test fun `resync forgets held buttons`() {
+        val shifts = mutableListOf<Int>()
+        val tracker = ObcButtonTracker { direction, _ -> shifts += direction }
+        tracker.handle(buttons(0x01 to 1))
+        tracker.handle(ObcMessage.Resync)
+        tracker.handle(buttons(0x01 to 1))
+        assertEquals(listOf(1, 1), shifts)
     }
 
     @Test fun `each press shifts once`() {
