@@ -45,6 +45,9 @@ class FitnessMachineControlIntegrationTest {
                 val features = ftms.service.getCharacteristic(FitnessMachineConstants.FeatureUUID).value
                 assertArrayEquals(ByteArray(4), features.copyOfRange(4, 8))
                 assertNull(ftms.service.getCharacteristic(FitnessMachineConstants.SupportedPowerRangeUUID))
+                val range = ftms.service.getCharacteristic(FitnessMachineConstants.SupportedResistanceRangeUUID)
+                if (type == DeviceType.Tread) assertNull(range)
+                else assertArrayEquals(byteArrayOf(0, 0, 0xe8.toByte(), 3, 10, 0), range.value)
                 assertNull(ftms.service.getCharacteristic(FitnessMachineConstants.MachineStatusUUID))
                 assertArrayEquals(byteArrayOf(0x80.toByte(), 5, 2),
                     ftms.handleControl("test", byteArrayOf(5, 150.toByte(), 0)))
@@ -87,5 +90,35 @@ class FitnessMachineControlIntegrationTest {
             assertEquals(if (client.startsWith("ble:")) "Bluetooth" else "DirCon", control.state.value.externalControl)
             control.disconnect(client)
         }
+    }
+
+    @Test fun advertisedResistanceRangeMatchesEveryAcceptedTargetAndTelemetry() = fixture(DeviceType.Bike, true) { ftms, control ->
+        val range = ftms.service.getCharacteristic(FitnessMachineConstants.SupportedResistanceRangeUUID).value
+        fun uint16(bytes: ByteArray, offset: Int) = (bytes[offset].toInt() and 255) or ((bytes[offset + 1].toInt() and 255) shl 8)
+        assertEquals(6, range.size)
+        assertEquals(1, ftms.handleControl("ble:a", byteArrayOf(0))[2].toInt())
+        for (raw in uint16(range, 0)..uint16(range, 2) step uint16(range, 4)) {
+            assertEquals(1, ftms.handleControl("ble:a", byteArrayOf(4, raw.toByte(), (raw shr 8).toByte()))[2].toInt())
+            val level = control.state.value.targetResistance
+            ftms.onSensorDataUpdated(90f, 250f, 20f, level.toFloat(), 0f)
+            val data = ftms.service.getCharacteristic(FitnessMachineConstants.IndoorBikeDataUUID).value
+            assertEquals(raw, uint16(data, 6) * 10)
+            assertEquals(250, uint16(data, 8))
+        }
+    }
+
+    @Test fun localResistanceChangesPublishStatusThroughTheService() = fixture(DeviceType.Bike, true) { ftms, control ->
+        val status = ftms.service.getCharacteristic(FitnessMachineConstants.MachineStatusUUID)
+        control.localResistance(55)
+        ftms.onControlStateChanged(control.state.value)
+        assertArrayEquals(byteArrayOf(7, 38, 2), status.value)
+        control.shift(1)
+        ftms.onControlStateChanged(control.state.value)
+        assertArrayEquals(byteArrayOf(7, 58, 2), status.value)
+        // Incoming commands drain any pending local change, then publish their own status.
+        ftms.handleControl("dircon:b", byteArrayOf(0))
+        ftms.handleControl("dircon:b", byteArrayOf(4, 88, 2))
+        ftms.onControlStateChanged(control.state.value)
+        assertArrayEquals(byteArrayOf(7, 88, 2), status.value)
     }
 }

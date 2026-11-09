@@ -1,16 +1,18 @@
 package com.spop.poverlay.ble
 
 import kotlin.math.roundToInt
+import com.spop.poverlay.control.ResistanceLimits
 
 /** Shared Indoor Bike Data payload for BLE and DirCon. */
 internal object FitnessMachineData {
-    private const val MAX_RESISTANCE = 100
-
-    fun supportedResistanceRange(): ByteArray = byteArrayOf(
-        0x01, 0x00, // minimum: 1
-        MAX_RESISTANCE.toByte(), 0x00,
-        0x01, 0x00 // increment: 1
-    )
+    // FTMS TS p6 CR/BV-05-C: six bytes. Match the accepted Control Point targets
+    // (sint16 tenths) and increment (uint16 tenths), not the telemetry raw value.
+    fun supportedResistanceRange(): ByteArray {
+        val min = ResistanceLimits.MIN * ResistanceLimits.TARGET_SCALE
+        val max = ResistanceLimits.MAX * ResistanceLimits.TARGET_SCALE
+        val step = ResistanceLimits.STEP * ResistanceLimits.TARGET_SCALE
+        return byteArrayOf(min.toByte(), (min shr 8).toByte(), max.toByte(), (max shr 8).toByte(), step.toByte(), (step shr 8).toByte())
+    }
 
     /**
      * [heartRate] is the relayed strap reading in bpm. When it is 1..255 it is appended as the
@@ -27,10 +29,11 @@ internal object FitnessMachineData {
         val speedValue = (speed * 1.60934f * 100).toInt() // mph -> 0.01 km/h
         val cadenceValue = (cadence * 2).toInt()
         val powerValue = com.spop.poverlay.sensor.power.telemetryWatts(power)
-        // Preserve the existing whole-level, 16-bit wire format. Round rather than
-        // truncate: 99.99999 must encode as 100. Zero is also used for no sensor data.
+        // Legacy SIG GATT layout: sint16 whole points, NOT Control Point's tenths.
+        // SmartSpin2k consumes this layout without negotiation. The current GSS
+        // differs; see docs/ftms-resistance-audit.md before changing field width.
         val resistanceValue = if (resistance.isFinite()) {
-            resistance.coerceIn(0f, MAX_RESISTANCE.toFloat()).roundToInt()
+            resistance.coerceIn(ResistanceLimits.MIN.toFloat(), ResistanceLimits.MAX.toFloat()).roundToInt()
         } else {
             0
         }
