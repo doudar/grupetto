@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -115,6 +116,7 @@ internal fun HeartRateZoneSettings(
                     row.forEach { key ->
                         Box(
                             Modifier.weight(1f).height(44.dp)
+                                .testTag("zoneKey_$key")
                                 .border(1.dp, IdleBorder, RoundedCornerShape(8.dp))
                                 .clickable {
                                     when (key) {

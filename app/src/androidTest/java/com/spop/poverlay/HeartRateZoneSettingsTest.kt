@@ -25,13 +25,15 @@ class HeartRateZoneSettingsTest {
         listOf("Zone 1", "Zone 2", "Zone 3", "Zone 4", "Zone 5").forEach {
             compose.onNodeWithText(it).assertIsDisplayed()
         }
-        // The keypad only appears once a box is picked; Del removes one digit at a time.
+        // The keypad only appears once a box is picked; Del removes one digit at a time. Keys are
+        // found by tag because a box showing "1" would also match the text "1".
+        fun key(k: String) = compose.onNodeWithTag("zoneKey_$k").performClick()
         compose.onNodeWithText("Zone 1").performClick()
-        repeat(3) { compose.onNodeWithText("Del").performClick() }
+        repeat(3) { key("Del") }
         compose.runOnIdle { assertEquals(listOf(null, 126, 144, 162, 180), updated) }
-        listOf("1", "1", "5").forEach { compose.onNodeWithText(it).performClick() }
+        listOf("1", "1", "5").forEach { key(it) }
         compose.runOnIdle { assertEquals(listOf(115, 126, 144, 162, 180), updated) }
-        compose.onNodeWithText("Del").performClick()
+        key("Del")
         compose.runOnIdle { assertEquals(listOf(11, 126, 144, 162, 180), updated) }
     }
 
