@@ -17,37 +17,43 @@ import org.junit.Test
 class HeartRateZoneSettingsTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun zoneLabelsUseSupportedTextAndKeepEditableBoundaries() {
+    @Test fun zoneBoxesAreLabelledAndKeypadEditsBoundaries() {
         var updated: List<Int?>? = null
         compose.setContent { MaterialTheme(typography = Typography) { Column {
-            HeartRateZoneSettings(listOf(108, 126, 144, 162)) { updated = it }
+            HeartRateZoneSettings(listOf(108, 126, 144, 162, 180)) { updated = it }
         } } }
-        listOf("1 to 2", "2 to 3", "3 to 4", "4 to 5").forEach {
+        listOf("Zone 1", "Zone 2", "Zone 3", "Zone 4", "Zone 5").forEach {
             compose.onNodeWithText(it).assertIsDisplayed()
         }
-        compose.onNodeWithText("1 to 2").performTextReplacement("115")
-        compose.runOnIdle { assertEquals(listOf(115, 126, 144, 162), updated) }
-        compose.onNodeWithText("1 to 2").performTextClearance()
-        compose.runOnIdle { assertEquals(listOf(null, 126, 144, 162), updated) }
+        // The keypad only appears once a box is picked; Del removes one digit at a time. Keys are
+        // found by tag because a box showing "1" would also match the text "1".
+        fun key(k: String) = compose.onNodeWithTag("zoneKey_$k").performClick()
+        compose.onNodeWithText("Zone 1").performClick()
+        repeat(3) { key("Del") }
+        compose.runOnIdle { assertEquals(listOf(null, 126, 144, 162, 180), updated) }
+        listOf("1", "1", "5").forEach { key(it) }
+        compose.runOnIdle { assertEquals(listOf(115, 126, 144, 162, 180), updated) }
+        key("Del")
+        compose.runOnIdle { assertEquals(listOf(11, 126, 144, 162, 180), updated) }
     }
 
-    @Test fun boundariesWrapIntoTwoRowsOnNarrowDialogsAndStayInOneRowWhenWide() {
-        val width = mutableStateOf(280.dp)
+    @Test fun boxesWrapIntoTwoRowsOnNarrowDialogsAndStayInOneRowWhenWide() {
+        val width = mutableStateOf(360.dp)
         compose.setContent { MaterialTheme(typography = Typography) {
             Column(Modifier.requiredWidth(width.value)) {
-                HeartRateZoneSettings(listOf(108, 126, 144, 162)) {}
+                HeartRateZoneSettings(listOf(108, 126, 144, 162, 180)) {}
             }
         } }
         fun bounds(label: String) = compose.onNodeWithText(label).fetchSemanticsNode().boundsInRoot
-        listOf("1 to 2", "2 to 3", "3 to 4", "4 to 5").forEach {
-            compose.onNodeWithText(it).assertIsDisplayed().assertWidthIsAtLeast(130.dp)
+        listOf("Zone 1", "Zone 2", "Zone 3", "Zone 4", "Zone 5").forEach {
+            compose.onNodeWithText(it).assertIsDisplayed().assertWidthIsAtLeast(80.dp)
         }
-        assertEquals(bounds("1 to 2").top, bounds("2 to 3").top, 0f)
-        assertEquals(bounds("3 to 4").top, bounds("4 to 5").top, 0f)
-        assertTrue(bounds("3 to 4").top >= bounds("1 to 2").bottom)
-        compose.runOnIdle { width.value = 560.dp }
-        val firstTop = bounds("1 to 2").top
-        listOf("2 to 3", "3 to 4", "4 to 5").forEach {
+        assertEquals(bounds("Zone 1").top, bounds("Zone 3").top, 0f)
+        assertEquals(bounds("Zone 4").top, bounds("Zone 5").top, 0f)
+        assertTrue(bounds("Zone 4").top >= bounds("Zone 1").bottom)
+        compose.runOnIdle { width.value = 700.dp }
+        val firstTop = bounds("Zone 1").top
+        listOf("Zone 2", "Zone 3", "Zone 4", "Zone 5").forEach {
             assertEquals(firstTop, bounds(it).top, 0f)
         }
     }

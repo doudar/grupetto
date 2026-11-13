@@ -29,6 +29,7 @@ class PowerMeterManager internal constructor(
     }
     private val preferences = context.getSharedPreferences("power_meter", Context.MODE_PRIVATE)
     private var started = false
+    private val scanBudget = com.spop.poverlay.sensor.ScanBudget()
     private var managing = false
     private var manuallyDisconnected = false
     private var gatt: BluetoothGatt? = null
@@ -66,6 +67,7 @@ class PowerMeterManager internal constructor(
     @Synchronized fun start() {
         if (started) return
         started = true
+        scanBudget.arm(clock())
         watcher = scope.launch {
             while (isActive) {
                 checkConnection()
@@ -79,6 +81,17 @@ class PowerMeterManager internal constructor(
         watcher?.cancel(); watcher = null
         stopScan()
         release()
+    }
+    /**
+     * Reports whether the bike is moving. Riding after a long idle opens a new five-minute window of
+     * scanning for a saved meter that is not connected.
+     */
+    @Synchronized fun onBikeMovement(moving: Boolean) {
+        if (scanBudget.onMovement(moving, clock()) && started && gatt == null) {
+            stopScan()
+            nextReconnectAt = 0L
+            if (shouldScan()) startScan()
+        }
     }
     @Synchronized fun manage(enabled: Boolean) {
         if (managing == enabled) return
@@ -104,22 +117,26 @@ class PowerMeterManager internal constructor(
         if (gatt != null && now - (lastMeasurementAt ?: connectionAt) > timeout) {
             log("Data timeout: connected=${mutableConnected.value != null}, receivedPacket=$loggedPacket, lastValidAge=${lastMeasurementAt?.let { now - it }}")
             release(); nextReconnectAt = now + 3000
+            // A meter that dropped mid-ride gets a fresh five minutes of searching.
+            scanBudget.arm(now)
             preferReconnectScan = true
             mutableStatus.value = "Reconnecting to ${selected?.let(::savedName) ?: "power meter"}"
         }
         if (preferReconnectScan && !access.canScan()) preferReconnectScan = false
-        if (gatt == null && scan == null && !preferReconnectScan && !manuallyDisconnected && now >= nextReconnectAt) selected?.let {
+        if (gatt == null && scan == null && !preferReconnectScan && !manuallyDisconnected && now >= nextReconnectAt &&
+            scanBudget.allows(now)) selected?.let {
             beginConnection(HeartRateDevice(it, preferences.getString("name_$it", null)))
         }
         // Bound scan sessions; allow Android's scan throttling to settle between retries.
-        if (scan != null && now - scanStartedAt > 15000) {
-            stopScan(); nextReconnectAt = now + 5000
+        if (scan != null && now - scanStartedAt > 30000) {
+            stopScan(); nextReconnectAt = now + 3000
             preferReconnectScan = false
         } else if (shouldScan() && scan == null && now >= nextReconnectAt) startScan()
         if (!shouldScan()) stopScan()
     }
     private fun shouldScan() = shouldDiscoverSensor(
-        running = started, pickerOpen = managing, hasSavedTarget = selected != null || mutableSaved.value.isNotEmpty(),
+        running = started, pickerOpen = managing,
+        hasSavedTarget = (selected != null || mutableSaved.value.isNotEmpty()) && scanBudget.allows(clock()),
         manuallyDisconnected = manuallyDisconnected, hasGatt = gatt != null
     )
 
@@ -155,7 +172,7 @@ class PowerMeterManager internal constructor(
         mutableScanning.value = true
         scanStartedAt = clock()
         if (!access.startScan(listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(Service)).build()),
-                ScanSettings.Builder().setScanMode(if (managing) ScanSettings.SCAN_MODE_LOW_LATENCY else ScanSettings.SCAN_MODE_LOW_POWER).build(), callback)) {
+                ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), callback)) {
             scan = null; mutableScanning.value = false
             mutableStatus.value = "Bluetooth scan unavailable"
             nextReconnectAt = clock() + 5000

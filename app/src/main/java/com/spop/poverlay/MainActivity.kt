@@ -200,10 +200,40 @@ class MainActivity : ComponentActivity() {
             viewModel.onBatteryOptimizationRequestCompleted()
         }
 
+    private var backgroundRequestStartedAt = 0L
+    // Set when "while using" was just granted from the location button; Bluetooth starts once the
+    // "all the time" step is answered, so the battery prompt does not cover the location page.
+    private var startBluetoothAfterLocation = false
+
+    private val foregroundLocationRequest =
+        registerForActivityResult(RequestPermission()) { granted ->
+            if (granted) {
+                startBluetoothAfterLocation = true
+                requestBackgroundLocationPermission()
+            }
+        }
+
     private val backgroundLocationPermissionRequest =
         registerForActivityResult(RequestPermission()) { granted ->
             viewModel.onBackgroundLocationPermissionResult(granted)
+            if (startBluetoothAfterLocation) {
+                startBluetoothAfterLocation = false
+                viewModel.onBluetoothPermissionsResult(true)
+            }
+            // If Android answered at once without showing its location page, use the app info page.
+            val answeredInstantly = android.os.SystemClock.elapsedRealtime() - backgroundRequestStartedAt < 700
+            if (!granted && answeredInstantly && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) openAppSettings()
         }
+
+    private fun hasBackgroundLocation() = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+        androidx.core.content.ContextCompat.checkSelfPermission(
+            this, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    /** Opens this app's settings page (Permissions, then Location, has "Allow all the time"). */
+    private fun openAppSettings() {
+        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+    }
 
     private fun requestScreenPermission() = Intent(
         "android.settings.action.MANAGE_OVERLAY_PERMISSION",
@@ -217,10 +247,26 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestBackgroundLocationPermission() {
+        val hasForeground = androidx.core.content.ContextCompat.checkSelfPermission(
+            this, android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        // Android asks for "while using the app" first; "all the time" can only follow it.
+        if (!hasForeground) {
+            foregroundLocationRequest.launch(android.Manifest.permission.ACCESS_FINE_LOCATION)
+            return
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || hasBackgroundLocation()) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Android 11+ grants "Allow all the time" through the app's settings page.
-            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // On Android 11+ asking for background location on its own (once "while using" is granted)
+            // should open this app's location page, which has "Allow all the time".
+            android.widget.Toast.makeText(
+                this,
+                "Choose \"Allow all the time\" so heart-rate monitors and power meters reconnect during a ride.",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+            backgroundRequestStartedAt = android.os.SystemClock.elapsedRealtime()
+            backgroundLocationPermissionRequest.launch(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        } else {
             backgroundLocationPermissionRequest.launch(
                 android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
             )
