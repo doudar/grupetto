@@ -108,9 +108,15 @@ internal object CalibrationManualEdit {
     fun soften(table: GrupettoCalibrationTable, selected: Set<Int>): GrupettoCalibrationTable = change(table,
         table.gains.mapIndexed { index, gain -> if (index in selected) ln1p(expm1(gain) * .8) else gain }, selected)
 
-    /** Reset the shared correction, not a hidden recorded/manual layer. Undo remains available. */
-    fun resetCorrections(table: GrupettoCalibrationTable): GrupettoCalibrationTable =
-        change(table.copy(thermalCells = emptySet(), thermalAnchors = emptyMap()), List(496) { 0.0 }, table.gains.indices.toSet())
+    /** Zero the shared correction and discard manual fills without inventing coverage.
+     * Recorded cells stay populated so Calculate New Solution can refit them. */
+    fun resetCorrections(table: GrupettoCalibrationTable): GrupettoCalibrationTable {
+        val counts = table.effectiveCellSampleCounts().mapIndexed { index, count ->
+            if (index in table.recordedCoverage) count else 0
+        }
+        return change(table.copy(thermalCells = emptySet(), thermalAnchors = emptyMap(),
+            manualCoverage = emptySet(), cellSampleCounts = counts), List(496) { 0.0 }, emptySet())
+    }
 
 }
 

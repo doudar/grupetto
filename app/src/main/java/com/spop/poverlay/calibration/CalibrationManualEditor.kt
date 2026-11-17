@@ -266,7 +266,7 @@ private fun EditorQuickFixes(table: GrupettoCalibrationTable, enabled: Boolean,
                     table.correctionPercent.any { it != null } && table.correctionPercent.any { it == null }, onFill) },
                 { EditorTool("Smooth whole table", "Soften abrupt changes between neighbors.", enabled, onSmooth) },
                 { EditorTool("Reduce all 20%", "Bring every correction closer to zero.", enabled, onSoften) },
-                { EditorTool("Reset corrections", "Set the shared table to zero; keep original observations.", enabled, onReset) }
+                { EditorTool("Reset corrections", "Zero corrections and clear fills; keep original observations.", enabled, onReset) }
             )
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 buttons.chunked(columns).forEach { row ->
