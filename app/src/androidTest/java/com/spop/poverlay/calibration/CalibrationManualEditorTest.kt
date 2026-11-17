@@ -246,7 +246,7 @@ class CalibrationManualEditorTest {
         compose.onNodeWithText("Fill all gaps").performClick()
         compose.onNodeWithText("Fill all gaps").assertIsNotEnabled()
         compose.onNodeWithText("Reset corrections").performClick()
-        compose.onNodeWithText("Fill all gaps").assertIsNotEnabled()
+        compose.onNodeWithText("Fill all gaps").assertIsEnabled()
         compose.onNodeWithText("Undo").performClick()
         compose.onNodeWithText("Zoom in").performClick()
         compose.onNodeWithText("Fit table").assertExists().performClick()
@@ -290,7 +290,7 @@ class CalibrationManualEditorTest {
         compose.onNodeWithText("Reset corrections").performClick()
         compose.runOnIdle {
             assertTrue(history.current.gains.all { it == 0.0 })
-            assertEquals(496, history.current.correctionPercent.count { it != null })
+            assertEquals(original.recordedCoverage.size, history.current.correctionPercent.count { it != null })
             assertTrue(history.current.ready)
         }
     }

@@ -126,9 +126,11 @@ the whole table and remain reversible with Undo:
 - **Smooth whole table:** blends every cell halfway toward its immediate
   neighbors' average to reduce abrupt changes.
 - **Reduce all 20%:** scales every percentage correction toward zero.
-- **Reset corrections:** sets the shared correction table to zero. Original
-  pedal observations remain available for diagnostics; Undo restores the table
-  before the reset until the edit session is saved.
+- **Reset corrections:** sets the shared correction table to zero and clears
+  manual fills. Only recorded cells remain covered, so **Calculate New Solution**
+  can refit them and **Fill all gaps** can interpolate the remaining cells again.
+  Original pedal observations remain available for diagnostics; Undo restores
+  the table before the reset until the edit session is saved.
 
 The inspector also retains **Smooth selection** and **Reduce corrections 20%**
 for cell, cadence-row, resistance-column, or whole-table selections. Compare mode

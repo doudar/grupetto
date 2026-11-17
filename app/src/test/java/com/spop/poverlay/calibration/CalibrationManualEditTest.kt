@@ -88,7 +88,33 @@ class CalibrationManualEditTest {
         assertTrue(reset.ready)
         assertEquals(original.sampleCount, reset.sampleCount)
         assertEquals(original.recordedCoverage, reset.recordedCoverage)
+        assertEquals(original.cellSampleCounts, reset.cellSampleCounts)
+        assertEquals(original.cells, reset.cells)
+        assertTrue(reset.manualCoverage.isEmpty())
+        assertEquals(original.recordedCoverage, reset.correctionPercent.indices.filterTo(mutableSetOf()) {
+            reset.correctionPercent[it] != null
+        })
         assertEquals(reset, CalibrationManualEdit.resetCorrections(reset))
+    }
+
+    @Test fun resetThenCalculateNewSolutionLeavesGapsThatCanBeFilledAgain() {
+        val original = table()
+        for (starting in listOf(original, CalibrationManualEdit.fillGaps(original))) {
+            val profile = GrupettoCalibrationProfile(
+                CalibrationCapture("bike", "pedal", 2040490, baseline, samples), starting)
+            val reset = applyUnifiedManualEdit(profile, CalibrationManualEdit.resetCorrections(starting), 2000)
+            assertEquals(samples.map { it.pedalWatts }, reset.capture.samples.map { it.measuredPedalWatts })
+            val refitted = refitCalibrationTable(reset.table!!, reset.capture.samples)!!.table
+            assertEquals(original.recordedCoverage.size, refitted.correctionPercent.count { it != null })
+            assertTrue(refitted.correctionPercent.any { it == null })
+            val filled = CalibrationManualEdit.fillGaps(refitted)
+            assertEquals(496, filled.correctionPercent.count { it != null })
+            assertTrue(filled.gains.all { abs(it - ln(1.1)) < 1e-12 })
+            original.recordedCoverage.forEach {
+                assertEquals(refitted.gains[it], filled.gains[it], 0.0)
+            }
+            assertEquals(original.recordedCoverage, filled.recordedCoverage)
+        }
     }
 
     @Test fun settingMinusTenTwiceDoesNotAccumulateAnotherMinusTen() {
