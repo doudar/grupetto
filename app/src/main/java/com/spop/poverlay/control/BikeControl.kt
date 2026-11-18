@@ -54,6 +54,8 @@ class BikeControl(
 ) {
     private val mutableState = MutableStateFlow(ControlState())
     val state = mutableState.asStateFlow()
+    /** Observers must not publish the intermediate state of a synchronized mode change. */
+    @Synchronized fun snapshot(): ControlState = state.value
     private var sample: BikeSample? = null
     private var owner: String? = null
     private var filteredPower: Float? = null
@@ -153,7 +155,7 @@ class BikeControl(
     @Synchronized fun acceptSample(value: BikeSample?) {
         if (!supported) return
         if (value == null || !value.power.isFinite() || value.power < 0 ||
-            !value.cadence.isFinite() || value.cadence < 0 || value.resistance !in 0..100) {
+            !value.cadence.isFinite() || value.cadence < 0 || value.resistance !in ResistanceLimits.levels) {
             sample = null
             unavailable("Bike+ disconnected")
             return
@@ -227,7 +229,7 @@ class BikeControl(
         return localResistance(sample!!.resistance)
     }
     @Synchronized fun localResistance(level: Int): Boolean {
-        if (!fresh() || level !in 0..100) return false
+        if (!fresh() || level !in ResistanceLimits.levels) return false
         setMode(ControlMode.Resistance)
         mutableState.value = state.value.copy(targetResistance = level, message = "Manual active", externalControl = null)
         return true
@@ -240,13 +242,13 @@ class BikeControl(
             ControlMode.Erg -> { localErg((state.value.targetWatts + step * state.value.wattsPerShift).coerceIn(25, 1000)); return }
             ControlMode.Manual, ControlMode.Resistance -> {
                 val base = if (state.value.mode == ControlMode.Manual) sample!!.resistance else state.value.targetResistance
-                localResistance((base + step * state.value.shiftSize).coerceIn(0, 100)); return
+                localResistance((base + step * state.value.shiftSize).coerceIn(ResistanceLimits.MIN, ResistanceLimits.MAX)); return
             }
             ControlMode.Simulation -> Unit
         }
         val base = simBase + simulation.resistanceOffset(state.value.inclineSensitivity)
-        val current = (base + state.value.shiftOffset).coerceIn(0f, 100f)
-        val next = (current + direction.coerceIn(-1, 1) * state.value.shiftSize).coerceIn(0f, 100f)
+        val current = (base + state.value.shiftOffset).coerceIn(ResistanceLimits.MIN.toFloat(), ResistanceLimits.MAX.toFloat())
+        val next = (current + direction.coerceIn(-1, 1) * state.value.shiftSize).coerceIn(ResistanceLimits.MIN.toFloat(), ResistanceLimits.MAX.toFloat())
         mutableState.value = state.value.copy(shiftOffset = (next - base).roundToInt(), externalControl = null)
     }
 
@@ -423,7 +425,8 @@ class BikeControl(
         // including mode changes. Modeled jumps travel only through rampTick() at the rider's
         // ramp speed; during the settle hold that follows, the level is already at its goal.
         val jump = state.value.mode == ControlMode.Erg && feedForwardActive()
-        requestedResistance = target.coerceIn(requestedResistance - RESISTANCE_RATE * dt, requestedResistance + RESISTANCE_RATE * dt).coerceIn(0f, 100f)
+        requestedResistance = target.coerceIn(requestedResistance - RESISTANCE_RATE * dt, requestedResistance + RESISTANCE_RATE * dt)
+            .coerceIn(ResistanceLimits.MIN.toFloat(), ResistanceLimits.MAX.toFloat())
         val next = requestedResistance.roundToInt()
         if (next != reading.resistance) {
             trace?.invoke("write level=$next from=${reading.resistance} why=" + when {
@@ -732,12 +735,13 @@ class BikeControl(
                 }
             }
             4 -> {
-                // Corrected FTMS format: SINT16 in tenths (FTMS TS p6 BV-25-C).
+                // Corrected FTMS Control Point: SINT16 tenths (TS p6 CW/BV-05-C).
                 val level = signed(1)
-                if (level !in 0..1000 || level % 10 != 0) Reply(3) else {
+                if (level !in ResistanceLimits.MIN * ResistanceLimits.TARGET_SCALE..ResistanceLimits.MAX * ResistanceLimits.TARGET_SCALE ||
+                    level % (ResistanceLimits.STEP * ResistanceLimits.TARGET_SCALE) != 0) Reply(3) else {
                     setMode(ControlMode.Resistance)
-                    mutableState.value = state.value.copy(targetResistance = level / 10, message = "Manual active")
-                    Reply(1, byteArrayOf(7) + bytes.copyOfRange(1, 3))
+                    mutableState.value = state.value.copy(targetResistance = level / ResistanceLimits.TARGET_SCALE, message = "Manual active")
+                    Reply(1, ResistanceLimits.targetStatus(state.value.targetResistance))
                 }
             }
             5 -> {

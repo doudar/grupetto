@@ -68,14 +68,20 @@ Target Power, Start/Resume, Stop/Pause, and Indoor Bike Simulation Parameters.
 Pause retains the target for explicit Resume; Stop/Reset discard it. No motor
 movement is commanded while the rider is below the cadence threshold.
 
-Bike+/CrossTrainer expose power/resistance ranges and Machine Status. The
+Bike+/CrossTrainer expose power/resistance ranges and Machine Status. Read-only
+bikes also expose the optional resistance range for SmartSpin2k homing, while
+keeping all target feature bits clear. The
 advertised target feature bits are resistance, power, and simulation only.
 Power is SINT16 watts. Resistance uses the corrected SINT16 tenths format:
 0–1000 in increments of 10 means Peloton levels 0–100. Existing Indoor Bike
-Data resistance telemetry remains in whole levels. The
+Data resistance telemetry remains in two-byte whole levels for existing
+SmartSpin2k receivers, with no manual compatibility setting. Local resistance
+and ERG targets notify connected clients, just as remote target changes do. The
 [Bluetooth SIG FTMS test suite p6](https://files.bluetooth.com/wp-content/uploads/dlm_uploads/2024/10/FTMS.TS_.p6.pdf)
 specifies SINT16 for resistance control (BV-05-C) and corrected resistance
-status (BV-25-C); older published tables inconsistently describe UINT8.
+status (BV-25-C); published SIG documents still contain conflicting layouts.
+See [the resistance contract and compatibility verification](ftms-resistance-audit.md)
+for the exact byte layouts, range rules, and limits of the standards claim.
 
 Malformed lengths, unsupported operations, signed/out-of-range targets, and
 requests without ownership are rejected. BLE rejects prepared/offset writes.

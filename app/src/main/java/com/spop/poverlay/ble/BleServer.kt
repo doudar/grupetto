@@ -1331,11 +1331,11 @@ class BleServer(
         sensorDataJob = launch {
             sensorInterface.bikeControl?.takeIf { it.supported }?.let { control ->
                 launch {
-                    control.state.collect { state ->
+                    control.state.collect {
                         synchronized(this@BleServer) {
                             if (!isActive) return@collect
                             registeredServices.filterIsInstance<FitnessMachineService>()
-                                .forEach { it.onControlStateChanged(state) }
+                                .forEach { it.onControlStateChanged(control.snapshot()) }
                         }
                     }
                 }
