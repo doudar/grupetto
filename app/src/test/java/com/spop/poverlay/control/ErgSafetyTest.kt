@@ -2,7 +2,6 @@ package com.spop.poverlay.control
 
 import org.junit.Assert.*
 import org.junit.Test
-import kotlin.math.exp
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
@@ -20,7 +19,7 @@ class ErgSafetyTest {
         trace = { lines.add("[$now] $it") }
     }
     private fun watts(cadence: Float) =
-        (exp(1.491016 + 0.108267 * resistance - 0.000584 * resistance * resistance) * (cadence / 90.0).pow(1.7)).toFloat()
+        PowerModel.seedWatts(resistance) * (cadence / 90f).pow(1.7f)
     /** Ride [ms] at [cadence]: 100 ms ticks, a bike sample every 200 ms. */
     private fun ride(ms: Int, cadence: Float, power: Float? = null) {
         var t = 0
@@ -102,6 +101,25 @@ class ErgSafetyTest {
         assertTrue(jump, "cadSrc=held" in jump)
         val expected = control.powerModel.nearestLevelFor(165f, 89f)!!
         ride(4_000, 89f)
+        assertEquals(expected.toDouble(), resistance.toDouble(), 1.0)
+    }
+
+    @Test fun dropFollowsTheMostRecentRecoveryCadence() {
+        // Nov 8: warm-up at 88 rpm at 165 W, then efforts and recoveries all at 72 rpm. The ten-minute
+        // median kept sizing recoveries for 86-87 rpm (L44-45 where ~L50 held 165 W) and undershot by
+        // 38-46 W; the drop now uses the last recovery's 72 rpm.
+        ride(20_000, 88f)
+        assertTrue(control.localErg(165)); ride(60_000, 88f)
+        assertTrue(control.localErg(296)); ride(30_000, 72f)
+        assertTrue(control.localErg(165)); ride(60_000, 72f)
+        assertTrue(control.localErg(362)); ride(30_000, 72f)
+        assertTrue(control.localErg(165)); ride(1_000, 72f)
+        val jump = lines.last { "target from=362 to=165" in it }
+        assertTrue(jump, "cadSrc=held" in jump || "cadSrc=avg5s" in jump)
+        val used = Regex("cadUsed=([0-9.]+)").find(jump)!!.groupValues[1].toFloat()
+        assertEquals(72.0, used.toDouble(), 1.0)
+        val expected = control.powerModel.nearestLevelFor(165f, 72f)!!
+        ride(4_000, 72f)
         assertEquals(expected.toDouble(), resistance.toDouble(), 1.0)
     }
 

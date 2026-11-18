@@ -6,10 +6,13 @@ import kotlin.math.pow
 
 /**
  * Bike+ power as reported by the mainboard is a near-fixed function of resistance
- * level and cadence: power ≈ A(level) · (cadence / 90)^1.7. Fitted from 3,662
- * one-second samples of Bike+ telemetry (levels 18–63, 50–110 RPM), the model's
- * mean absolute error is about 2 W. The seed curve is refined online from steady
- * readings so a particular bike's calibration is learned during the ride.
+ * level and cadence: power ≈ A(level) · (cadence / 90)^1.7. The seed curve A was
+ * refitted (Nov 2026) from 6,018 steady one-second samples on 14 rides (levels 39–71,
+ * 69–110 RPM; mean absolute error 2.7 W). The earlier curve, fitted mostly below
+ * level 55, under-predicted power by 11–15 W above it, so big climbs, above all at low
+ * cadence, asked for too many levels (alone it asks L73–74 for 362 W at 71 RPM; the refit
+ * L70–71, which a warm bike used on Nov 8). The cadence exponent refits to 1.76, so 1.7 is kept. The seed is refined online from
+ * steady readings so a particular bike's calibration is learned during the ride.
  */
 class PowerModel {
     companion object {
@@ -18,10 +21,10 @@ class PowerModel {
         private const val LEARN_RATE = .2f
         private const val MAX_CORRECTION = 1.5f
 
-        /** Seed watts at 90 RPM: exp(1.491 + 0.108267·r − 0.000584·r²), within ~3 W for levels 39–52. */
+        /** Seed watts at 90 RPM: exp(1.45091 + 0.108422·r − 0.000564·r²); per-level bias within ~4 W for levels 43–64. */
         fun seedWatts(level: Int): Float {
             val r = level.coerceIn(0, 100).toFloat()
-            return exp(1.491016f + .108267f * r - .000584f * r * r)
+            return exp(1.45091f + .108422f * r - .000564f * r * r)
         }
     }
 
