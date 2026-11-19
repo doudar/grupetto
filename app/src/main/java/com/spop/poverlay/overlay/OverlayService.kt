@@ -117,6 +117,8 @@ class OverlayService : LifecycleEnabledService() {
         if ((application as GrupettoApplication).emulatedModel == null) HeartRateManager.start(this)
         if ((application as GrupettoApplication).emulatedModel == null)
             (application as GrupettoApplication).powerMeterManager.start()
+        if ((application as GrupettoApplication).emulatedModel == null)
+            (application as GrupettoApplication).openBikeControl.start()
         syncBackgroundExecutionGuards()
         buildDialog()
     }

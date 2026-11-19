@@ -86,6 +86,14 @@ After following those steps, the APK for grupetto can be found on the Releases t
   **External control** flag identifying the active transport. Original Bike
   and Tread remain read-only.
   The ERG/motor work builds on [dwj300's PR #50](https://github.com/doudar/grupetto/pull/50).
+- **Remotes:** on a Bike+ or G700 CrossTrainer, the **Remotes** tab in
+  **Modes & tuning** turns on [OpenBikeControl](https://openbikecontrol.org)
+  remotes. Each shift or difficulty press works like a tap on the on-screen
+  shifters. Grupetto looks for a remote on Wi-Fi and Bluetooth while the overlay
+  runs, and connects to the first one it finds. Use
+  [BikeControl](https://bikecontrol.app) to connect physical shifters (for
+  example Zwift Click, CYCPLUS BC2 or a gamepad), with **OpenBikeControl
+  Compatible** chosen as its trainer app. The setting is off by default.
 - Settings show live metrics and connection status in a compact dashboard, with
   dialogs for connections, **External Sensors**, and bike control. Sensor lists
   use pages instead of scrolling. External Sensors includes heart-rate monitors,
