@@ -376,10 +376,8 @@ object HeartRateManager {
 
     @Synchronized
     fun connectTo(device: HeartRateDevice) {
-        // A stale picker tap must not replace a connected sensor, but it does replace an attempt
-        // that has not connected yet (which could otherwise block it for up to 30 seconds).
-        if (_connectedDevice.value != null) return
-        if (bluetoothGatt != null) releaseCurrentGatt()
+        // A stale picker tap must not replace the sensor already owning this type.
+        if (bluetoothGatt != null) return
         manualDisconnectRequested = false
         saveDevice(device)
         selectedAddress = device.address
