@@ -108,14 +108,15 @@ fun Overlay(
         if (bpm != null && bpm > 0 && zones != null) heartRateZoneColor(bpm, zones)
         else MetricHeartRateColor
     }
-    val heartRateZoneBands = remember(heartRateZones) {
+    val zoneMax by HeartRateManager.zoneMax.collectAsStateWithLifecycle(initialValue = null)
+    val heartRateZoneBands = remember(heartRateZones, zoneMax) {
         val zones = heartRateZones ?: return@remember null
         listOf(
             ZoneBand(0f,          zones[0].toFloat(), HrZone1Color.copy(alpha = 0.3f).toArgb()),
             ZoneBand(zones[0].toFloat(), zones[1].toFloat(), HrZone2Color.copy(alpha = 0.3f).toArgb()),
             ZoneBand(zones[1].toFloat(), zones[2].toFloat(), HrZone3Color.copy(alpha = 0.3f).toArgb()),
             ZoneBand(zones[2].toFloat(), zones[3].toFloat(), HrZone4Color.copy(alpha = 0.3f).toArgb()),
-            ZoneBand(zones[3].toFloat(), 220f,         HrZone5Color.copy(alpha = 0.3f).toArgb()),
+            ZoneBand(zones[3].toFloat(), (zoneMax ?: 220).toFloat().coerceAtLeast(zones[3] + 1f),         HrZone5Color.copy(alpha = 0.3f).toArgb()),
         )
     }
     val timerLabel by timerViewModel.timerLabel.collectAsState(initial = "")

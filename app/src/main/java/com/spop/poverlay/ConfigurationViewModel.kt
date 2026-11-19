@@ -328,6 +328,20 @@ class ConfigurationViewModel(
         infoPopup.postValue(msg)
     }
 
+    /** Asks Android for "Allow all the time" location (the activity explains it with a short message). */
+    fun onRequestBackgroundLocationClicked() {
+        if (isPreview) return
+        requestBackgroundLocationPermission.postValue(Unit)
+    }
+
+    /** "Not now" on the location page: fall back to the normal Bluetooth/location pop-up. */
+    fun onLocationPageSkipped() {
+        if (isPreview) return
+        if (bleTxEnabled.value && !hasBluetoothPermissions()) {
+            requestBluetoothPermissions.value = getRequiredBluetoothPermissions()
+        }
+    }
+
     fun onAutoStartOnBootClicked(isChecked: Boolean) {
         configurationRepository.setAutoStartOnBoot(isChecked)
         if (!isPreview && isChecked && !hasBackgroundLocationPermission()) {
@@ -534,7 +548,10 @@ class ConfigurationViewModel(
         }
         if (isPreview) return
         syncOutboundTransports()
-        if (bleTxEnabled.value && !hasBluetoothPermissions()) {
+        // On Android 11 and below the only pop-up here is location, which the location page asks for
+        // (so it can go straight on to "Allow all the time"); don't ask twice at launch.
+        val locationPageWillAsk = Build.VERSION.SDK_INT < Build.VERSION_CODES.S && !hasBackgroundLocationPermission()
+        if (bleTxEnabled.value && !hasBluetoothPermissions() && !locationPageWillAsk) {
             val permissions = getRequiredBluetoothPermissions()
             requestBluetoothPermissions.value = permissions
         } else if ((bleTxEnabled.value || dirConEnabled.value) &&

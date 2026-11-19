@@ -86,8 +86,15 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
     var previewShifters by remember { mutableStateOf(false) }
     var developerTaps by remember { mutableStateOf(0) }
     var lastDeveloperTap by remember { mutableStateOf(0L) }
+    var locationPageSkipped by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().padding(16.dp)) {
-        if (permission) {
+        // Location comes first, where Android's location pop-up used to appear, then the overlay.
+        if (!background && !locationPageSkipped && !viewModel.isPreview) {
+            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                LocationPermissionPage(viewModel::onRequestBackgroundLocationClicked,
+                    { locationPageSkipped = true; viewModel.onLocationPageSkipped() }, UiScale(.7f))
+            }
+        } else if (permission) {
             Column(Modifier.align(Alignment.Center)) {
                 PermissionPage(viewModel::onGrantPermissionClicked, UiScale(.7f))
             }
@@ -228,6 +235,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                 viewModel::restoreAutomaticBikeService, viewModel::requestBikeDiscoveryReport)
         }
         "sensors" -> SettingsDialog("External Sensors", { dialog = null }) {
+            LocationAllowNotice(background, viewModel::onRequestBackgroundLocationClicked)
             SensorSummary("Heart rate", hr?.let { it.name ?: it.address } ?: "Pair a heart-rate monitor",
                 bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185), heartStatus)
             OutlinedButton({ dialog = "heart" }, Modifier.fillMaxWidth()) { Text("Heart-rate monitors & zones") }
@@ -331,7 +339,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
         "heart" -> HeartRateManagerDialog(hr, discovered, saved, scanning, match,
             viewModel::startHeartRateDiscovery, viewModel::stopHeartRateDiscovery,
             viewModel::connectHeartRateDevice, viewModel::disconnectHeartRateDevice,
-            viewModel::forgetHeartRateDevice, viewModel::setHrMatchByName) { dialog = null }
+            viewModel::forgetHeartRateDevice, viewModel::setHrMatchByName,
+            background = background, onAllowLocation = viewModel::onRequestBackgroundLocationClicked) { dialog = null }
         "about" -> SettingsDialog("About Grupetto", { dialog = null }) {
             Text("Version ${BuildConfig.VERSION_NAME} · Android ${Build.VERSION.RELEASE}")
             Text("Device: ${Build.MODEL}", fontSize = 14.sp)
@@ -367,6 +376,19 @@ private fun TileActionButton(label: String, onClick: () -> Unit, modifier: Modif
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
         Text(label, fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold)
     }
+}
+
+/**
+ * Android only lets an app find Bluetooth sensors while it is on screen unless location is set to
+ * "Allow all the time", so without it saved sensors would not reconnect during a ride.
+ */
+@Composable
+private fun LocationAllowNotice(granted: Boolean, onAllow: () -> Unit) {
+    if (granted) return
+    Text("Sensors can only reconnect while you ride if location is set to \"Allow all the time\".",
+        fontSize = 13.sp, color = Color(0xFFFBBF24))
+    OutlinedButton(onAllow, Modifier.fillMaxWidth()) { Text("Allow location all the time") }
+    Divider(Modifier.padding(vertical = 12.dp))
 }
 
 @Composable
@@ -506,6 +528,30 @@ private fun PermissionPage(onClickedGrantPermission: () -> Unit, uiScale: UiScal
     Button(onClick = onClickedGrantPermission) { Text(text = "Grant Permission") }
 }
 
+/** Shown first, before the overlay permission, until location is "Allow all the time" (or skipped for now). */
+@Composable
+private fun LocationPermissionPage(onAllow: () -> Unit, onSkip: () -> Unit, uiScale: UiScale) {
+    Text(
+            text = "Grupetto Needs Location\n\"Allow All The Time\"",
+            fontSize = uiScale.sp(40f),
+            fontStyle = FontStyle.Italic,
+            fontWeight = FontWeight.Bold,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+    )
+    Spacer(modifier = Modifier.height(uiScale.dp(10f)))
+    Text(
+            text = "Android only lets apps find Bluetooth sensors in the background with this setting.\n" +
+                "It lets heart-rate monitors and power meters reconnect during a ride.",
+            fontSize = uiScale.sp(20f),
+            fontWeight = FontWeight.Normal,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+    )
+    Spacer(modifier = Modifier.height(uiScale.dp(16f)))
+    Button(onClick = onAllow) { Text(text = "Grant Location Permission") }
+    Spacer(modifier = Modifier.height(uiScale.dp(8f)))
+    TextButton(onClick = onSkip) { Text(text = "Not Now") }
+}
+
 @Composable
 private fun HeartRateManagerDialog(
     connectedDevice: HeartRateDevice?,
@@ -519,6 +565,8 @@ private fun HeartRateManagerDialog(
     onDisconnectConnectedDevice: () -> Unit,
     onForgetDevice: (String) -> Unit,
     onSetMatchByName: (Boolean) -> Unit,
+    background: Boolean = true,
+    onAllowLocation: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     var tab by remember { mutableStateOf(0) }
@@ -528,9 +576,11 @@ private fun HeartRateManagerDialog(
     val zone23 by HeartRateManager.zone23.collectAsStateWithLifecycle()
     val zone34 by HeartRateManager.zone34.collectAsStateWithLifecycle()
     val zone45 by HeartRateManager.zone45.collectAsStateWithLifecycle()
+    val zoneMax by HeartRateManager.zoneMax.collectAsStateWithLifecycle()
     val connecting by HeartRateManager.connectingDevice.collectAsStateWithLifecycle()
     SensorPickerScanEffect(tab == 0, HeartRateManager::setManaging)
     SettingsDialog("Heart rate", onDismiss, scrollable = true) {
+        LocationAllowNotice(background, onAllowLocation)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(connectedDevice?.name ?: connectedDevice?.address ?: "No monitor connected",
@@ -545,8 +595,15 @@ private fun HeartRateManagerDialog(
         GrupettoTabs(tab, listOf("Discover", "Zones"), { tab = it; page = 0 })
         Spacer(Modifier.height(12.dp))
         if (tab == 1) {
-            HeartRateZoneSettings(listOf(zone12, zone23, zone34, zone45)) { values ->
-                HeartRateManager.setHeartRateZones(values[0], values[1], values[2], values[3])
+            val owner by HeartRateManager.zoneOwner.collectAsStateWithLifecycle()
+            val ownerName = savedDevices.firstOrNull { it.address == owner }?.let { it.name ?: it.address }
+            Text(
+                if (ownerName != null) "Heart rate zones for $ownerName" else "Heart rate zones",
+                fontWeight = FontWeight.SemiBold, color = Color(0xFF7DD3FC)
+            )
+            Spacer(Modifier.height(8.dp))
+            HeartRateZoneSettings(listOf(zone12, zone23, zone34, zone45, zoneMax)) { values ->
+                HeartRateManager.setHeartRateZones(values[0], values[1], values[2], values[3], values[4])
             }
         } else {
             val devices = discoveredDevices.filter { candidate ->
