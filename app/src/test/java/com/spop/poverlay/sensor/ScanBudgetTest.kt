@@ -8,12 +8,12 @@ class ScanBudgetTest {
     private val minute = 60_000L
 
     @Test
-    fun `scanning is allowed until a window has been opened`() {
+    fun `scanning is allowed before anything is reported`() {
         assertTrue(ScanBudget().allows(10 * minute))
     }
 
     @Test
-    fun `window closes after five minutes`() {
+    fun `start-up scans for five minutes while the bike is idle`() {
         val budget = ScanBudget()
         budget.arm(0)
         assertTrue(budget.allows(4 * minute))
@@ -21,37 +21,38 @@ class ScanBudgetTest {
     }
 
     @Test
-    fun `first movement opens a fresh window`() {
+    fun `scanning never stops while the bike keeps moving`() {
         val budget = ScanBudget()
         budget.arm(0)
-        assertTrue(budget.onMovement(true, 20 * minute))
-        assertTrue(budget.allows(24 * minute))
-        assertFalse(budget.allows(25 * minute))
+        budget.onMovement(true, 1 * minute)
+        assertTrue(budget.allows(90 * minute))
     }
 
     @Test
-    fun `a short pause while riding does not open a new window`() {
+    fun `scanning continues for five minutes after the bike stops`() {
         val budget = ScanBudget()
         budget.onMovement(true, 0)
-        assertFalse(budget.onMovement(false, 10 * minute))
-        assertFalse(budget.onMovement(true, 12 * minute))
-        assertFalse(budget.allows(12 * minute))
+        budget.onMovement(false, 30 * minute)
+        assertTrue(budget.allows(34 * minute))
+        assertFalse(budget.allows(35 * minute))
     }
 
     @Test
-    fun `riding again after a long idle opens a new window`() {
+    fun `moving again after a long idle resumes scanning`() {
         val budget = ScanBudget()
         budget.onMovement(true, 0)
         budget.onMovement(false, 10 * minute)
-        assertTrue(budget.onMovement(true, 16 * minute))
-        assertTrue(budget.allows(17 * minute))
+        assertFalse(budget.allows(20 * minute))
+        assertTrue(budget.onMovement(true, 20 * minute))
+        assertTrue(budget.allows(21 * minute))
     }
 
     @Test
-    fun `repeated moving reports do not reopen the window`() {
+    fun `a short pause does not count as resuming`() {
         val budget = ScanBudget()
-        assertTrue(budget.onMovement(true, 0))
-        assertFalse(budget.onMovement(true, 6 * minute))
-        assertFalse(budget.allows(6 * minute))
+        budget.onMovement(true, 0)
+        budget.onMovement(false, 10 * minute)
+        assertFalse(budget.onMovement(true, 12 * minute))
+        assertTrue(budget.allows(12 * minute))
     }
 }

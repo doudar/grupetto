@@ -82,10 +82,10 @@ internal class HeartRateBluetoothAccess(
         }
     }
 
-    fun connect(device: BluetoothDevice, callback: BluetoothGattCallback, autoConnect: Boolean = false): BluetoothGatt? {
+    fun connect(device: BluetoothDevice, callback: BluetoothGattCallback): BluetoothGatt? {
         if (!canConnect()) return null
         return try {
-            device.connectGatt(context, autoConnect, callback)
+            device.connectGatt(context, false, callback)
         } catch (e: SecurityException) {
             Timber.w(e, "HR connection permission was revoked")
             null

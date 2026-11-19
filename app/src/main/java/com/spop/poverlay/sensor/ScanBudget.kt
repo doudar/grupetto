@@ -1,44 +1,33 @@
 package com.spop.poverlay.sensor
 
 /**
- * Limits how long a manager keeps scanning for a saved Bluetooth sensor that is not connected.
+ * Decides whether a manager may keep scanning for a saved Bluetooth sensor that is not connected.
  *
- * A scan window is opened at start-up, when the bike starts moving after being idle for a while,
- * and when a connected sensor is lost. It closes after [windowMs]. Brief pauses while riding do not
- * open a new window, so a second saved sensor that is not in the room is not searched for all ride.
- * Until the first window is opened, scanning is allowed.
+ * Scanning keeps going until the sensor connects, as long as the bike is in use: while it is moving
+ * and for [idleMs] after it stops, after start-up, or after a connected sensor is lost. Once the bike
+ * has been idle that long, scanning pauses until it moves again, so a sensor that is not in the room
+ * is not searched for while nobody is riding. Until [arm] or [onMovement] is first called, scanning
+ * is allowed.
  */
-internal class ScanBudget(
-    private val windowMs: Long = 5 * 60_000L,
-    private val idleResetMs: Long = 5 * 60_000L,
-) {
-    private var armed = false
-    private var until = 0L
-    private var movedBefore = false
-    private var idleSince: Long? = null
+internal class ScanBudget(private val idleMs: Long = 5 * 60_000L) {
+    private var moving = false
+    private var lastActive: Long? = null
 
+    /** Start-up, or a connected sensor was lost: scan for at least [idleMs] from [now]. */
     fun arm(now: Long) {
-        armed = true
-        until = now + windowMs
+        lastActive = now
     }
 
-    fun allows(now: Long): Boolean = !armed || now < until
+    fun allows(now: Long): Boolean {
+        val last = lastActive ?: return true
+        return moving || now - last < idleMs
+    }
 
-    /**
-     * Reports whether the bike is moving. Returns true when this opened a new scan window.
-     */
+    /** Reports whether the bike is moving. Returns true when this resumes paused scanning. */
     fun onMovement(moving: Boolean, now: Long): Boolean {
-        if (!moving) {
-            if (idleSince == null) idleSince = now
-            return false
-        }
-        val idleFor = idleSince?.let { now - it }
-        idleSince = null
-        val sameSession = movedBefore && idleFor != null && idleFor < idleResetMs
-        val alreadyMoving = movedBefore && idleFor == null
-        movedBefore = true
-        if (sameSession || alreadyMoving) return false
-        arm(now)
-        return true
+        val wasAllowed = allows(now)
+        this.moving = moving
+        lastActive = now
+        return moving && !wasAllowed
     }
 }
