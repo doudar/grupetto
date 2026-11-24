@@ -1,0 +1,168 @@
+name: Auto-release patched build
+
+# Builds the newest upstream Grupetto release with every patch in patches/ applied and publishes
+# the APK as a release on this fork (delete the release after downloading it).
+# Started by hand: Actions > this workflow > Run workflow. The workflow file must be on the
+# fork's DEFAULT branch to be runnable.
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: 'Upstream tag to build (blank = latest upstream release)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+env:
+  UPSTREAM: doudar/grupetto
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Find the upstream release to build
+        id: up
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.upstream_tag }}
+        run: |
+          TAG="$INPUT_TAG"
+          if [ -z "$TAG" ]; then
+            TAG=$(gh api "repos/$UPSTREAM/releases/latest" --jq .tag_name)
+          fi
+          if [ -z "$TAG" ]; then
+            echo "::error::Could not determine the latest upstream release"
+            exit 1
+          fi
+          if ! gh api "repos/$UPSTREAM/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Upstream has no tag named '$TAG'. Tags look like v0.0.56. Leave the input blank to build the latest release."
+            exit 1
+          fi
+          OURS="${TAG}-fork${GITHUB_RUN_NUMBER}"
+          echo "upstream=$TAG" >> "$GITHUB_OUTPUT"
+          echo "ours=$OURS" >> "$GITHUB_OUTPUT"
+
+      - name: Check out this fork (for the patch)
+        uses: actions/checkout@v5
+        with:
+          path: fork
+
+      - name: Check out upstream at that release
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.UPSTREAM }}
+          ref: ${{ steps.up.outputs.upstream }}
+          path: src
+
+      - name: Apply the patches (skipping any upstream already contains)
+        id: patch
+        working-directory: src
+        run: |
+          applied=0
+          for P in "$GITHUB_WORKSPACE"/fork/patches/*.patch; do
+            if git apply -R --check "$P" 2>/dev/null; then
+              echo "::notice::$(basename "$P") is already in upstream ${{ steps.up.outputs.upstream }}, skipping it."
+            elif git apply --check "$P"; then
+              git apply "$P"
+              applied=$((applied + 1))
+            else
+              echo "::error::$(basename "$P") no longer applies to ${{ steps.up.outputs.upstream }}. It needs to be rebased by hand."
+              exit 1
+            fi
+          done
+          if [ "$applied" -eq 0 ]; then
+            echo "::notice::Upstream already contains every patch. No patched release needed."
+            echo "already=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-java@v5
+        if: steps.patch.outputs.already != 'true'
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Use Google's Maven Central mirror
+        if: steps.patch.outputs.already != 'true'
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/mirror.gradle <<'EOF'
+          // Maven Central rate-limits GitHub's shared machines (429 Too Many Requests).
+          // Check Google's copy of Maven Central first; anything not there falls through
+          // to the project's own repositories.
+          def mirror = 'https://maven-central.storage-download.googleapis.com/maven2/'
+          beforeSettings { settings ->
+              settings.pluginManagement.repositories { maven { url mirror } }
+              settings.dependencyResolutionManagement.repositories { maven { url mirror } }
+          }
+          EOF
+
+      - name: Set up signing
+        if: steps.patch.outputs.already != 'true'
+        working-directory: src
+        env:
+          KS_B64: ${{ secrets.FORK_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.FORK_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.FORK_KEY_ALIAS }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > app/release.keystore
+            {
+              echo "storeFile=release.keystore"
+              echo "storeType=pkcs12"
+              echo "storePassword=$KS_PASS"
+              echo "keyAlias=$KS_ALIAS"
+              echo "keyPassword=$KS_PASS"
+            } > keystore.properties
+          else
+            echo "::warning::No FORK_KEYSTORE_B64 secret. Using a throwaway debug key, so each release will have a different signature and you will have to uninstall before updating."
+            mkdir -p ~/.android
+            keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android \
+              -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+              -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Set version
+        if: steps.patch.outputs.already != 'true'
+        working-directory: src
+        run: |
+          # versionCode must keep rising for in-place updates; use a UTC timestamp (yymmddHH).
+          sed -i "s/versionName \".*\"/versionName \"${{ steps.up.outputs.ours }}\"/" app/build.gradle
+          sed -i "s/versionCode [0-9]*/versionCode $(date -u +%y%m%d%H)/" app/build.gradle
+          grep -E "versionCode|versionName" app/build.gradle
+
+      - name: Test the patched code
+        if: steps.patch.outputs.already != 'true'
+        working-directory: src
+        run: |
+          chmod +x gradlew
+          # Only name test classes that exist in this build (a patch may be skipped or merged upstream).
+          args=()
+          for T in CyclingPowerWheelTimeTest HeartRateZoneMathTest ScanBudgetTest; do
+            if find app/src/test -name "$T.kt" | grep -q .; then args+=(--tests "*$T"); fi
+          done
+          if [ "${#args[@]}" -gt 0 ]; then
+            ./gradlew testDebugUnitTest "${args[@]}" --continue
+          fi
+
+      - name: Build release APK
+        if: steps.patch.outputs.already != 'true'
+        working-directory: src
+        run: |
+          ./gradlew assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/grupetto-${{ steps.up.outputs.ours }}.apk"
+
+      - name: Publish release
+        if: steps.patch.outputs.already != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.up.outputs.ours }}" \
+            "grupetto-${{ steps.up.outputs.ours }}.apk" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Grupetto ${{ steps.up.outputs.upstream }} + fork patches (build ${{ github.run_number }})" \
+            --notes "Upstream ${{ steps.up.outputs.upstream }} plus the patches in patches/: heart-rate strap reconnect and heart-rate zones. Built automatically."
