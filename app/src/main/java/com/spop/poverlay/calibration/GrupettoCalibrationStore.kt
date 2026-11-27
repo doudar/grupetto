@@ -11,9 +11,9 @@ internal data class GrupettoCalibrationProfile(val capture: CalibrationCapture, 
         capture.serviceVersion == other.serviceVersion &&
         capture.baseline == other.baseline
 
-    val canActivate get() = table?.hasUsableCells == true && table.baseline == capture.baseline &&
+    val canActivate by lazy { table?.hasUsableCells == true && table.baseline == capture.baseline &&
         capture.frameSerial.isNotBlank() && capture.meterAddress.isNotBlank() && capture.serviceVersion == 2040490L &&
-        capture.samples.any { it.usableForCalibration(capture.baseline) }
+        capture.samples.any { it.usableForCalibration(capture.baseline) } }
 
     // Upgrade sparse drafts without replaying recordings or changing their saved gains.
     fun withActivationReadiness() = copy(table = table?.copy(ready = canActivate))

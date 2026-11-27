@@ -1,7 +1,6 @@
 package com.spop.poverlay.overlay.composables
 
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -25,6 +24,8 @@ import androidx.compose.ui.graphics.Color.Companion.White
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -110,28 +111,13 @@ fun OverlayMinimizedContent(
     ) {
         if (emulationLabel != null) Text("DEMO", color = Color(0xFFFFCC44), fontSize = 11.sp,
             modifier = Modifier.padding(end = 6.dp))
-        val infiniteTransition = rememberInfiniteTransition()
         if (!isMinimized || showTimerWhenMinimized || timerPaused) {
-
-            val timerAlpha = if (timerPaused) {
-                infiniteTransition.animateFloat(
-                    initialValue = 1f,
-                    targetValue = 0.6f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(500, easing = LinearEasing),
-                        repeatMode = RepeatMode.Reverse
-                    )
-                ).value
-            } else {
-                1f
-            }
-
             OverlayTimerField(
-                modifier = Modifier
-                    .width(80.dp)
-                    .alpha(timerAlpha),
+                modifier = Modifier.width(80.dp).semantics {
+                    if (timerPaused) stateDescription = "Paused"
+                },
                 timerLabel = timerLabel,
-                iconDrawable = R.drawable.ic_timer
+                iconDrawable = if (timerPaused) R.drawable.ic_timer_paused else R.drawable.ic_timer
             )
         }
 

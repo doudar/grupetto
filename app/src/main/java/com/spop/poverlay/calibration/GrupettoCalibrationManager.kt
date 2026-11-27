@@ -88,7 +88,9 @@ class GrupettoCalibrationManager(private val context: Context) {
                 else "Recording paused") }
             if (enabled) {
                 val capture = draft?.capture ?: savedProfile?.capture ?: existing?.takeIf { preferences.getLong("clearedAt", 0) == 0L }
-                if (capture != null) fitAndSave(mergeCalibrationCaptures(capture, existing, preferences.getLong("clearedAt", 0)))
+                if (capture != null) fitAndSave(withContext(Dispatchers.Default) {
+                    mergeCalibrationCaptures(capture, existing, preferences.getLong("clearedAt", 0))
+                })
             }
         }
     }
@@ -96,7 +98,7 @@ class GrupettoCalibrationManager(private val context: Context) {
         initialized.await()
         mutex.withLock {
             if (!mutableState.value.recording) return
-            val fresh = capture.samples.filter { it.capturedAt >= recordingSince }
+            val fresh = withContext(Dispatchers.Default) { capture.samples.filter { it.capturedAt >= recordingSince } }
             if (fresh.isEmpty()) return
             val previous = draft?.capture
             if (previous != null && (previous.frameSerial != capture.frameSerial ||
@@ -105,26 +107,31 @@ class GrupettoCalibrationManager(private val context: Context) {
                 mutableState.update { it.copy(recording = false, message = message) }
                 error(message)
             }
-            val samples = retainCalibrationObservations(capture.baseline, (previous?.samples ?: emptyList()) + fresh)
+            val samples = withContext(Dispatchers.Default) {
+                retainCalibrationObservations(capture.baseline, (previous?.samples ?: emptyList()) + fresh)
+            }
             fitAndSave(capture.copy(samples = samples))
             check(mutableState.value.recording) { mutableState.value.message }
         }
     }
     private suspend fun fitAndSave(capture: CalibrationCapture) {
         try {
-            val (generation, incumbent) = synchronized(activationLock) {
-                activationGeneration to activeProfile?.takeIf { it.matches(capture) }
+            val (generation, activeAtFit) = synchronized(activationLock) {
+                activationGeneration to activeProfile
             }
+            val incumbent = activeAtFit?.takeIf { it.matches(capture) }
             val previous = draft?.takeIf { it.matches(capture) } ?: savedProfile?.takeIf { it.matches(capture) }
             val updated = withContext(Dispatchers.Default) {
                 updateUnifiedCalibration(capture, previous, incumbent?.table)
             }
             val table = updated.table
+            val errors = withContext(Dispatchers.Default) { calibrationErrorComparison(updated, activeAtFit, savedProfile) }
             withContext(NonCancellable + Dispatchers.IO) { store.save(CalibrationBackup(updated, savedProfile)) }
             synchronized(activationLock) {
                 draft = updated
                 mutableState.update { it.copy(count = capture.samples.size, table = table, savedCount = compatibleSavedCount(),
-                errors = calibrationErrorComparison(draft, activeProfile, savedProfile), displayTable = displayedTable(),
+                errors = if (activeProfile === activeAtFit) errors else calibrationErrorComparison(draft, activeProfile, savedProfile),
+                displayTable = displayedTable(),
                 message = if (incumbent != null && updated.canActivate) "Draft saved · applying latest fit"
                     else if (activeProfile != null) "Recording · no usable point in the latest fit"
                     else if (updated.canActivate) "Draft ready · activate when ready" else "Record at least one valid effort to activate") }
@@ -169,6 +176,7 @@ class GrupettoCalibrationManager(private val context: Context) {
         fun allowed() = generation == activationGeneration && (!automatic ||
             (recordingRequested && mutableState.value.recording && activeProfile === previous))
         if (!synchronized(activationLock) { allowed() }) return@withContext
+        val errors = withContext(Dispatchers.Default) { calibrationErrorComparison(draft, profile, profile) }
         withContext(Dispatchers.IO) { store.save(CalibrationBackup(draft, profile)) }
         var installed = false
         try {
@@ -179,7 +187,7 @@ class GrupettoCalibrationManager(private val context: Context) {
                     savedProfile = profile
                     installed = true
                     mutableState.update { it.copy(active = true, verified = automatic && it.verified,
-                        errors = calibrationErrorComparison(draft, activeProfile, savedProfile), displayTable = displayedTable(),
+                        errors = errors, displayTable = displayedTable(),
                         activeCount = profile.capture.samples.size, savedCount = profile.capture.samples.size, message = if (automatic)
                             "Auto-updated · ${profile.capture.samples.size} saved efforts"
                         else if (profile !== draft) "Saved table active · latest draft kept"

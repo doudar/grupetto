@@ -20,6 +20,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
@@ -236,36 +237,44 @@ internal fun GrupettoCoverageChart(table: GrupettoCalibrationTable?, capture: Ca
     val fallbackCell = highlights?.fallback
     val pulse = if (cell != null) {
         val transition = rememberInfiniteTransition(label = "Current and fallback cells")
-        transition.animateFloat(.25f, 1f, infiniteRepeatable(tween(650), RepeatMode.Reverse), label = "Table cell pulse").value
-    } else 0f
+        transition.animateFloat(.25f, 1f, infiniteRepeatable(tween(650), RepeatMode.Reverse), label = "Table cell pulse")
+    } else null
     val progressColor = if (cell != null && cell == recordingCell) captureProgressColor(capture.progress) else Color(0xFF22D3EE)
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("120\nrpm\n\n45", fontSize = 11.sp, lineHeight = 18.sp, modifier = Modifier.width(32.dp))
-        Canvas(Modifier.weight(1f).height(80.dp).semantics {
+        Box(Modifier.weight(1f).height(80.dp).semantics {
             contentDescription = "Correction percentage: red -20% for bike overestimation, neutral 0%, blue +20% for bike underestimation; gray unknown. Resistance left to right, cadence bottom to top" +
                 (cell?.let { "; ${if (it == recordingCell) "recording" else "current"} resistance cell ${it.first}, ${45 + it.second * 5} rpm" } ?: "") +
                 (fallbackCell?.let { "; green pulsing border: fallback resistance cell ${it.first}, ${45 + it.second * 5} rpm" } ?: "")
         }) {
-            val w = size.width / 31
-            val h = size.height / 16
-            for (x in 0..30) for (y in 0..15) {
-                val i = x * 16 + y
-                val color = correctionColor(table?.correctionPercent?.getOrNull(i))
-                val origin = Offset(x * w, (15 - y) * h)
+            CoverageGrid(table?.correctionPercent)
+            if (cell != null && pulse != null) Canvas(Modifier.fillMaxSize().graphicsLayer()) {
+                val w = size.width / 31
+                val h = size.height / 16
+                val origin = Offset(cell.first * w, (15 - cell.second) * h)
                 val block = Size(w - 1, h - 1)
-                drawRect(color, origin, block)
-                if (cell == (x to y)) {
-                    drawRect(lerp(progressColor, Color.White, pulse * .35f), origin, block)
-                    drawRect(progressColor.copy(alpha = .55f + pulse * .45f), origin, block,
-                        style = Stroke((1f + pulse).dp.toPx()))
+                val intensity = pulse.value
+                val border = Stroke((1f + intensity).dp.toPx())
+                drawRect(lerp(progressColor, Color.White, intensity * .35f), origin, block)
+                drawRect(progressColor.copy(alpha = .55f + intensity * .45f), origin, block, style = border)
+                fallbackCell?.let { (x, y) ->
+                    drawRect(Color(0xFF4ADE80).copy(alpha = .45f + intensity * .55f),
+                        Offset(x * w, (15 - y) * h), block, style = border)
                 }
             }
-            // Draw after the grid so adjacent cell fills cannot cover the source-cell border.
-            fallbackCell?.let { (x, y) ->
-                drawRect(Color(0xFF4ADE80).copy(alpha = .45f + pulse * .55f),
-                    Offset(x * w, (15 - y) * h), Size(w - 1, h - 1),
-                    style = Stroke((1f + pulse).dp.toPx()))
-            }
+        }
+    }
+}
+
+@Composable
+private fun CoverageGrid(percentages: List<Double?>?) {
+    Canvas(Modifier.fillMaxSize().graphicsLayer()) {
+        val w = size.width / 31
+        val h = size.height / 16
+        val block = Size(w - 1, h - 1)
+        for (x in 0..30) for (y in 0..15) {
+            drawRect(correctionColor(percentages?.getOrNull(x * 16 + y)),
+                Offset(x * w, (15 - y) * h), block)
         }
     }
 }

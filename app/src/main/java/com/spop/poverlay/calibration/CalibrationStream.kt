@@ -36,20 +36,91 @@ internal fun retainCalibrationObservations(baseline: List<Int>, samples: List<Ca
     return (legacy + stream).sortedBy { it.capturedAt }
 }
 
+/** Session-local index. Each accepted batch from the stream belongs to one cell.
+ * Keep insertion order for immutable capture snapshots and evict directly from that cell. */
+internal class CalibrationRecordingHistory(private val baseline: List<Int>, history: List<CalibrationSample>) {
+    var samples: List<CalibrationSample> = emptyList()
+        private set
+    private val buckets = mutableMapOf<Int, ArrayDeque<CalibrationSample>>()
+    private var newestAt = Long.MIN_VALUE
+    private var tiedTimestamps = false
+
+    init { rebuild(history) }
+
+    private fun rebuild(history: List<CalibrationSample>) {
+        samples = retainCalibrationObservations(baseline, history)
+        buckets.clear()
+        newestAt = Long.MIN_VALUE
+        tiedTimestamps = false
+        for (sample in samples) {
+            if (sample.capturedAt == newestAt) tiedTimestamps = true
+            if (sample.observation != null) {
+                val cell = calibrationCellIndex(baseline, sample.ad, sample.rpm)!!
+                buckets.getOrPut(cell) { ArrayDeque() }.addLast(sample)
+            }
+            newestAt = sample.capturedAt
+        }
+    }
+
+    fun count(cell: Int?) = buckets[cell]?.size ?: 0
+
+    fun add(cell: Int, accepted: List<CalibrationSample>, now: Long): CalibrationRollingReplacement? {
+        // CalibrationStream admits one cell at a time, including a confirmed outlier batch.
+        require(accepted.size <= CalibrationCellSeconds)
+        var last = newestAt
+        for (sample in accepted) {
+            if (tiedTimestamps || sample.capturedAt <= last) {
+                // Wall-clock adjustments and tied timestamps use the same stable ordering and
+                // provenance-based deduplication as a loaded or merged capture.
+                val before = buckets[cell]?.toList().orEmpty()
+                rebuild(samples + accepted)
+                return calibrationRollingReplacement(baseline, before, buckets[cell]?.toList().orEmpty(), cell, now)
+            }
+            last = sample.capturedAt
+        }
+        val bucket = buckets.getOrPut(cell) { ArrayDeque() }
+        val removed = (bucket.size + accepted.size - CalibrationCellSeconds).coerceAtLeast(0)
+        val previous = samples
+        samples = buildList(previous.size + accepted.size - removed) {
+            if (removed == 0) addAll(previous)
+            else {
+                var remaining = removed
+                for (sample in previous) {
+                    if (remaining > 0 && sample === bucket.first()) {
+                        bucket.removeFirst()
+                        remaining--
+                    } else add(sample)
+                }
+            }
+            addAll(accepted)
+        }
+        bucket.addAll(accepted)
+        newestAt = last
+        return if (removed > 0) CalibrationRollingReplacement(cell, now, removed) else null
+    }
+}
+
 /** Adjustable stable gate; admission windows never change the actual sample's fitting cell.
  * Outlier comparisons use recent measured ratios, not the old fitted table gain. */
 internal class CalibrationStream(private val baseline: List<Int>, history: List<CalibrationSample> = emptyList(),
     settings: CalibrationStreamSettings = CalibrationStreamSettings()) {
     var settings = settings
         private set
-    private val historicalGroups = history.filter { it.observation != null }.groupBy {
-        calibrationCellIndex(baseline, it.ad, it.rpm)
+    private val recentThermal = mutableMapOf<Int, Boolean>()
+    private val recent = mutableMapOf<Int, MutableList<Double>>()
+    init {
+        for (sample in history) {
+            if (sample.observation == null) continue
+            val index = calibrationCellIndex(baseline, sample.ad, sample.rpm) ?: continue
+            val thermal = CalibrationThermalCorrection.usable(sample)
+            if (!thermal && recentThermal[index] == true) continue
+            val ratios = recent.getOrPut(index) { mutableListOf() }
+            if (thermal && recentThermal[index] != true) ratios.clear()
+            recentThermal[index] = thermal
+            if (ratios.size == 5) ratios.removeAt(0)
+            ratios.add(CalibrationThermalCorrection.ratio(sample))
+        }
     }
-    private val recentThermal = historicalGroups.mapValues { (_, values) -> values.any(CalibrationThermalCorrection::usable) }.toMutableMap()
-    private val recent = historicalGroups.mapValues { (cell, values) ->
-        values.filter { CalibrationThermalCorrection.usable(it) == recentThermal[cell] }.takeLast(5)
-            .map(CalibrationThermalCorrection::ratio).toMutableList()
-    }.toMutableMap()
     private val pendingByCell = mutableMapOf<Int, MutableList<CalibrationSample>>()
     private val pendingLastAt = mutableMapOf<Int, Long>()
     private var cell: Int? = null
@@ -62,7 +133,7 @@ internal class CalibrationStream(private val baseline: List<Int>, history: List<
     private var lastPedal = Long.MIN_VALUE
     private var lastAcceptedAt = Long.MIN_VALUE
     private var lastPollAt: Long? = null
-    private val latestRecordedPair = history.filter { it.observation != null }.maxByOrNull { it.capturedAt }
+    private val latestRecordedPair = history.asSequence().filter { it.observation != null }.maxByOrNull { it.capturedAt }
     private var historicalMarksSeeded = false
     private fun progress(phase: CapturePhase = CapturePhase.Waiting) = CaptureProgress(phase,
         totalSeconds = settings.settleSeconds, settleSeconds = settings.settleSeconds, streaming = true)

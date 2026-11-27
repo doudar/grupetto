@@ -68,11 +68,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
     val powerStatus by viewModel.powerMeterStatus.collectAsStateWithLifecycle()
     val meter by viewModel.powerMeterDevice.collectAsStateWithLifecycle()
     val externalWatts by viewModel.powerMeterReading.collectAsStateWithLifecycle()
-    val calibration by viewModel.calibrationState.collectAsStateWithLifecycle()
     val grupettoTable by viewModel.grupettoCalibrationState.collectAsStateWithLifecycle()
-    val calibrationMeterReady by viewModel.calibrationMeterReady.collectAsStateWithLifecycle(initialValue = false)
-    val captureSettings by viewModel.calibrationCaptureSettings.collectAsStateWithLifecycle()
-    val flywheelTemperature by viewModel.flywheelTemperature.collectAsStateWithLifecycle()
     var dialog by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     androidx.compose.runtime.LaunchedEffect(dialog) {
         if (dialog == "grupetto-calibration") viewModel.showCalibrationTable()
@@ -244,6 +240,10 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
         }
         "power" -> PowerMeterDialog(viewModel) { dialog = null }
         "grupetto-calibration" -> SettingsDialog("Calibrate using power pedals", { dialog = null }, compact = true) {
+            val calibration by viewModel.calibrationState.collectAsStateWithLifecycle()
+            val captureSettings by viewModel.calibrationCaptureSettings.collectAsStateWithLifecycle()
+            val flywheelTemperature by viewModel.flywheelTemperature.collectAsStateWithLifecycle()
+            val calibrationMeterReady by viewModel.calibrationMeterReady.collectAsStateWithLifecycle(initialValue = false)
             val livePosition by viewModel.liveCalibrationPosition.collectAsStateWithLifecycle(initialValue = null)
             Column {
                 com.spop.poverlay.calibration.GrupettoCalibrationPanel(grupettoTable,
@@ -266,7 +266,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
             }
         }
         "refit-calibration" -> com.spop.poverlay.calibration.CalibrationRefitDialog(
-            recording = grupettoTable.recording || calibration.enabled,
+            recording = grupettoTable.recording || viewModel.calibrationState.collectAsStateWithLifecycle().value.enabled,
             onPreview = viewModel::previewCalibrationRefit,
             onApply = viewModel::applyCalibrationRefit,
             onUndo = viewModel::undoCalibrationRefit,
@@ -285,6 +285,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
             }
         }
         "calibration" -> SettingsDialog("Calibrate using power pedals", { dialog = null }, compact = true) {
+            val calibration by viewModel.calibrationState.collectAsStateWithLifecycle()
+            val calibrationMeterReady by viewModel.calibrationMeterReady.collectAsStateWithLifecycle(initialValue = false)
             com.spop.poverlay.calibration.CalibrationPanel(calibration,
                 { if (it) viewModel.startGuidedCalibration() else viewModel.setCalibrationEnabled(false) }, viewModel::clearCalibrationCapture,
                 viewModel::restCalibration, viewModel::easierCalibration,
