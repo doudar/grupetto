@@ -168,7 +168,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 when (current.first) {
                                     "trainer" -> {
-                                        Text("Training apps choose the mode. These only change how it feels.",
+                                        Text("A connected training app sets the mode by itself. Pick one here only to ride without an app; the sliders change how it feels.",
                                             fontSize = 13.sp, color = Color(0xFF9EAEC0))
                                         TrainerControls(bike, viewModel::startErg, viewModel::startSimulation,
                                             viewModel::stopBikeControl, viewModel::setBikeResistance, viewModel::setBikeTuning)
