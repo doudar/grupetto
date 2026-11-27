@@ -1,6 +1,7 @@
 package com.spop.poverlay.calibration
 
 import kotlin.math.*
+import java.util.concurrent.atomic.AtomicIntegerArray
 
 /** Descriptive errors on the same saved efforts, not held-out validation or an activation gate. */
 data class ActiveCalibrationComparison(val activeRmse: Double, val candidateRmse: Double,
@@ -33,24 +34,29 @@ data class GrupettoCalibrationTable(val baseline: List<Int>, val gains: List<Dou
      */
     val canActivate get() = ready && hasUsableCells
 
-    internal val hasUsableCells get() = sampleCount > 0 && cells in 1..496 && validCalibrationTable(baseline) &&
+    internal val hasUsableCells by lazy { sampleCount > 0 && cells in 1..496 && validCalibrationTable(baseline) &&
         gains.size == 496 && gains.indices.all { gains[it].isFinite() && gains[it] in gainRange(it) } &&
         confidence.size == 496 && confidence.all { it.isFinite() && it in 0.0..1.0 } &&
         (cellSampleCounts.isEmpty() || cellSampleCounts.size == 496 && cellSampleCounts.all { it in 0..10 }) &&
         effectiveCellSampleCounts().any { it > 0 } &&
         thermalCells.all { it in 0 until 496 && effectiveCellSampleCounts()[it] > 0 } &&
-        thermalAnchors.keys == thermalCells && thermalAnchors.values.all { it.isFinite() && it in .85..1.10 }
+        thermalAnchors.keys == thermalCells && thermalAnchors.values.all { it.isFinite() && it in .85..1.10 } }
 
     internal fun gainRange(cell: Int) = if (cell in thermalCells) CalibrationThermalCorrection.referenceLogRange else CalibrationCorrectionLimits.logRange
 
     fun currentCellIndex(ad: Double, rpm: Double): Int? = calibrationCellIndex(baseline, ad, rpm)
 
     // Distance is squared Euclidean grid distance: one resistance column and one 5-rpm
-    // row each count as one step. Scan at most 496 values, with no allocations or deferred
-    // cache construction in the sensor callback. Ties keep the first (lowest) flat index.
+    // row each count as one step. Snapshots have fixed coverage, so ride telemetry and error
+    // scoring can share the result for each empty cell. Zero is unknown, -1 is no source.
+    private val nearestCells = if (cellSampleCounts.size == 496 && 0 in cellSampleCounts)
+        AtomicIntegerArray(496) else null
+
     fun lookupCellIndex(ad: Double, rpm: Double): Int? {
         val cell = currentCellIndex(ad, rpm) ?: return null
         if (cellSampleCounts.size != 496 || cellSampleCounts[cell] > 0) return cell
+        val cached = nearestCells?.get(cell) ?: 0
+        if (cached != 0) return if (cached < 0) null else cached - 1
         var closest = -1
         var shortest = Int.MAX_VALUE
         for (source in 0 until 496) {
@@ -60,6 +66,7 @@ data class GrupettoCalibrationTable(val baseline: List<Int>, val gains: List<Dou
             val distance = dx * dx + dy * dy
             if (distance < shortest) { shortest = distance; closest = source }
         }
+        nearestCells?.set(cell, if (closest < 0) -1 else closest + 1)
         return closest.takeIf { it >= 0 }
     }
 

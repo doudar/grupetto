@@ -22,7 +22,7 @@ internal fun correctionColor(percent: Double?): Color {
 internal fun calibrationCorrectionPercent(table: GrupettoCalibrationTable, samples: List<CalibrationSample>,
     includeManual: Boolean = true): List<Double?> {
     val counts = table.effectiveCellSampleCounts()
-    val recorded = samples.filter { it.usableForCalibration(table.baseline) }
+    val recorded = if (includeManual) emptySet() else samples.asSequence().filter { it.usableForCalibration(table.baseline) }
         .mapNotNull { calibrationCellIndex(table.baseline, it.ad, it.rpm) }.toSet()
     return List(496) { index ->
         if (counts[index] > 0 && (includeManual || index in recorded))
@@ -32,8 +32,8 @@ internal fun calibrationCorrectionPercent(table: GrupettoCalibrationTable, sampl
 
 internal fun GrupettoCalibrationTable.withCalibrationCoverage(samples: List<CalibrationSample>): GrupettoCalibrationTable {
     val measured = calibrationCorrectionPercent(this, samples, includeManual = false)
-    return copy(streamSeconds = samples.count { it.observation != null },
-        legacyEffortCount = samples.count { it.observation == null },
+    val seconds = samples.count { it.observation != null }
+    return copy(streamSeconds = seconds, legacyEffortCount = samples.size - seconds,
         correctionPercent = calibrationCorrectionPercent(this, samples),
         recordedCoverage = measured.indices.filterTo(mutableSetOf()) { measured[it] != null })
 }

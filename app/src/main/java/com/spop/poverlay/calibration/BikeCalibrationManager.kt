@@ -122,12 +122,16 @@ class BikeCalibrationManager(
                 val baseline = withContext(Dispatchers.IO) { connection.readTable() }
                 Timber.tag("CalibrationCapture").i("Subscribed to bike; read %d baseline points", baseline.size)
                 var window = CalibrationWindow(baseline, mutableSettings.value)
-                val stream = grupettoCalibration?.let { CalibrationStream(baseline, capture?.samples.orEmpty(), mutableStreamSettings.value) }
+                val savedSamples = capture?.samples.orEmpty()
+                val stream = grupettoCalibration?.let { withContext(Dispatchers.Default) {
+                    CalibrationStream(baseline, savedSamples, mutableStreamSettings.value)
+                } }
+                val history = stream?.let { withContext(Dispatchers.Default) {
+                    CalibrationRecordingHistory(baseline, savedSamples)
+                } }
                 var dirty = false
                 var lastFlush = 0L
                 var lastReplacement: CalibrationRollingReplacement? = null
-                var bucketCounts = withContext(Dispatchers.Default) { capture?.samples.orEmpty().filter { it.observation != null }
-                    .groupingBy { calibrationCellIndex(baseline, it.ad, it.rpm) }.eachCount() }
                 var guideCells = emptyList<CalibrationTarget>()
                 var nextGuideRefresh = 0L
                 suspend fun flush() {
@@ -178,7 +182,9 @@ class BikeCalibrationManager(
                         mutableState.value = mutableState.value.captureIdentityVerified()
                         capture = current
                         if (guide == null) guide = CalibrationGuide(baseline, frame.ad)
-                        if (stream == null || now >= nextGuideRefresh) {
+                        if (mutableState.value.mode != CalibrationMode.Guided) {
+                            guideCells = emptyList()
+                        } else if (stream == null || now >= nextGuideRefresh) {
                             guideCells = withContext(Dispatchers.Default) { guide!!.cells(current.samples, streaming = stream != null) }
                             nextGuideRefresh = now + 5000
                         }
@@ -194,29 +200,26 @@ class BikeCalibrationManager(
                             delay(1000)
                             continue
                         }
-                        if (stream != null) {
+                        if (stream != null && history != null) {
                             val accepted = stream.add(frame, pedal.watts, pedal.timestamp, pedal.address, now, System.currentTimeMillis(),
                                 grupettoCalibration?.flywheelTemperature?.temperatureAt(frame.timestamp))
                             if (accepted.isNotEmpty()) {
                                 // Once admitted, finish staging this batch even if Pause arrives
                                 // during background retention; finally then flushes every accepted pair.
                                 withContext(NonCancellable) {
-                                val retained = withContext(Dispatchers.Default) {
-                                    retainCalibrationObservations(baseline, current.samples + accepted)
-                                }
-                                withContext(Dispatchers.Default) {
-                                    calibrationRollingReplacement(baseline, current.samples, retained, stream.progress.cell, now)
-                                }?.let { lastReplacement = it }
-                                bucketCounts = withContext(Dispatchers.Default) { retained.filter { it.observation != null }
-                                    .groupingBy { calibrationCellIndex(baseline, it.ad, it.rpm) }.eachCount() }
-                                capture = current.copy(samples = retained)
-                                dirty = true
+                                    val cell = checkNotNull(stream.progress.cell)
+                                    withContext(Dispatchers.Default) {
+                                        history.add(cell, accepted, now)
+                                    }?.let { lastReplacement = it }
+                                    capture = current.copy(samples = history.samples)
+                                    dirty = true
                                 }
                             }
                             val samples = capture!!.samples
-                            val bucket = bucketCounts[stream.progress.cell] ?: 0
+                            val bucket = history.count(stream.progress.cell)
                             mutableState.value = mutableState.value.copy(sampleCount = samples.size,
-                                status = stream.progress.phase.cue, recent = samples.takeLast(30),
+                                status = stream.progress.phase.cue,
+                                recent = if (accepted.isNotEmpty()) samples.takeLast(30) else mutableState.value.recent,
                                 progress = stream.progress.copy(bucketSeconds = bucket, rollingReplacement = lastReplacement),
                                 savedAt = if (accepted.isNotEmpty()) now else mutableState.value.savedAt)
                             if (dirty && (lastFlush == 0L || now - lastFlush >= 5000)) flush()

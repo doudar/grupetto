@@ -33,4 +33,24 @@ class CalibrationRollingReplacementTest {
         assertNull(calibrationRollingReplacement(baseline,before,retained,cell,1000))
         assertNull(calibrationRollingReplacement(baseline,before,retained,cell+1,1000))
     }
+
+    @Test fun liveHistoryMatchesRetentionAcrossCellsBatchesAndClockChanges() {
+        val legacy = sample(50).copy(observation = null, capturedAt = 50200)
+        val history = (0 until 100).flatMap {
+            listOf(sample(it), sample(it, 85.0).copy(capturedAt = it * 1000L + 500))
+        } + legacy
+        val live = CalibrationRecordingHistory(baseline, history)
+        var expected = retainCalibrationObservations(baseline, history)
+        val batches = listOf((100..102).map { sample(it) }, listOf(sample(103, 85.0)),
+            listOf(sample(101)), listOf(sample(70).copy(capturedAt = 101000)), listOf(sample(104)))
+        for (batch in batches) {
+            val index = calibrationCellIndex(baseline, batch.first().ad, batch.first().rpm)!!
+            val retained = retainCalibrationObservations(baseline, expected + batch)
+            assertEquals(calibrationRollingReplacement(baseline, expected, retained, index, 200000),
+                live.add(index, batch, 200000))
+            assertEquals(retained, live.samples)
+            assertEquals(100, live.count(index))
+            expected = retained
+        }
+    }
 }

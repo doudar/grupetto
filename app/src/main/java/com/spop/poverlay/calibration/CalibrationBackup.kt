@@ -7,6 +7,8 @@ import java.io.File
 import java.io.FileNotFoundException
 import java.io.InputStream
 import java.io.FileOutputStream
+import java.io.StringWriter
+import java.io.Writer
 import java.util.UUID
 
 /** Bound persisted and imported JSON before allocating its complete text. I/O errors propagate. */
@@ -38,10 +40,26 @@ internal data class CalibrationBackup(
     val resetAt: Long = 0,
 ) {
     val hasData get() = draft != null || saved != null
-    fun encode(): String = JSONObject().put("format", "grupetto-calibration-backup").put("schema", 3)
-        .put("draft", draft?.let(GrupettoCalibrationStore::encode) ?: JSONObject.NULL)
-        .put("saved", saved?.let(GrupettoCalibrationStore::encode) ?: JSONObject.NULL)
-        .also { if (resetAt > 0) it.put("resetAt", resetAt) }.toString()
+    fun encode(): String = StringWriter().also(::writeTo).toString()
+
+    fun writeTo(writer: Writer) {
+        writer.write("""{"format":"grupetto-calibration-backup","schema":3,"draft":""")
+        fun encodeProfile(profile: GrupettoCalibrationProfile?) =
+            profile?.let { GrupettoCalibrationStore.encode(it).toString() } ?: "null"
+        if (draft === saved) {
+            // Auto-activation normally saves the same immutable profile in both slots.
+            val encoded = encodeProfile(draft)
+            writer.write(encoded)
+            writer.write(""","saved":""")
+            writer.write(encoded)
+        } else {
+            writer.write(encodeProfile(draft))
+            writer.write(""","saved":""")
+            writer.write(encodeProfile(saved))
+        }
+        if (resetAt > 0) writer.write(""","resetAt":$resetAt""")
+        writer.write("}")
+    }
 
     companion object {
         const val MAX_BYTES = 32 * 1024 * 1024
@@ -54,7 +72,10 @@ internal data class CalibrationBackup(
 
         fun decode(text: String): CalibrationBackup {
             require(text.toByteArray(Charsets.UTF_8).size <= MAX_BYTES) { "Calibration file is too large." }
-            val json = JSONObject(text)
+            return decode(JSONObject(text))
+        }
+
+        internal fun decode(json: JSONObject): CalibrationBackup {
             val schema = json.getInt("schema")
             require(json.getString("format") == "grupetto-calibration-backup" && schema in 1..3) {
                 "Unsupported calibration file format."
@@ -94,7 +115,7 @@ internal class CalibrationBackupStore(private val directory: File) {
             // Only format errors trigger quarantine. Transient read/close failures propagate.
             val text = stream.use(::boundedCalibrationText)
             val json = JSONObject(text)
-            val backup = CalibrationBackup.decode(text)
+            val backup = CalibrationBackup.decode(json)
             val legacy = json.getInt("schema") < 3 || listOf("draft", "saved").any { key ->
                 !json.isNull(key) && json.getJSONObject(key).getInt("schema") < 5
             }
@@ -163,7 +184,12 @@ internal class CalibrationBackupStore(private val directory: File) {
 
     fun save(backup: CalibrationBackup) {
         val stream = file.startWrite()
-        try { stream.write(backup.encode().toByteArray(Charsets.UTF_8)); file.finishWrite(stream) }
+        try {
+            val writer = stream.bufferedWriter(Charsets.UTF_8)
+            backup.writeTo(writer)
+            writer.flush()
+            file.finishWrite(stream)
+        }
         catch (e: Exception) { file.failWrite(stream); throw e }
     }
 }
