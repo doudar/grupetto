@@ -465,6 +465,17 @@ class ConfigurationViewModel(
         finishActivity.value = Unit
     }
 
+    /** Start the overlay and stay on settings. */
+    fun startOverlay() {
+        Timber.i("Starting service")
+        ContextCompat.startForegroundService(getApplication(), Intent(getApplication(), OverlayService::class.java))
+    }
+
+    /** Hide settings and ride: the overlay keeps running. */
+    fun onRideClicked() {
+        finishActivity.value = Unit
+    }
+
     fun onGrantPermissionClicked() {
         requestOverlayPermission.value = Unit
     }
