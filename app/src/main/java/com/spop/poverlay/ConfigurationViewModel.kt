@@ -90,6 +90,7 @@ class ConfigurationViewModel(
         app.bleServer.stopDirConOnly()
         app.antPlusServer.stop()
         app.powerMeterManager.stop()
+        app.openBikeControl.stop()
         requestRestart.postValue(Unit)
     }
 
@@ -112,6 +113,9 @@ class ConfigurationViewModel(
     val shifterInset get() = configurationRepository.shifterInset
     fun setShowShifters(shown: Boolean) = configurationRepository.setShowShifters(shown)
     fun setShifterInset(inset: Float) = configurationRepository.setShifterInset(inset)
+    val openBikeControlEnabled get() = configurationRepository.openBikeControlEnabled
+    val openBikeControlStatus get() = (getApplication<Application>() as GrupettoApplication).openBikeControl.status
+    fun setOpenBikeControlEnabled(enabled: Boolean) = configurationRepository.setOpenBikeControlEnabled(enabled)
 
     val bleTxEnabled
         get() = configurationRepository.bleTxEnabled
@@ -475,6 +479,7 @@ class ConfigurationViewModel(
         calibration.setEnabled(false)
         bikeControl?.stop()
         powerMeters.stop()
+        (getApplication<Application>() as GrupettoApplication).openBikeControl.stop()
         requestQuit.value = Unit
     }
 

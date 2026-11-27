@@ -32,6 +32,7 @@ class GrupettoApplication : Application() {
         bleServer.stopDirConOnly()
         antPlusServer.stop()
         powerMeterManager.stop()
+        openBikeControl.stop()
         getSharedPreferences("developer", MODE_PRIVATE).edit().putString("emulatedModel", model?.name).commit()
     }
     // Use one detection result for both Bluetooth and every overlay instance.
@@ -48,6 +49,9 @@ class GrupettoApplication : Application() {
     lateinit var powerMeterManager: com.spop.poverlay.sensor.power.PowerMeterManager
         private set
     lateinit var bikeCalibration: com.spop.poverlay.calibration.BikeCalibrationManager
+        private set
+    /** Shifts the Bike+ from OpenBikeControl remotes; only active on bikes Grupetto can control. */
+    lateinit var openBikeControl: com.spop.poverlay.openbikecontrol.OpenBikeControlManager
         private set
     val boardCalibration by lazy { com.spop.poverlay.calibration.BoardWriteController(this, bikeCalibration) }
     val grupettoCalibration by lazy { com.spop.poverlay.calibration.GrupettoCalibrationManager(this) }
@@ -79,6 +83,9 @@ class GrupettoApplication : Application() {
             bike, powerMeterManager.reading, sensorScope, android.os.SystemClock::elapsedRealtime
         ) else bike
         bleServer = BleServer(this, bluetoothManager, sensorInterface)
+        val control = sensorInterface.bikeControl?.takeIf { it.supported }
+        openBikeControl = com.spop.poverlay.openbikecontrol.OpenBikeControlManager.create(this, configurationPreferencesName,
+            BuildConfig.VERSION_NAME, control?.let { bike -> { direction: Int -> bike.shift(direction) } })
         antPlusServer = AntPlusServer(this, sensorInterface)
     }
 

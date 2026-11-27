@@ -17,6 +17,7 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner, 
         ShowTimerWhenMinimized("showTimerWhenMinimized"),
         ShowShifters("showShifters"),
         ShifterInset("shifterInset"),
+        OpenBikeControlEnabled("openBikeControlEnabled"),
         BleTxEnabled("bleTxEnabled"),
         DirConEnabled("dirConEnabled"),
         BleFtmsDeviceName("bleFtmsDeviceName"),
@@ -38,6 +39,7 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner, 
     private val mutableShowTimerWhenMinimized = MutableStateFlow(true)
     val showShifters = MutableStateFlow(true)
     val shifterInset = MutableStateFlow(0f)
+    val openBikeControlEnabled = MutableStateFlow(false)
     private val mutableBleTxEnabled = MutableStateFlow(true)
     private val mutableDirConEnabled = MutableStateFlow(true)
     private val mutableBleFtmsDeviceName = MutableStateFlow("Grupetto FTMS")
@@ -87,6 +89,11 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner, 
     fun setShowShifters(shown: Boolean) {
         showShifters.value = shown
         sharedPreferences.edit { putBoolean(Preferences.ShowShifters.key, shown) }
+    }
+
+    fun setOpenBikeControlEnabled(enabled: Boolean) {
+        openBikeControlEnabled.value = enabled
+        sharedPreferences.edit { putBoolean(Preferences.OpenBikeControlEnabled.key, enabled) }
     }
 
     fun setShifterInset(inset: Float) {
@@ -162,6 +169,7 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner, 
         showShifters.value = sharedPreferences.getBoolean(Preferences.ShowShifters.key, true)
         shifterInset.value = com.spop.poverlay.overlay.normalizedShifterInset(
             sharedPreferences.getFloat(Preferences.ShifterInset.key, 0f))
+        openBikeControlEnabled.value = sharedPreferences.getBoolean(Preferences.OpenBikeControlEnabled.key, false)
         mutableShowTimerWhenMinimized.value =
             sharedPreferences
                 .getBoolean(Preferences.ShowTimerWhenMinimized.key, true)

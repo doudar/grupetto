@@ -167,6 +167,7 @@ class MainActivity : ComponentActivity() {
             // off the main thread so a slow radio service can't trigger an ANR while quitting.
             withContext(Dispatchers.IO) {
                 (application as GrupettoApplication).powerMeterManager.stop()
+                (application as GrupettoApplication).openBikeControl.stop()
                 (application as GrupettoApplication).bleServer.stop()
                 (application as GrupettoApplication).antPlusServer.stop()
             }

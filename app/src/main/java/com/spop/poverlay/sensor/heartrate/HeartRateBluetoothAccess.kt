@@ -118,6 +118,29 @@ internal class HeartRateBluetoothAccess(
         }
     }
 
+    fun requestMtu(gatt: BluetoothGatt, mtu: Int): Boolean {
+        if (!canConnect()) return false
+        return try {
+            gatt.requestMtu(mtu)
+        } catch (e: SecurityException) {
+            Timber.w(e, "MTU request permission was revoked")
+            false
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    fun write(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray): Boolean {
+        if (!canConnect()) return false
+        return try {
+            characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            characteristic.value = value
+            gatt.writeCharacteristic(characteristic)
+        } catch (e: SecurityException) {
+            Timber.w(e, "Characteristic write permission was revoked")
+            false
+        }
+    }
+
     /** Best-effort radio coexistence hint, applied after notification setup completes.
      * Android chooses the interval; this does not set the sensor's reporting cadence.
      * A rejected request must not tear down an otherwise working sensor connection.
