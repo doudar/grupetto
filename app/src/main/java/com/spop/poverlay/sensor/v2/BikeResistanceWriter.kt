@@ -6,7 +6,7 @@ import timber.log.Timber
 
 /** Kept separate so the real parcel contract can be tested without running the poller. */
 internal fun writeBikeResistance(binder: IBinder, resistance: Int): Boolean {
-    if (resistance !in 0..100) return false
+    if (resistance !in com.spop.poverlay.control.ResistanceLimits.levels) return false
     val data = Parcel.obtain()
     val reply = Parcel.obtain()
     return try {
