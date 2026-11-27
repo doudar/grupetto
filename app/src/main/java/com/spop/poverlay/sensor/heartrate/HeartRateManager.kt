@@ -11,6 +11,7 @@ import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.ParcelUuid
+import com.spop.poverlay.sensor.ScanBudget
 import com.spop.poverlay.sensor.shouldDiscoverSensor
 import androidx.core.content.edit
 import kotlinx.coroutines.CoroutineScope
@@ -34,15 +35,22 @@ object HeartRateManager {
     private const val PrefSavedDevices = "hr_saved_devices"
     private const val PrefSelectedDevice = "hr_selected_device"
     private const val PrefNamePrefix = "hr_name_"
+    private const val PrefZoneMax = "hr_zone_max"
     private const val PrefZone12 = "hr_zone_12"
     private const val PrefZone23 = "hr_zone_23"
     private const val PrefZone34 = "hr_zone_34"
     private const val PrefZone45 = "hr_zone_45"
     private const val PrefMatchByName = "hr_match_by_name"
 
-    private const val ReconnectDelayMs = 3_000L
-    private const val AutoReconnectScanMs = 10_000L
+    private const val ReconnectDelayMs = 1_000L
+    // Each background scan runs this long at full speed, then restarts after ReconnectDelayMs.
+    // Long enough to catch a strap that advertises slowly, short enough that Android never
+    // demotes it to an opportunistic scan.
+    private const val AutoReconnectScanMs = 30_000L
     private const val StaleHeartRateTimeoutMs = 12_000L
+    // A strap that has just connected can take a while to find a pulse (dry electrodes, cold hands)
+    // before it sends its first reading; give it longer than an established connection.
+    private const val FirstReadingTimeoutMs = 30_000L
     // Android abandons a direct connectGatt after about 30 s; do not restart a
     // pending attempt to the same strap sooner. Straps already serving other
     // receivers can take several seconds to accept, and every restart cancels
@@ -50,6 +58,7 @@ object HeartRateManager {
     private const val PendingConnectTimeoutMs = 30_000L
 
     // Default zones based on 180 bpm max HR (typical 40-year-old), 10% bands
+    private const val DefaultZoneMax = 180
     private const val DefaultZone12 = 108
     private const val DefaultZone23 = 126
     private const val DefaultZone34 = 144
@@ -82,6 +91,9 @@ object HeartRateManager {
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning
 
+    private val _zoneMax = MutableStateFlow<Int?>(null)
+    /** The top of zone 5: the heart rate that counts as 100%. */
+    val zoneMax: StateFlow<Int?> = _zoneMax
     private val _zone12 = MutableStateFlow<Int?>(null)
     private val _zone23 = MutableStateFlow<Int?>(null)
     private val _zone34 = MutableStateFlow<Int?>(null)
@@ -90,6 +102,9 @@ object HeartRateManager {
     val zone23: StateFlow<Int?> = _zone23
     val zone34: StateFlow<Int?> = _zone34
     val zone45: StateFlow<Int?> = _zone45
+    // Zones belong to the selected monitor, so each rider's strap uses that rider's zones.
+    private val _zoneOwner = MutableStateFlow<String?>(null)
+    val zoneOwner: StateFlow<String?> = _zoneOwner
     private val _heartRateZones = MutableStateFlow<List<Int>?>(null)
     val heartRateZones: StateFlow<List<Int>?> = _heartRateZones
 
@@ -123,6 +138,8 @@ object HeartRateManager {
     @Volatile
     private var manualDisconnectRequested = false
 
+    private val scanBudget = ScanBudget()
+
     @Volatile
     private var lastHeartRateAtMs: Long = 0L
 
@@ -141,11 +158,12 @@ object HeartRateManager {
             appContext = context.applicationContext
             bluetoothAccess = HeartRateBluetoothAccess(context.applicationContext)
             prefs = appContext?.getSharedPreferences(PrefsName, Context.MODE_PRIVATE)
-            loadHeartRateZones()
             _matchByName.value = prefs?.getBoolean(PrefMatchByName, false) ?: false
             stopped.set(false)
             loadSavedDevices()
             selectedAddress = prefs?.getString(PrefSelectedDevice, null)
+            loadHeartRateZones()
+            scanBudget.arm(monotonicTimeMs())
             if (!manualDisconnectRequested) {
                 selectedAddress?.let { connectToAddress(it) }
             }
@@ -191,26 +209,49 @@ object HeartRateManager {
         return if (sharedPrefs.contains(key)) sharedPrefs.getInt(key, 0) else null
     }
 
+    private fun zoneKey(base: String, address: String?) = if (address == null) base else "${base}_$address"
+
+    // A monitor's own zones win, then the shared default zones, then the built-in defaults.
+    private fun readZone(base: String, builtIn: Int): Int =
+        readIntOrNull(zoneKey(base, selectedAddress)) ?: readIntOrNull(base) ?: builtIn
+
     private fun loadHeartRateZones() {
-        _zone12.value = readIntOrNull(PrefZone12) ?: DefaultZone12
-        _zone23.value = readIntOrNull(PrefZone23) ?: DefaultZone23
-        _zone34.value = readIntOrNull(PrefZone34) ?: DefaultZone34
-        _zone45.value = readIntOrNull(PrefZone45) ?: DefaultZone45
+        _zoneOwner.value = selectedAddress
+        _zoneMax.value = readZone(PrefZoneMax, DefaultZoneMax)
+        _zone12.value = readZone(PrefZone12, DefaultZone12)
+        _zone23.value = readZone(PrefZone23, DefaultZone23)
+        _zone34.value = readZone(PrefZone34, DefaultZone34)
+        _zone45.value = readZone(PrefZone45, DefaultZone45)
         updateHeartRateZones()
     }
 
-    fun setHeartRateZones(zone12: Int?, zone23: Int?, zone34: Int?, zone45: Int?) {
+    /** Saves zones for the selected monitor, or as the shared default when none is selected. */
+    fun setHeartRateZones(zone12: Int?, zone23: Int?, zone34: Int?, zone45: Int?, zoneMax: Int?) {
+        val owner = selectedAddress
         prefs?.edit {
-            if (zone12 != null) putInt(PrefZone12, zone12) else remove(PrefZone12)
-            if (zone23 != null) putInt(PrefZone23, zone23) else remove(PrefZone23)
-            if (zone34 != null) putInt(PrefZone34, zone34) else remove(PrefZone34)
-            if (zone45 != null) putInt(PrefZone45, zone45) else remove(PrefZone45)
+            if (zoneMax != null) putInt(zoneKey(PrefZoneMax, owner), zoneMax) else remove(zoneKey(PrefZoneMax, owner))
+            if (zone12 != null) putInt(zoneKey(PrefZone12, owner), zone12) else remove(zoneKey(PrefZone12, owner))
+            if (zone23 != null) putInt(zoneKey(PrefZone23, owner), zone23) else remove(zoneKey(PrefZone23, owner))
+            if (zone34 != null) putInt(zoneKey(PrefZone34, owner), zone34) else remove(zoneKey(PrefZone34, owner))
+            if (zone45 != null) putInt(zoneKey(PrefZone45, owner), zone45) else remove(zoneKey(PrefZone45, owner))
         }
+        _zoneMax.value = zoneMax
         _zone12.value = zone12
         _zone23.value = zone23
         _zone34.value = zone34
         _zone45.value = zone45
         updateHeartRateZones()
+    }
+
+    private fun copyZones(from: String, to: String) {
+        val p = prefs ?: return
+        p.edit {
+            for (base in listOf(PrefZone12, PrefZone23, PrefZone34, PrefZone45, PrefZoneMax)) {
+                val key = zoneKey(base, from)
+                if (p.contains(key)) putInt(zoneKey(base, to), p.getInt(key, 0))
+                remove(key)
+            }
+        }
     }
 
     fun setMatchByName(enabled: Boolean) {
@@ -233,10 +274,9 @@ object HeartRateManager {
         }
     }
 
-    // scanMode defaults to LOW_LATENCY for the user-initiated "scan for devices" flow, which
-    // wants fast results. The unattended background auto-reconnect loop passes LOW_POWER
-    // instead, since it can run continuously (whenever no strap is connected) and fast
-    // discovery there isn't worth the extra battery/CPU draw.
+    // Always scan at LOW_LATENCY. The background auto-reconnect used LOW_POWER (about a 10% duty
+    // cycle), which on the bike's tablet often missed a saved strap until settings opened the fast
+    // scan. The bike is mains powered, so the extra power draw does not matter.
     @Synchronized
     fun startDiscovery(scanMode: Int = ScanSettings.SCAN_MODE_LOW_LATENCY) {
         if (!shouldScan()) { stopDiscovery(); updateIdleStatus(); return }
@@ -300,20 +340,38 @@ object HeartRateManager {
         if (callback != null) bluetoothAccess?.stopScan(callback)
     }
 
+    /**
+     * Reports whether the bike is moving. A saved strap that is not connected is searched for at full
+     * speed while the bike is in use; when the bike starts moving after sitting idle, the search
+     * resumes at once. A pending connection that went nowhere is dropped so the scan can run. Does
+     * nothing after a manual disconnect, with no saved strap, or while a strap is connected.
+     */
+    @Synchronized
+    fun onBikeMovement(moving: Boolean) {
+        if (!scanBudget.onMovement(moving, monotonicTimeMs())) return
+        if (stopped.get() || manualDisconnectRequested || _connectedDevice.value != null) return
+        if (_savedDevices.value.isEmpty()) return
+        if (bluetoothGatt != null) releaseCurrentGatt()
+        stopDiscovery()
+        nextScanAtMs = 0L
+        startDiscovery(ScanSettings.SCAN_MODE_LOW_LATENCY)
+    }
+
     /** The matching pairing picker is visible, not merely the settings screen. */
     @Synchronized
     fun setManaging(active: Boolean) {
         if (isManaging == active) return
         isManaging = active
         stopDiscovery()
-        if (shouldScan()) startDiscovery(if (active) ScanSettings.SCAN_MODE_LOW_LATENCY else ScanSettings.SCAN_MODE_LOW_POWER)
+        if (shouldScan()) startDiscovery(ScanSettings.SCAN_MODE_LOW_LATENCY)
         else updateIdleStatus()
     }
 
     private fun shouldScan() = shouldDiscoverSensor(
         running = !stopped.get(), pickerOpen = isManaging,
-        hasSavedTarget = _savedDevices.value.isNotEmpty(),
-        manuallyDisconnected = manualDisconnectRequested, hasGatt = bluetoothGatt != null
+        hasSavedTarget = _savedDevices.value.isNotEmpty() && scanBudget.allows(monotonicTimeMs()),
+        manuallyDisconnected = manualDisconnectRequested,
+        hasGatt = bluetoothGatt != null
     )
 
     @Synchronized
@@ -323,6 +381,8 @@ object HeartRateManager {
         manualDisconnectRequested = false
         saveDevice(device)
         selectedAddress = device.address
+        loadHeartRateZones()
+        scanBudget.arm(monotonicTimeMs())
         // Further scan results would otherwise restart this connection attempt.
         stopDiscovery()
         connectToAddress(device.address)
@@ -333,6 +393,7 @@ object HeartRateManager {
         manualDisconnectRequested = true
         stopDiscovery()
         selectedAddress = null
+        loadHeartRateZones()
         prefs?.edit { remove(PrefSelectedDevice) }
         releaseCurrentGatt()
         _status.value = "Heart-rate monitor disconnected"
@@ -346,10 +407,12 @@ object HeartRateManager {
         p.edit {
             putStringSet(PrefSavedDevices, saved)
             remove(PrefNamePrefix + address)
+            for (base in listOf(PrefZone12, PrefZone23, PrefZone34, PrefZone45, PrefZoneMax)) remove(zoneKey(base, address))
             if (selectedAddress == address) remove(PrefSelectedDevice)
         }
         if (selectedAddress == address) {
             selectedAddress = null
+            loadHeartRateZones()
             releaseCurrentGatt()
             _status.value = "No heart-rate monitor selected"
         }
@@ -397,6 +460,7 @@ object HeartRateManager {
         // Exact MAC match
         if (_savedDevices.value.any { it.address == address }) {
             selectedAddress = address
+            loadHeartRateZones()
             connectToAddress(address)
             stopDiscovery()
             return true
@@ -410,6 +474,7 @@ object HeartRateManager {
             } ?: return false
             updateSavedDeviceAddress(oldAddress = matched.address, newAddress = address, name = deviceName)
             selectedAddress = address
+            loadHeartRateZones()
             connectToAddress(address)
             stopDiscovery()
             return true
@@ -430,6 +495,7 @@ object HeartRateManager {
             putString(PrefNamePrefix + newAddress, name)
             if (wasSelected) putString(PrefSelectedDevice, newAddress)
         }
+        copyZones(oldAddress, newAddress)
         Timber.i("HR device name-matched '%s': updated address %s → %s", name, oldAddress, newAddress)
         loadSavedDevices()
         pruneDiscovered()
@@ -464,6 +530,8 @@ object HeartRateManager {
                     return
                 }
                 releaseCurrentGatt()
+                // A strap that failed to connect or dropped is searched for again straight away.
+                scanBudget.arm(monotonicTimeMs())
                 _status.value = "Reconnecting to ${deviceName(address)}"
                 scheduleReconnect()
             }
@@ -582,6 +650,9 @@ object HeartRateManager {
             (manualDisconnectRequested || _savedDevices.value.isEmpty())) {
             _status.value = if (manualDisconnectRequested) "Heart-rate monitor disconnected"
                 else "No heart-rate monitor selected"
+        } else if (bluetoothGatt == null && !isManaging && !manualDisconnectRequested &&
+            _savedDevices.value.isNotEmpty() && !scanBudget.allows(monotonicTimeMs())) {
+            _status.value = "Saved heart-rate monitor not found · will search again when you ride"
         }
     }
 
@@ -598,9 +669,14 @@ object HeartRateManager {
         if (bluetoothGatt != null) {
             val connected = _connectedDevice.value != null
             val lastSignal = if (connected) maxOf(lastHeartRateAtMs, lastConnectedAtMs) else pendingSinceMs
-            val timeout = if (connected) StaleHeartRateTimeoutMs else PendingConnectTimeoutMs
+            val timeout = when {
+                !connected -> PendingConnectTimeoutMs
+                lastHeartRateAtMs == 0L -> FirstReadingTimeoutMs
+                else -> StaleHeartRateTimeoutMs
+            }
             if (now - lastSignal > timeout) {
                 releaseCurrentGatt()
+                if (connected) scanBudget.arm(now)
                 nextScanAtMs = now + ReconnectDelayMs
                 _status.value = "Heart-rate data lost · reconnecting"
             }
@@ -610,7 +686,7 @@ object HeartRateManager {
             stopDiscovery()
             nextScanAtMs = now + ReconnectDelayMs
         } else if (!_isScanning.value && now >= nextScanAtMs) {
-            startDiscovery(if (isManaging) ScanSettings.SCAN_MODE_LOW_LATENCY else ScanSettings.SCAN_MODE_LOW_POWER)
+            startDiscovery(ScanSettings.SCAN_MODE_LOW_LATENCY)
         }
     }
 }

@@ -192,6 +192,15 @@ class OverlayService : LifecycleEnabledService() {
         // Wire up timer to auto-start/pause based on movement
         timerViewModel.observeMovement(sensorViewModel.isMoving, sensorViewModel.sessionReset)
 
+        // Tell the Bluetooth managers when the bike moves: riding after a long idle opens a short
+        // window of searching for saved sensors that are not connected.
+        lifecycleScope.launch {
+            sensorViewModel.isMoving.collect { moving ->
+                HeartRateManager.onBikeMovement(moving)
+                (application as GrupettoApplication).powerMeterManager.onBikeMovement(moving)
+            }
+        }
+
         val dialogViewModel = OverlayDialogViewModel(
             screenSize,
             sensorViewModel.isMinimized,
