@@ -111,7 +111,9 @@ fun OverlayMinimizedContent(
     ) {
         if (emulationLabel != null) Text("DEMO", color = Color(0xFFFFCC44), fontSize = 11.sp,
             modifier = Modifier.padding(end = 6.dp))
-        if (!isMinimized || showTimerWhenMinimized || timerPaused) {
+        // "Timer when minimized" off means off: the timer used to come back whenever the rider stopped pedaling
+        // (and before the first pedal stroke), because a paused timer was always shown.
+        if (!isMinimized || showTimerWhenMinimized) {
             OverlayTimerField(
                 modifier = Modifier.width(80.dp).semantics {
                     if (timerPaused) stateDescription = "Paused"
