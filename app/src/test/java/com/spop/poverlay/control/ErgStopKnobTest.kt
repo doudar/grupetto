@@ -2,7 +2,6 @@ package com.spop.poverlay.control
 
 import org.junit.Assert.*
 import org.junit.Test
-import kotlin.math.exp
 import kotlin.math.pow
 
 class ErgStopKnobTest {
@@ -14,7 +13,7 @@ class ErgStopKnobTest {
         trace = { lines.add("[$now] $it") }
     }
     private fun watts(cadence: Float) =
-        (exp(1.491016 + 0.108267 * resistance - 0.000584 * resistance * resistance) * (cadence / 90.0).pow(1.7)).toFloat()
+        PowerModel.seedWatts(resistance) * (cadence / 90f).pow(1.7f)
     private fun ride(ms: Int, cadence: Float, power: Float? = null) {
         var t = 0
         while (t < ms) {

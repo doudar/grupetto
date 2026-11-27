@@ -2,7 +2,6 @@ package com.spop.poverlay.control
 
 import org.junit.Assert.*
 import org.junit.Test
-import kotlin.math.exp
 import kotlin.math.pow
 
 /** The ERG trace only reports: a traced ride makes exactly the same writes as an untraced one. */
@@ -17,7 +16,7 @@ class ErgTraceTest {
         }
         // Bike+-like plant, so feed-forward, ramps, arrivals and trims all happen.
         private fun watts(cadence: Float) =
-            (exp(1.491016 + 0.108267 * resistance - 0.000584 * resistance * resistance) * (cadence / 90.0).pow(1.7)).toFloat()
+            PowerModel.seedWatts(resistance) * (cadence / 90f).pow(1.7f)
         private fun command(vararg bytes: Int) = control.procedure("ble:tr", bytes.map { it.toByte() }.toByteArray())
         private fun ride(seconds: Int, cadence: Float) = repeat(seconds * 10) {
             now += 100

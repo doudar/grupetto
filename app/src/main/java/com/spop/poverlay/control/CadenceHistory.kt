@@ -10,6 +10,9 @@ import kotlin.math.abs
  * drop. Choosing the recovery level from the cadence at the moment of the drop picked a
  * level one too easy, and power undershot 15-30 W. The cadence the rider has held at
  * about the new target, or failing that their typical cadence, predicts it much better.
+ * Only the most recent of that riding counts: a rider who warmed up at 88 rpm and then
+ * rode every interval and recovery at 72 rpm had recoveries sized for 87 rpm for the next
+ * ten minutes, a level-5 drop that undershot 165 W by 38-46 W.
  * Climbs keep the current cadence: riders have usually already spun up by then.
  */
 class CadenceHistory {
@@ -30,11 +33,15 @@ class CadenceHistory {
         add(steady, Entry(time, cadence, watts), time)
     }
 
-    /** Cadence held at about [watts] (within 10%) in the last ten minutes, or null without enough of it. */
+    /**
+     * Cadence most recently held at about [watts] (within 10%): the median of the last
+     * [RECENT_STEADY_SAMPLES] such samples in the last ten minutes, or null without
+     * [MIN_STEADY_SAMPLES] of them.
+     */
     fun cadenceAt(watts: Int, now: Long): Float? {
         prune(now)
         val near = steady.filter { abs(it.watts - watts) <= watts * NEAR_FRACTION }.map { it.cadence }
-        return if (near.size >= MIN_STEADY_SAMPLES) median(near) else null
+        return if (near.size >= MIN_STEADY_SAMPLES) median(near.takeLast(RECENT_STEADY_SAMPLES)) else null
     }
 
     /** Median cadence over the last two minutes, or null without enough of it. */
@@ -71,6 +78,8 @@ class CadenceHistory {
         private const val TYPICAL_WINDOW_MS = 120_000L
         private const val NEAR_FRACTION = .1f
         private const val MIN_STEADY_SAMPLES = 15
+        // About the last 20 s settled at that power: the end of the most recent recovery.
+        private const val RECENT_STEADY_SAMPLES = 20
         private const val MIN_TYPICAL_SAMPLES = 50
     }
 }
