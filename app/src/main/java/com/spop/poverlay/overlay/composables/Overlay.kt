@@ -88,10 +88,22 @@ fun Overlay(
     val selectedMetric by sensorViewModel.selectedMetric.collectAsState(initial = defaultMetric)
     val currentGraph = remember(selectedMetric) { sensorViewModel.getGraphForMetric(selectedMetric) }
     // Card visibility is initialized from the detected device before the first frame.
-    val showPowerCard by sensorViewModel.showPowerCard.collectAsState()
-    val showCadenceCard by sensorViewModel.showCadenceCard.collectAsState()
-    val showResistanceCard by sensorViewModel.showResistanceCard.collectAsState()
-    val showInclineCard by sensorViewModel.showInclineCard.collectAsState()
+    // What the rider chose to show (settings › Show on the overlay), within what this machine has.
+    val overlayItems by timerViewModel.overlayItems.collectAsState()
+    val showPowerCard = sensorViewModel.showPowerCard.collectAsState().value &&
+        com.spop.poverlay.OverlayItem.Power in overlayItems
+    val showCadenceCard = sensorViewModel.showCadenceCard.collectAsState().value &&
+        com.spop.poverlay.OverlayItem.Cadence in overlayItems
+    val showResistanceCard = sensorViewModel.showResistanceCard.collectAsState().value &&
+        com.spop.poverlay.OverlayItem.Resistance in overlayItems
+    val showInclineCard = sensorViewModel.showInclineCard.collectAsState().value &&
+        com.spop.poverlay.OverlayItem.Incline in overlayItems
+    val showSpeed = com.spop.poverlay.OverlayItem.Speed in overlayItems
+    val showHeartRate = com.spop.poverlay.OverlayItem.HeartRate in overlayItems
+    val showCalories = com.spop.poverlay.OverlayItem.Calories in overlayItems
+    val showChart = com.spop.poverlay.OverlayItem.Chart in overlayItems
+    val flywheelLabel = sensorViewModel.flywheelLabel.collectAsState(initial = null).value
+        ?.takeIf { com.spop.poverlay.OverlayItem.FlywheelTemperature in overlayItems }
     val isTread by sensorViewModel.isTread.collectAsState()
     val rpm by sensorViewModel.rpmValue.collectAsState(initial = SensorValuePlaceholderText)
     val resistance by sensorViewModel.resistanceValue.collectAsState(initial = SensorValuePlaceholderText)
@@ -149,7 +161,7 @@ fun Overlay(
     }
 
     val minimized by sensorViewModel.isMinimized.collectAsState(initial = false)
-    val showHeartRateCard = connectedHeartRateDevice != null
+    val showHeartRateCard = connectedHeartRateDevice != null && showHeartRate
     val location by locationState
     LaunchedEffect(showHeartRateCard, selectedMetric) {
         if (!showHeartRateCard && selectedMetric == MetricType.HEART_RATE) {
@@ -228,6 +240,9 @@ fun Overlay(
             showCadenceField = showCadenceCard,
             showResistanceField = showResistanceCard,
             showInclineField = showInclineCard,
+            showSpeedField = showSpeed,
+            showHeartRateField = showHeartRate,
+            flywheelLabel = flywheelLabel,
             heartRateColor = heartRateColor,
             onTap = { timerViewModel.onTimerTap() },
             onLongPress = { timerViewModel.onTimerLongPress() },
@@ -339,7 +354,10 @@ fun Overlay(
                     onSpeedUnitClicked = { sensorViewModel.onClickedSpeedUnit() },
                     onChartClicked = { sensorViewModel.onOverlayPressed() },
                     shrinkChart = shrinkChart,
-                    onShrinkChartToggled = { shrinkChart = !shrinkChart }
+                    onShrinkChartToggled = { shrinkChart = !shrinkChart },
+                    showSpeedCard = showSpeed,
+                    showCaloriesCard = showCalories,
+                    showChart = showChart
                 )
                 }
             }

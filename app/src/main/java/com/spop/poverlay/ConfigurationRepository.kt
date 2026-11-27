@@ -36,6 +36,8 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner, 
     }
 
     private val mutableShowTimerWhenMinimized = MutableStateFlow(true)
+    /** What the overlay shows; see [OverlayItem]. */
+    val overlayItems = MutableStateFlow(OverlayItem.defaults)
     val showShifters = MutableStateFlow(true)
     val shifterInset = MutableStateFlow(0f)
     private val mutableBleTxEnabled = MutableStateFlow(true)
@@ -75,6 +77,11 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner, 
                 close()
             }
         })
+    }
+
+    fun setOverlayItem(item: OverlayItem, shown: Boolean) {
+        overlayItems.value = if (shown) overlayItems.value + item else overlayItems.value - item
+        sharedPreferences.edit { putBoolean(item.key, shown) }
     }
 
     fun setShowTimerWhenMinimized(isShown: Boolean) {
@@ -165,6 +172,8 @@ class ConfigurationRepository(context: Context, lifecycleOwner: LifecycleOwner, 
         mutableShowTimerWhenMinimized.value =
             sharedPreferences
                 .getBoolean(Preferences.ShowTimerWhenMinimized.key, true)
+        overlayItems.value = OverlayItem.values()
+            .filter { sharedPreferences.getBoolean(it.key, it.shownByDefault) }.toSet()
 
         mutableBleTxEnabled.value =
             sharedPreferences

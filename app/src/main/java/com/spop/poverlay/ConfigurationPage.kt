@@ -43,6 +43,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
     val release by viewModel.latestRelease
     val boot by viewModel.autoStartOnBoot.collectAsStateWithLifecycle()
     val timer by viewModel.showTimerWhenMinimized.collectAsStateWithLifecycle()
+    val overlayItems by viewModel.overlayItems.collectAsStateWithLifecycle()
     val ble by viewModel.bleTxEnabled.collectAsStateWithLifecycle()
     val dircon by viewModel.dirConEnabled.collectAsStateWithLifecycle()
     val dirconStatus by viewModel.dirConStatus.collectAsStateWithLifecycle()
@@ -124,6 +125,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                     SettingsTile(if (running) "Overlay · Running" else "Overlay · Ready", Modifier.weight(1f).fillMaxHeight(), Color(0xFF34D399)) {
                         SettingSwitch("Start on boot", boot, viewModel::onAutoStartOnBootClicked)
                         SettingSwitch("Timer when minimized", timer, viewModel::onShowTimerWhenMinimizedClicked)
+                        Spacer(Modifier.weight(1f))
+                        TileActionButton("Show on the overlay", { dialog = "overlay-items" })
                     }
                     SettingsTile("Broadcast connections", Modifier.weight(1f).fillMaxHeight(), Color(0xFF60A5FA)) {
                         ConnectionSummary("Bluetooth", if (viewModel.isPreview) "Preview" else if (ble) "On · Grupetto" else "Off", ble)
@@ -222,6 +225,14 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
             com.spop.poverlay.sensor.discovery.BikeDiscoveryPanel(discovery, connection, viewModel.isPreview,
                 viewModel::discoverBikeServices, viewModel::cancelBikeDiscovery, viewModel::useDiscoveredBikeService,
                 viewModel::restoreAutomaticBikeService, viewModel::requestBikeDiscoveryReport)
+        }
+        "overlay-items" -> SettingsDialog("Show on the overlay", { dialog = null }, scrollable = true) {
+            Text("Switch off anything you don't want to see. Applies to the overlay and its minimized bar.",
+                fontSize = 14.sp, color = Color(0xFF9EAEC0))
+            Spacer(Modifier.height(8.dp))
+            OverlayItem.forDevice(viewModel.isTread, viewModel.calibrationSupported).forEach { item ->
+                SettingSwitch(item.label, item in overlayItems) { viewModel.setOverlayItem(item, it) }
+            }
         }
         "sensors" -> SettingsDialog("External Sensors", { dialog = null }) {
             SensorSummary("Heart rate", hr?.let { it.name ?: it.address } ?: "Pair a heart-rate monitor",

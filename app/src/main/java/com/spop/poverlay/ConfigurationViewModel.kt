@@ -107,6 +107,8 @@ class ConfigurationViewModel(
 
     val showTimerWhenMinimized
         get() = configurationRepository.showTimerWhenMinimized
+    val overlayItems get() = configurationRepository.overlayItems
+    fun setOverlayItem(item: OverlayItem, shown: Boolean) = configurationRepository.setOverlayItem(item, shown)
 
     val showShifters get() = configurationRepository.showShifters
     val shifterInset get() = configurationRepository.shifterInset

@@ -51,6 +51,10 @@ fun OverlayMinimizedContent(
     showCadenceField: Boolean,
     showResistanceField: Boolean,
     showInclineField: Boolean,
+    showSpeedField: Boolean = true,
+    showHeartRateField: Boolean = true,
+    /** The flywheel temperature chip, when switched on in settings and the bike reports power. */
+    flywheelLabel: String? = null,
     heartRateColor: Color,
     contentAlpha: Float,
     timerLabel: String,
@@ -123,6 +127,18 @@ fun OverlayMinimizedContent(
             )
         }
 
+        if (flywheelLabel != null) {
+            // Estimate, read-only.
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                flywheelLabel,
+                color = Color(0xFFFFC078),
+                fontSize = 13.sp,
+                modifier = Modifier
+                    .background(Color(0x40845A2B), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            )
+        }
         Spacer(modifier = Modifier.width(6.dp))
         Icon(
             imageVector = Icons.Filled.Settings,
@@ -204,17 +220,19 @@ fun OverlayMinimizedContent(
                 if (showInclineField) {
                     inclineField()
                 }
-                speedField()
+                if (showSpeedField) speedField()
             } else {
-                speedField()
+                if (showSpeedField) speedField()
             }
-            Spacer(modifier = Modifier.width(4.dp))
-            OverlayTimerField(
-                modifier = Modifier.width(58.dp),
-                timerLabel = heartRateLabel,
-                iconDrawable = R.drawable.ic_hrm,
-                textColor = heartRateColor
-            )
+            if (showHeartRateField) {
+                Spacer(modifier = Modifier.width(4.dp))
+                OverlayTimerField(
+                    modifier = Modifier.width(58.dp),
+                    timerLabel = heartRateLabel,
+                    iconDrawable = R.drawable.ic_hrm,
+                    textColor = heartRateColor
+                )
+            }
         }
     }
 }

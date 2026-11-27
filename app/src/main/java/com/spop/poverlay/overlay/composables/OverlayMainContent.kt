@@ -69,6 +69,11 @@ fun OverlayMainContent(
         // Hoisted so the setting survives the content being dropped while minimized.
         shrinkChart: Boolean,
         onShrinkChartToggled: () -> Unit,
+        // Settings › Show on the overlay: off hides the card (power, cadence, resistance, incline and
+        // heart rate come in already combined with what the machine has).
+        showSpeedCard: Boolean = true,
+        showCaloriesCard: Boolean = true,
+        showChart: Boolean = true,
         powerComparison: String? = null,
         powerSourceLabel: String = if (powerComparison != null) "External" else "Power"
 ) {
@@ -257,8 +262,8 @@ fun OverlayMainContent(
             if (showInclineCard) {
                 inclineCard()
             }
-            chart()
-            speedCard()
+            if (showChart) chart()
+            if (showSpeedCard) speedCard()
             if (showHeartRateCard) {
                 heartRateCard()
             }
@@ -270,15 +275,15 @@ fun OverlayMainContent(
             if (showCadenceCard) {
                 cadenceCard()
             }
-            chart()
+            if (showChart) chart()
             if (showResistanceCard) {
                 resistanceCard()
             }
-            speedCard()
+            if (showSpeedCard) speedCard()
             if (showHeartRateCard) {
                 heartRateCard()
             }
-            caloriesCard()
+            if (showCaloriesCard) caloriesCard()
         }
     }
 }
