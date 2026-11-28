@@ -22,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import timber.log.Timber
 
@@ -107,6 +108,8 @@ class ConfigurationViewModel(
 
     val showTimerWhenMinimized
         get() = configurationRepository.showTimerWhenMinimized
+    val overlayItems get() = configurationRepository.overlayItems
+    fun setOverlayItem(item: OverlayItem, shown: Boolean) = configurationRepository.setOverlayItem(item, shown)
 
     val showShifters get() = configurationRepository.showShifters
     val shifterInset get() = configurationRepository.shifterInset
@@ -128,6 +131,8 @@ class ConfigurationViewModel(
 
     private val bleServer = (application as GrupettoApplication).bleServer
     val dirConStatus get() = bleServer.dirConStatus
+    /** Some training app is connected (Bluetooth or DirCon), in control of the bike or not. */
+    val appConnected = bleServer.connectedAppCount.map { it > 0 }
     private val antPlusServer = (application as GrupettoApplication).antPlusServer
     private val bikeControl = (application as GrupettoApplication).sensorInterface.bikeControl
     private val powerMeters = (application as GrupettoApplication).powerMeterManager
@@ -460,6 +465,17 @@ class ConfigurationViewModel(
             getApplication(),
             Intent(getApplication(), OverlayService::class.java)
         )
+        finishActivity.value = Unit
+    }
+
+    /** Start the overlay and stay on settings. */
+    fun startOverlay() {
+        Timber.i("Starting service")
+        ContextCompat.startForegroundService(getApplication(), Intent(getApplication(), OverlayService::class.java))
+    }
+
+    /** Hide settings and ride: the overlay keeps running. */
+    fun onRideClicked() {
         finishActivity.value = Unit
     }
 

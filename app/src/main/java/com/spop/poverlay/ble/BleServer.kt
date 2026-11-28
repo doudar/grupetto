@@ -117,6 +117,17 @@ class BleServer(
     }
     private val dirConServer: DirConServer by dirConDelegate
     val dirConStatus get() = dirConServer.status
+    private val mutableBleClientCount = kotlinx.coroutines.flow.MutableStateFlow(0)
+    /** Apps connected over Bluetooth or the network (DirCon), whether or not they control the bike. */
+    val connectedAppCount: kotlinx.coroutines.flow.Flow<Int>
+        get() = combine(mutableBleClientCount, dirConServer.clientCount) { ble, net -> ble + net }
+    // Counted by telemetry subscriptions, not GATT connections: Android also reports Grupetto's own
+    // client links (heart-rate strap, power meter) to the server callback.
+    private fun publishBleClientCount() {
+        mutableBleClientCount.value = synchronized(notificationSubscriptions) {
+            notificationSubscriptions.values.count { uuids -> uuids.any { it in telemetryUuids } }
+        }
+    }
     private var dirConTransportEnabled = true
     private var isDirConOnlyStarted = false
     private val servicesToRegister = LinkedList<BaseBleService>()
@@ -572,6 +583,7 @@ class BleServer(
         synchronized(notificationSubscriptions) {
             notificationSubscriptions.clear()
         }
+        publishBleClientCount()
     }
 
     private fun closeGattServer(server: BluetoothGattServer?) {
@@ -787,6 +799,7 @@ class BleServer(
     private fun disconnectNotificationClient(device: BluetoothDevice) {
         pendingNotifications.removeAll { it.device == device }
         notificationSubscriptions.remove(device.address)
+        publishBleClientCount()
         connectedDevices.remove(device)
         registeredServices.forEach { it.onDisconnected(device) }
         try {
@@ -804,6 +817,7 @@ class BleServer(
         notificationInFlight = null
         pendingNotifications.clear()
         notificationSubscriptions.clear()
+        publishBleClientCount()
         connectedDevices.toList().forEach { device ->
             registeredServices.forEach { it.onDisconnected(device) }
         }
@@ -1173,6 +1187,7 @@ class BleServer(
             synchronized(notificationSubscriptions) {
                 notificationSubscriptions.remove(device?.address)
             }
+            publishBleClientCount()
             device?.let {
                 connectedDevices.remove(device)
                 pendingNotifications.removeAll { it.device == device }
@@ -1303,6 +1318,7 @@ class BleServer(
                     logBleDebug("BLE CCCD disabled ch=${descriptor.characteristic.uuid} dev=$deviceAddress")
                 }
             }
+            publishBleClientCount()
         }
 
         findServiceForCharacteristic(descriptor.characteristic.service.uuid)

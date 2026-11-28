@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -51,6 +52,10 @@ fun OverlayMinimizedContent(
     showCadenceField: Boolean,
     showResistanceField: Boolean,
     showInclineField: Boolean,
+    showSpeedField: Boolean = true,
+    showHeartRateField: Boolean = true,
+    /** The flywheel temperature chip's text, when switched on in settings (null text: the bike isn't reporting power). */
+    flywheelLabel: kotlinx.coroutines.flow.Flow<String?>? = null,
     heartRateColor: Color,
     contentAlpha: Float,
     timerLabel: String,
@@ -111,7 +116,9 @@ fun OverlayMinimizedContent(
     ) {
         if (emulationLabel != null) Text("DEMO", color = Color(0xFFFFCC44), fontSize = 11.sp,
             modifier = Modifier.padding(end = 6.dp))
-        if (!isMinimized || showTimerWhenMinimized || timerPaused) {
+        // "Timer when minimized" off means off: the timer used to come back whenever the rider stopped pedaling
+        // (and before the first pedal stroke), because a paused timer was always shown.
+        if (!isMinimized || showTimerWhenMinimized) {
             OverlayTimerField(
                 modifier = Modifier.width(80.dp).semantics {
                     if (timerPaused) stateDescription = "Paused"
@@ -121,6 +128,7 @@ fun OverlayMinimizedContent(
             )
         }
 
+        if (flywheelLabel != null) FlywheelChip(flywheelLabel)
         Spacer(modifier = Modifier.width(6.dp))
         Icon(
             imageVector = Icons.Filled.Settings,
@@ -202,17 +210,19 @@ fun OverlayMinimizedContent(
                 if (showInclineField) {
                     inclineField()
                 }
-                speedField()
+                if (showSpeedField) speedField()
             } else {
-                speedField()
+                if (showSpeedField) speedField()
             }
-            Spacer(modifier = Modifier.width(4.dp))
-            OverlayTimerField(
-                modifier = Modifier.width(58.dp),
-                timerLabel = heartRateLabel,
-                iconDrawable = R.drawable.ic_hrm,
-                textColor = heartRateColor
-            )
+            if (showHeartRateField) {
+                Spacer(modifier = Modifier.width(4.dp))
+                OverlayTimerField(
+                    modifier = Modifier.width(58.dp),
+                    timerLabel = heartRateLabel,
+                    iconDrawable = R.drawable.ic_hrm,
+                    textColor = heartRateColor
+                )
+            }
         }
     }
 }
@@ -254,4 +264,19 @@ private fun OverlayTimerField(
     if (headerLabel != null) Text(headerLabel, color = Color.White, fontSize = 11.sp, maxLines = 1)
     if (secondaryLabel != null) Text(secondaryLabel, color = Color.LightGray, fontSize = 11.sp, maxLines = 1)
     }
+}
+
+/** Estimate, read-only. Collects its own flow so a temperature change redraws the chip alone. */
+@Composable
+private fun FlywheelChip(label: kotlinx.coroutines.flow.Flow<String?>) {
+    val text = label.collectAsState(initial = null).value ?: return
+    Spacer(modifier = Modifier.width(6.dp))
+    Text(
+        text,
+        color = Color(0xFFFFC078),
+        fontSize = 13.sp,
+        modifier = Modifier
+            .background(Color(0x40845A2B), RoundedCornerShape(6.dp))
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+    )
 }

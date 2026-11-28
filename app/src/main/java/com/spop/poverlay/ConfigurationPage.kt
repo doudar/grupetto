@@ -10,6 +10,10 @@ import android.os.Build
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,9 +47,11 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
     val release by viewModel.latestRelease
     val boot by viewModel.autoStartOnBoot.collectAsStateWithLifecycle()
     val timer by viewModel.showTimerWhenMinimized.collectAsStateWithLifecycle()
+    val overlayItems by viewModel.overlayItems.collectAsStateWithLifecycle()
     val ble by viewModel.bleTxEnabled.collectAsStateWithLifecycle()
     val dircon by viewModel.dirConEnabled.collectAsStateWithLifecycle()
     val dirconStatus by viewModel.dirConStatus.collectAsStateWithLifecycle()
+    val appConnected by viewModel.appConnected.collectAsStateWithLifecycle(initialValue = false)
     val ant by viewModel.antPlusTxEnabled.collectAsStateWithLifecycle()
     val running by viewModel.isOverlayRunning.collectAsStateWithLifecycle()
     val background by viewModel.backgroundLocationGranted.collectAsStateWithLifecycle()
@@ -70,6 +76,9 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
     val externalWatts by viewModel.powerMeterReading.collectAsStateWithLifecycle()
     val grupettoTable by viewModel.grupettoCalibrationState.collectAsStateWithLifecycle()
     var dialog by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    // Basic settings by default; Advanced holds the rest, one section per page.
+    var advanced by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var section by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("trainer") }
     androidx.compose.runtime.LaunchedEffect(dialog) {
         if (dialog == "grupetto-calibration") viewModel.showCalibrationTable()
     }
@@ -102,10 +111,20 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         Text(viewModel.emulatedModel?.let { "${it.label} emulation · Simulated data · Radios off" }
                             ?: "Your ride, connected", color = Color(0xFF9EAEC0), fontSize = 14.sp)
                     }
-                    Button(viewModel::onStartServiceClicked, Modifier.heightIn(min = 48.dp)) {
-                        Text(if (running) "Restart overlay" else "Start overlay")
+                    // Start the overlay and stay here (more settings to change); Ride hides this screen.
+                    if (!running) {
+                        Button(viewModel::startOverlay, Modifier.heightIn(min = 48.dp)) { Text("Start overlay") }
+                        // Out of settings without quitting anything.
+                        OutlinedButton(viewModel::onRideClicked, Modifier.heightIn(min = 48.dp).padding(start = 12.dp)) { Text("Close") }
+                    } else {
+                        if (advanced) OutlinedButton(viewModel::onStartServiceClicked, Modifier.heightIn(min = 48.dp).padding(end = 12.dp)) {
+                            Text("Restart overlay")
+                        }
+                        Button(viewModel::onRideClicked, Modifier.heightIn(min = 48.dp)) { Text("Ride (hide settings)") }
                     }
-                    TextButton(viewModel::onQuitClicked, Modifier.padding(start = 12.dp)) { Text("Quit") }
+                    if (advanced) TextButton({ advanced = false }, Modifier.padding(start = 12.dp)) { Text("Basic settings") }
+                    // Quitting drops the overlay, ERG and every app's connection: name it fully and ask first.
+                    TextButton({ dialog = "quit" }, Modifier.padding(start = 12.dp)) { Text("Quit Grupetto") }
                 }
                 Row(Modifier.fillMaxWidth().height(58.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -120,81 +139,116 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                     }
                     LiveMetric("HEART RATE", bpm?.toString() ?: "—", "bpm", Color(0xFFFB7185), Modifier.weight(1f))
                 }
-                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsTile(if (running) "Overlay · Running" else "Overlay · Ready", Modifier.weight(1f).fillMaxHeight(), Color(0xFF34D399)) {
-                        SettingSwitch("Start on boot", boot, viewModel::onAutoStartOnBootClicked)
-                        SettingSwitch("Timer when minimized", timer, viewModel::onShowTimerWhenMinimizedClicked)
-                    }
-                    SettingsTile("Broadcast connections", Modifier.weight(1f).fillMaxHeight(), Color(0xFF60A5FA)) {
-                        ConnectionSummary("Bluetooth", if (viewModel.isPreview) "Preview" else if (ble) "On · Grupetto" else "Off", ble)
-                        ConnectionSummary("Network", when {
-                            viewModel.isPreview -> "Preview"
-                            !dircon -> "Off"
-                            dirconStatus == com.spop.poverlay.dircon.DirConStatus.Listening -> "On · DirCon"
-                            dirconStatus == com.spop.poverlay.dircon.DirConStatus.Starting -> "Starting…"
-                            dirconStatus == com.spop.poverlay.dircon.DirConStatus.Failed -> "Unavailable · check connection"
-                            else -> "Not running"
-                        }, dircon && dirconStatus == com.spop.poverlay.dircon.DirConStatus.Listening)
-                        if (viewModel.antPlusSupported) ConnectionSummary("ANT+", if (viewModel.isPreview) "Preview" else if (ant) "On · IDs 1 / 2 / 3" else "Off", ant)
-                        Spacer(Modifier.weight(1f))
-                        TileActionButton("Manage connections", { dialog = "connections" })
-                    }
-                }
-                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SettingsTile("External Sensors", Modifier.weight(1f).fillMaxHeight(), Color(0xFFFB7185)) {
-                        SensorSummary("Heart rate", hr?.let { it.name ?: it.address } ?: "Not connected",
-                            bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185), heartStatus)
-                        CalibrationSensorSummary(
-                            grupettoTable.active, grupettoTable.recording, meter?.let { it.name ?: it.address },
-                            externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", powerStatus)
-                        if (viewModel.calibrationSupported) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            OutlinedButton({ viewModel.showCalibrationTable(); dialog = "grupetto-calibration" }) { Text("Calibration") }
-                        }
-                        Spacer(Modifier.weight(1f))
-                        TileActionButton("Pair & manage sensors", { dialog = "sensors" })
-                    }
-                    if (bike.connected) {
-                        SettingsTile("Trainer control", Modifier.weight(1f).fillMaxHeight(), Color(0xFFFBBF24)) {
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text(when (bike.mode) {
-                                    com.spop.poverlay.control.ControlMode.Erg -> "ERG · ${bike.targetWatts} W"
-                                    com.spop.poverlay.control.ControlMode.Simulation -> "Sim · ${"%.1f".format(java.util.Locale.US, bike.targetIncline)}%"
-                                    else -> "Manual · ${bike.targetResistance}"
-                                }, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6EE7B7))
-                                Spacer(Modifier.weight(1f))
-                                Text(if (externalWatts != null) "EXTERNAL POWER" else "BUILT-IN POWER", fontSize = 10.sp, color = Color(0xFF9EAEC0))
-                            }
-                            Text(when (bike.mode) {
-                                com.spop.poverlay.control.ControlMode.Erg -> "Shift ${bike.wattsPerShift} W   ·   Gain ${"%.3f".format(java.util.Locale.US, bike.gain)}   ·   Ramp ${bike.rampRate}/s"
-                                com.spop.poverlay.control.ControlMode.Simulation -> "Shift ${bike.shiftSize} pts   ·   ${"%.1f".format(java.util.Locale.US, bike.inclineSensitivity)} pts / 1% incline"
-                                else -> "Shift ${bike.shiftSize} pts"
-                            },
-                                fontSize = 13.sp, lineHeight = 17.sp, color = Color(0xFF9EAEC0))
-                            Text(bike.message, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Spacer(Modifier.weight(1f))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                TileActionButton("Modes & tuning", { dialog = "bike" }, Modifier.weight(1f))
-                                OutlinedButton(viewModel::stopBikeControl, modifier = Modifier.height(48.dp),
+                if (advanced) {
+                    // One page per section, chosen on the left; everything Basic already has stays on Basic.
+                    val sections = listOfNotNull(
+                        ("trainer" to "Trainer tuning").takeIf { bike.connected },
+                        "power" to "Power & calibration",
+                        "heart" to "Heart rate",
+                        "connections" to "Connections",
+                        ("shifters" to "Shift buttons").takeIf { bike.connected },
+                        "diagnostics" to "Diagnostics",
+                        "about" to "About & updates",
+                    )
+                    val current = sections.firstOrNull { it.first == section } ?: sections.first()
+                    Row(Modifier.weight(2f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Column(Modifier.width(220.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            sections.forEach { (key, label) ->
+                                val selected = key == current.first
+                                TextButton({ section = key }, Modifier.fillMaxWidth().heightIn(min = 48.dp),
                                     shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF52728F)),
-                                    colors = ButtonDefaults.outlinedButtonColors(backgroundColor = Color.Transparent, contentColor = Color(0xFFE6F3FF))) {
-                                    Text("Manual", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                    colors = ButtonDefaults.textButtonColors(
+                                        backgroundColor = if (selected) Color(0xFF223142) else Color.Transparent,
+                                        contentColor = if (selected) Color(0xFFE6EDF5) else Color(0xFFB4C2D1))) {
+                                    Text(label, Modifier.fillMaxWidth(), fontSize = 15.sp,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
                                 }
                             }
                         }
-                    } else {
-                        SettingsTile("Device & app", Modifier.weight(1f).fillMaxHeight(), Color(0xFFA78BFA)) {
-                            Text(if (viewModel.isTread) "Tread · Speed & incline" else "Bike · Live telemetry", fontSize = 18.sp, lineHeight = 22.sp)
-                            Text("Model ${Build.MODEL}   ·   Android ${Build.VERSION.RELEASE}", fontSize = 13.sp, lineHeight = 17.sp, color = Color(0xFF9EAEC0))
-                            Text(when (displayedPower.source) {
-                                DisplayPowerSource.Corrected -> "Displayed power: Grupetto calibration"
-                                DisplayPowerSource.Pedals -> "Displayed power: external meter"
-                                DisplayPowerSource.Bike -> "Displayed power: built-in sensors"
-                            }, fontSize = 13.sp, lineHeight = 17.sp)
-                            Spacer(Modifier.weight(1f))
-                            TileActionButton("Version & updates", { dialog = "about" })
+                        SettingsTile(current.second, Modifier.weight(1f).fillMaxHeight(), Color(0xFFFBBF24)) {
+                            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                when (current.first) {
+                                    "trainer" -> {
+                                        Text("A connected training app sets the mode by itself. Pick one here only to ride without an app; the sliders change how it feels.",
+                                            fontSize = 13.sp, color = Color(0xFF9EAEC0))
+                                        TrainerControls(bike, viewModel::startErg, viewModel::startSimulation,
+                                            viewModel::stopBikeControl, viewModel::setBikeResistance, viewModel::setBikeTuning)
+                                    }
+                                    "power" -> {
+                                        CalibrationSensorSummary(
+                                            grupettoTable.active, grupettoTable.recording, meter?.let { it.name ?: it.address },
+                                            externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", powerStatus)
+                                        Text(when (displayedPower.source) {
+                                            DisplayPowerSource.Corrected -> "Displayed power: Grupetto calibration"
+                                            DisplayPowerSource.Pedals -> "Displayed power: external meter"
+                                            DisplayPowerSource.Bike -> "Displayed power: built-in sensors"
+                                        }, fontSize = 13.sp, color = Color(0xFF9EAEC0))
+                                        TileActionButton("Pair & manage power meters", { dialog = "power" })
+                                        if (viewModel.calibrationSupported) {
+                                            TileActionButton("Calibrate using power pedals", { viewModel.showCalibrationTable(); dialog = "grupetto-calibration" })
+                                        }
+                                        Text("Broadcast power matches the large overlay number. Pedals supply ERG feedback. Changing or losing the ERG power source stops ERG until restarted.",
+                                            fontSize = 13.sp, color = Color(0xFF9EAEC0))
+                                    }
+                                    "heart" -> {
+                                        SensorSummary("Heart rate", hr?.let { it.name ?: it.address } ?: "Not connected",
+                                            bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185), heartStatus)
+                                        TileActionButton("Heart-rate monitors & zones", { dialog = "heart" })
+                                    }
+                                    "connections" -> {
+                                        SettingSwitch("Bluetooth FTMS", ble, viewModel::onBleTxEnabledClicked)
+                                        ConnectionSummary("Bluetooth", if (viewModel.isPreview) "Preview" else if (ble) "On · Grupetto" else "Off", ble)
+                                        SettingSwitch("Network / DirCon", dircon, viewModel::onDirConEnabledClicked)
+                                        ConnectionSummary("Network", when {
+                                            viewModel.isPreview -> "Preview"
+                                            !dircon -> "Off"
+                                            dirconStatus == com.spop.poverlay.dircon.DirConStatus.Listening -> "On · DirCon"
+                                            dirconStatus == com.spop.poverlay.dircon.DirConStatus.Starting -> "Starting…"
+                                            dirconStatus == com.spop.poverlay.dircon.DirConStatus.Failed -> "Unavailable · check connection"
+                                            else -> "Not running"
+                                        }, dircon && dirconStatus == com.spop.poverlay.dircon.DirConStatus.Listening)
+                                        Text("Bluetooth name: Grupetto", fontSize = 14.sp, color = Color(0xFF9EAEC0))
+                                        if (boot && !background) Text("Allow location all the time in Android settings for sensor reconnection after boot.",
+                                            fontSize = 12.sp, color = Color(0xFFFBBF24))
+                                        if (viewModel.antPlusSupported) {
+                                            Divider(Modifier.padding(vertical = 8.dp))
+                                            SettingSwitch("ANT+ broadcast", ant, viewModel::onAntPlusTxEnabledClicked)
+                                            Text("ANT+ sensor IDs: power 1 · speed/cadence 2 · HR 3", fontSize = 14.sp)
+                                        }
+                                    }
+                                    "shifters" -> ShifterSettings(showShifters, shifterInset, viewModel::setShowShifters, viewModel::setShifterInset,
+                                        onPreview = { previewShifters = it })
+                                    "diagnostics" -> {
+                                        Text((if (viewModel.isTread) "Tread" else "Bike") + "   ·   Model ${Build.MODEL}   ·   Android ${Build.VERSION.RELEASE}",
+                                            fontSize = 13.sp, color = Color(0xFF9EAEC0))
+                                        val discovery by viewModel.discoveryState.collectAsStateWithLifecycle()
+                                        val connection by viewModel.discoveryConnection.collectAsStateWithLifecycle()
+                                        com.spop.poverlay.sensor.discovery.BikeDiscoveryPanel(discovery, connection, viewModel.isPreview,
+                                            viewModel::discoverBikeServices, viewModel::cancelBikeDiscovery, viewModel::useDiscoveredBikeService,
+                                            viewModel::restoreAutomaticBikeService, viewModel::requestBikeDiscoveryReport)
+                                    }
+                                    else -> {
+                                        Text("Version ${BuildConfig.VERSION_NAME} · Android ${Build.VERSION.RELEASE}")
+                                        Text("Device: ${Build.MODEL}", fontSize = 14.sp)
+                                        val latest = release
+                                        Text(latest?.let { if (it.isCurrentlyInstalled) "You're up to date" else "Available: ${it.friendlyName}" }
+                                            ?: "Couldn't check for updates")
+                                        if (latest != null) TextButton({ viewModel.onClickedRelease(latest) }) { Text("View release") }
+                                        Text("Bike+ ERG work based on dwj300's contribution (PR #50).", fontSize = 14.sp)
+                                    }
+                                }
+                            }
                         }
                     }
+                } else {
+                    BasicSettings(Modifier.weight(2f), viewModel.isTread, bike, appConnected, running, ble, dircon, timer, boot, showShifters,
+                        overlayItems, OverlayItem.forDevice(viewModel.isTread, viewModel.calibrationSupported),
+                        hr?.let { it.name ?: it.address }, bpm, meter?.let { it.name ?: it.address }, externalWatts?.watts,
+                        watts.isFinite() || cadence.isFinite(),
+                        onOverlayItem = viewModel::setOverlayItem, onTimer = viewModel::onShowTimerWhenMinimizedClicked,
+                        onBoot = viewModel::onAutoStartOnBootClicked, onBle = viewModel::onBleTxEnabledClicked,
+                        onDirCon = viewModel::onDirConEnabledClicked, onShifters = viewModel::setShowShifters,
+                        onDialog = { dialog = it }, onAdvanced = { advanced = true }, onStartOverlay = viewModel::startOverlay)
                 }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Grupetto ${BuildConfig.VERSION_NAME}", fontSize = 12.sp, color = Color(0xFF9EAEC0),
@@ -204,9 +258,6 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                             lastDeveloperTap = now
                             if (developerTaps >= 5) { developerTaps = 0; dialog = "developer" }
                         }.padding(vertical = 8.dp))
-                    TextButton({ dialog = "discovery" }, Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 12.dp)) {
-                        Text("Bike service discovery", fontSize = 12.sp)
-                    }
                     TextButton({ dialog = "about" }, Modifier.height(32.dp), contentPadding = PaddingValues(0.dp)) {
                         Text(if (release?.isCurrentlyInstalled == false) "New Version Available" else "About & updates", fontSize = 12.sp)
                     }
@@ -216,28 +267,6 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
         }
     }
     when (dialog) {
-        "discovery" -> SettingsDialog("Bike service discovery", { dialog = null }) {
-            val discovery by viewModel.discoveryState.collectAsStateWithLifecycle()
-            val connection by viewModel.discoveryConnection.collectAsStateWithLifecycle()
-            com.spop.poverlay.sensor.discovery.BikeDiscoveryPanel(discovery, connection, viewModel.isPreview,
-                viewModel::discoverBikeServices, viewModel::cancelBikeDiscovery, viewModel::useDiscoveredBikeService,
-                viewModel::restoreAutomaticBikeService, viewModel::requestBikeDiscoveryReport)
-        }
-        "sensors" -> SettingsDialog("External Sensors", { dialog = null }) {
-            SensorSummary("Heart rate", hr?.let { it.name ?: it.address } ?: "Pair a heart-rate monitor",
-                bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185), heartStatus)
-            OutlinedButton({ dialog = "heart" }, Modifier.fillMaxWidth()) { Text("Heart-rate monitors & zones") }
-            Divider(Modifier.padding(vertical = 12.dp))
-            CalibrationSensorSummary(
-                grupettoTable.active, grupettoTable.recording, meter?.let { it.name ?: it.address },
-                externalWatts?.let { "${it.watts.coerceAtLeast(0)} W" } ?: "—", powerStatus)
-            OutlinedButton({ dialog = "power" }, Modifier.fillMaxWidth()) { Text("Pair & manage power meters") }
-            if (viewModel.calibrationSupported) {
-                OutlinedButton({ dialog = "grupetto-calibration" }, Modifier.fillMaxWidth()) { Text("Calibrate using power pedals") }
-            }
-            Text("Broadcast power matches the large overlay number. Pedals supply ERG feedback. Changing or losing the ERG power source stops ERG until restarted.",
-                fontSize = 13.sp, color = Color(0xFF9EAEC0))
-        }
         "power" -> PowerMeterDialog(viewModel) { dialog = null }
         "grupetto-calibration" -> SettingsDialog("Calibrate using power pedals", { dialog = null }, compact = true) {
             val calibration by viewModel.calibrationState.collectAsStateWithLifecycle()
@@ -309,25 +338,18 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                 }
             }
         }
-        "connections" -> SettingsDialog("Connections", { dialog = null }) {
-            SettingSwitch("Bluetooth FTMS", ble, viewModel::onBleTxEnabledClicked)
-            SettingSwitch("Network / DirCon", dircon, viewModel::onDirConEnabledClicked)
-            Text("Bluetooth name: Grupetto", fontSize = 14.sp, color = Color(0xFF9EAEC0))
-            if (boot && !background) Text("Allow location all the time in Android settings for sensor reconnection after boot.",
-                fontSize = 12.sp, color = Color(0xFFFBBF24))
-            if (viewModel.antPlusSupported) {
-                Divider(Modifier.padding(vertical = 12.dp))
-                SettingSwitch("ANT+ broadcast", ant, viewModel::onAntPlusTxEnabledClicked)
-                Text("ANT+ sensor IDs: power 1 · speed/cadence 2 · HR 3", fontSize = 14.sp)
-            }
-        }
-        "bike" -> if (bike.connected) SettingsDialog("Bike+ / CrossTrainer", { dialog = null }) {
-            var tab by remember { mutableStateOf(0) }
-            GrupettoTabs(tab, listOf("Trainer", "Shifters"), { tab = it })
-            Spacer(Modifier.height(8.dp))
-            if (tab == 0) TrainerControls(bike, viewModel::startErg, viewModel::startSimulation,
-                viewModel::stopBikeControl, viewModel::setBikeResistance, viewModel::setBikeTuning)
-            else ShifterSettings(showShifters, shifterInset, viewModel::setShowShifters, viewModel::setShifterInset,
+        "quit" -> AlertDialog(
+            onDismissRequest = { dialog = null },
+            title = { Text("Quit Grupetto?") },
+            text = {
+                Text("The overlay closes, ERG stops, and " +
+                    (bike.externalControl?.let { "the app connected over $it loses the bike." } ?: "training apps lose the bike."))
+            },
+            confirmButton = { TextButton({ dialog = null; viewModel.onQuitClicked() }) { Text("Quit") } },
+            dismissButton = { TextButton({ dialog = null }) { Text("Cancel") } }
+        )
+        "shifters" -> SettingsDialog("Shift buttons", { dialog = null }) {
+            ShifterSettings(showShifters, shifterInset, viewModel::setShowShifters, viewModel::setShifterInset,
                 onPreview = { previewShifters = it })
         }
         "heart" -> HeartRateManagerDialog(hr, discovered, saved, scanning, match,
@@ -345,7 +367,8 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
             Text("Bike+ ERG work based on dwj300's contribution (PR #50).", fontSize = 14.sp)
         }
     }
-    ShifterPositionPreview(dialog == "bike" && bike.connected && previewShifters, shifterInset)
+    ShifterPositionPreview(bike.connected && previewShifters &&
+        (dialog == "shifters" || (advanced && section == "shifters" && dialog == null)), shifterInset)
 }
 
 @Composable
@@ -577,5 +600,121 @@ private fun HeartRateManagerDialog(
         }
         Divider()
         SettingSwitch("Reconnect by name", matchByName, onSetMatchByName)
+    }
+}
+
+/**
+ * The everyday settings: is everything working, what the overlay shows, how apps connect, and the
+ * sensors. Everything else (tuning, calibration, ANT+, zones, diagnostics) is one tap away in Advanced.
+ */
+@Composable
+private fun BasicSettings(
+    modifier: Modifier, isTread: Boolean, bike: com.spop.poverlay.control.ControlState, appConnected: Boolean, overlayRunning: Boolean,
+    ble: Boolean, dircon: Boolean, timer: Boolean, boot: Boolean, shifters: Boolean,
+    overlayItems: Set<OverlayItem>, itemsForDevice: List<OverlayItem>,
+    heartRateMonitor: String?, bpm: Int?, powerMeter: String?, meterWatts: Int?, bikeReporting: Boolean,
+    onOverlayItem: (OverlayItem, Boolean) -> Unit, onTimer: (Boolean) -> Unit, onBoot: (Boolean) -> Unit,
+    onBle: (Boolean) -> Unit, onDirCon: (Boolean) -> Unit, onShifters: (Boolean) -> Unit,
+    onDialog: (String) -> Unit, onAdvanced: () -> Unit, onStartOverlay: () -> Unit,
+) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            val machine = if (isTread) "Tread" else "Bike"
+            StatusCheck(Modifier.weight(1f), bikeReporting,
+                if (bikeReporting) "$machine found" else "Looking for the ${machine.lowercase()}",
+                when {
+                    !bikeReporting -> "Pedal or walk a few seconds"
+                    bike.connected -> "ERG ready"
+                    isTread -> "Reading speed and incline"
+                    else -> "Reading power and cadence"
+                })
+            // Off: the check itself starts it (people tap the card, not the button in the corner).
+            StatusCheck(Modifier.weight(1f), overlayRunning,
+                if (overlayRunning) "Overlay running" else "Overlay off",
+                if (overlayRunning) "Floating over the Peloton screen" else "Tap here to start it",
+                onClick = if (overlayRunning) null else onStartOverlay)
+            // Connected = an app is linked over Bluetooth or DirCon; in control = it has sent ERG or resistance.
+            val app = bike.externalControl
+            val connected = appConnected || app != null
+            StatusCheck(Modifier.weight(1f), connected,
+                if (connected) "App connected" else "No app connected",
+                when {
+                    app != null -> "Over $app, in control"
+                    connected -> "Receiving the ${if (isTread) "Tread" else "bike"}'s numbers"
+                    else -> "In your app, pick the trainer called Grupetto"
+                })
+        }
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            SettingsTile("Show on the overlay", Modifier.weight(1f).fillMaxHeight(), Color(0xFF34D399)) {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Tap to show or hide.", fontSize = 13.sp, color = Color(0xFF9EAEC0))
+                    val toggles: List<Triple<String, Boolean, (Boolean) -> Unit>> =
+                        itemsForDevice.map { item -> Triple(item.label, item in overlayItems, { on: Boolean -> onOverlayItem(item, on) }) } +
+                            Triple("Timer when minimized", timer, onTimer)
+                    toggles.chunked(2).forEach { pair ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            pair.forEach { (label, on, change) -> OverlayToggle(label, on, Modifier.weight(1f)) { change(!on) } }
+                            if (pair.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                    SettingSwitch("Start with the tablet", boot, onBoot)
+                }
+            }
+            SettingsTile("Training apps", Modifier.weight(1f).fillMaxHeight(), Color(0xFF60A5FA)) {
+                SettingSwitch("Bluetooth", ble, onBle)
+                SettingSwitch("Network (DirCon)", dircon, onDirCon)
+                Text("Leave both on. In Zwift, Gregario or any other app, pick the trainer called Grupetto: the app sets ERG or resistance.",
+                    fontSize = 13.sp, lineHeight = 18.sp, color = Color(0xFF9EAEC0))
+                if (bike.connected) {
+                    Spacer(Modifier.weight(1f))
+                    SettingSwitch("Shift buttons on screen", shifters, onShifters)
+                    if (shifters) TileActionButton("Shift button position", { onDialog("shifters") })
+                }
+            }
+            SettingsTile("Sensors", Modifier.weight(1f).fillMaxHeight(), Color(0xFFFB7185)) {
+                SensorSummary("Heart rate", heartRateMonitor ?: "Not paired", bpm?.let { "$it bpm" } ?: "—", Color(0xFFFB7185))
+                TileActionButton(if (heartRateMonitor == null) "Pair a heart-rate monitor" else "Heart-rate monitors", { onDialog("heart") })
+                Spacer(Modifier.height(4.dp))
+                SensorSummary("Power meter (optional)", powerMeter ?: "None · using the bike's power",
+                    meterWatts?.let { "${it.coerceAtLeast(0)} W" } ?: "—", Color(0xFFFBBF24))
+                TileActionButton(if (powerMeter == null) "Pair a power meter" else "Power meters", { onDialog("power") })
+                Spacer(Modifier.weight(1f))
+                TileActionButton("Advanced settings", onAdvanced)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusCheck(modifier: Modifier, ok: Boolean, title: String, detail: String, onClick: (() -> Unit)? = null) {
+    val accent = if (ok) Color(0xFF34D399) else Color(0xFFFBBF24)
+    Surface(if (onClick != null) modifier.clickable(onClick = onClick) else modifier, color = if (ok) Color(0xFF12301F) else Color(0xFF2A2412),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = .4f))) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(if (ok) Icons.Filled.CheckCircle else Icons.Filled.Info,
+                contentDescription = null, tint = accent)
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(title, fontSize = 15.sp, lineHeight = 19.sp, fontWeight = FontWeight.SemiBold)
+                Text(detail, fontSize = 13.sp, lineHeight = 17.sp, color = Color(0xFFB4C2D1), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/** One tap-to-toggle tile: shown (green, ticked) or hidden. */
+@Composable
+private fun OverlayToggle(label: String, on: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    Surface(modifier.heightIn(min = 48.dp).clickable(onClick = onClick),
+        color = if (on) Color(0xFF12301F) else Color(0xFF111A23),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (on) Color(0xFF2F7A55) else Color(0xFF2A3A4B))) {
+        Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(if (on) Icons.Filled.CheckCircle else Icons.Filled.AddCircle,
+                contentDescription = if (on) "Shown" else "Hidden", tint = if (on) Color(0xFF34D399) else Color(0xFF52728F))
+            Spacer(Modifier.width(8.dp))
+            Text(label, fontSize = 15.sp, color = if (on) Color(0xFFE6EDF5) else Color(0xFF9EAEC0))
+        }
     }
 }
