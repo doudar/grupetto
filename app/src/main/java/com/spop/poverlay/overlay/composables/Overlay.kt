@@ -102,8 +102,9 @@ fun Overlay(
     val showHeartRate = com.spop.poverlay.OverlayItem.HeartRate in overlayItems
     val showCalories = com.spop.poverlay.OverlayItem.Calories in overlayItems
     val showChart = com.spop.poverlay.OverlayItem.Chart in overlayItems
-    val flywheelLabel = sensorViewModel.flywheelLabel.collectAsState(initial = null).value
-        ?.takeIf { com.spop.poverlay.OverlayItem.FlywheelTemperature in overlayItems }
+    // Collected only by the chip itself, and only when switched on: temperature changes don't recompose the overlay.
+    val flywheelLabel = sensorViewModel.flywheelLabel
+        .takeIf { com.spop.poverlay.OverlayItem.FlywheelTemperature in overlayItems }
     val isTread by sensorViewModel.isTread.collectAsState()
     val rpm by sensorViewModel.rpmValue.collectAsState(initial = SensorValuePlaceholderText)
     val resistance by sensorViewModel.resistanceValue.collectAsState(initial = SensorValuePlaceholderText)

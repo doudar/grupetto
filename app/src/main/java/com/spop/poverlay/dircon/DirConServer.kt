@@ -38,6 +38,10 @@ class DirConServer(
     private var requested = false
     private val mutableStatus = MutableStateFlow(DirConStatus.Stopped)
     val status = mutableStatus.asStateFlow()
+    private val mutableClientCount = MutableStateFlow(0)
+    /** Apps connected over the network right now (whether or not they control the bike). */
+    val clientCount = mutableClientCount.asStateFlow()
+    private fun publishClientCount() { mutableClientCount.value = clients.size }
 
     fun start() {
         // Read bridge state before taking the lifecycle lock: the bridge may hold BleServer's monitor.
@@ -75,7 +79,7 @@ class DirConServer(
                 val session = ClientSession(client)
                 val accepted = synchronized(lifecycleLock) {
                     if (!requested || generation != token || !isActive) false
-                    else { clients.add(session); true }
+                    else { clients.add(session); publishClientCount(); true }
                 }
                 if (accepted) launch { session.run() } else session.close()
             }
@@ -104,7 +108,7 @@ class DirConServer(
 
     private fun drainClients(): List<ClientSession> =
         synchronized(clients) {
-            clients.toList().also { clients.clear() }
+            clients.toList().also { clients.clear(); publishClientCount() }
         }
 
     fun stop() {
@@ -257,6 +261,7 @@ class DirConServer(
                 Timber.e(error, "DIRCON client failed")
             } finally {
                 clients.remove(this)
+                publishClientCount()
                 close()
             }
         }

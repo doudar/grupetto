@@ -22,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import timber.log.Timber
 
@@ -130,6 +131,8 @@ class ConfigurationViewModel(
 
     private val bleServer = (application as GrupettoApplication).bleServer
     val dirConStatus get() = bleServer.dirConStatus
+    /** Some training app is connected (Bluetooth or DirCon), in control of the bike or not. */
+    val appConnected = bleServer.connectedAppCount.map { it > 0 }
     private val antPlusServer = (application as GrupettoApplication).antPlusServer
     private val bikeControl = (application as GrupettoApplication).sensorInterface.bikeControl
     private val powerMeters = (application as GrupettoApplication).powerMeterManager

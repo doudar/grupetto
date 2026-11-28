@@ -51,6 +51,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
     val ble by viewModel.bleTxEnabled.collectAsStateWithLifecycle()
     val dircon by viewModel.dirConEnabled.collectAsStateWithLifecycle()
     val dirconStatus by viewModel.dirConStatus.collectAsStateWithLifecycle()
+    val appConnected by viewModel.appConnected.collectAsStateWithLifecycle(initialValue = false)
     val ant by viewModel.antPlusTxEnabled.collectAsStateWithLifecycle()
     val running by viewModel.isOverlayRunning.collectAsStateWithLifecycle()
     val background by viewModel.backgroundLocationGranted.collectAsStateWithLifecycle()
@@ -240,7 +241,7 @@ fun ConfigurationPage(viewModel: ConfigurationViewModel) {
                         }
                     }
                 } else {
-                    BasicSettings(Modifier.weight(2f), viewModel.isTread, bike, running, ble, dircon, timer, boot, showShifters,
+                    BasicSettings(Modifier.weight(2f), viewModel.isTread, bike, appConnected, running, ble, dircon, timer, boot, showShifters,
                         overlayItems, OverlayItem.forDevice(viewModel.isTread, viewModel.calibrationSupported),
                         hr?.let { it.name ?: it.address }, bpm, meter?.let { it.name ?: it.address }, externalWatts?.watts,
                         watts.isFinite() || cadence.isFinite(),
@@ -608,7 +609,7 @@ private fun HeartRateManagerDialog(
  */
 @Composable
 private fun BasicSettings(
-    modifier: Modifier, isTread: Boolean, bike: com.spop.poverlay.control.ControlState, overlayRunning: Boolean,
+    modifier: Modifier, isTread: Boolean, bike: com.spop.poverlay.control.ControlState, appConnected: Boolean, overlayRunning: Boolean,
     ble: Boolean, dircon: Boolean, timer: Boolean, boot: Boolean, shifters: Boolean,
     overlayItems: Set<OverlayItem>, itemsForDevice: List<OverlayItem>,
     heartRateMonitor: String?, bpm: Int?, powerMeter: String?, meterWatts: Int?, bikeReporting: Boolean,
@@ -632,10 +633,16 @@ private fun BasicSettings(
                 if (overlayRunning) "Overlay running" else "Overlay off",
                 if (overlayRunning) "Floating over the Peloton screen" else "Tap here to start it",
                 onClick = if (overlayRunning) null else onStartOverlay)
+            // Connected = an app is linked over Bluetooth or DirCon; in control = it has sent ERG or resistance.
             val app = bike.externalControl
-            StatusCheck(Modifier.weight(1f), app != null,
-                if (app != null) "App connected" else "No app connected",
-                if (app != null) "Over $app, in control" else "In your app, pick the trainer called Grupetto")
+            val connected = appConnected || app != null
+            StatusCheck(Modifier.weight(1f), connected,
+                if (connected) "App connected" else "No app connected",
+                when {
+                    app != null -> "Over $app, in control"
+                    connected -> "Receiving the ${if (isTread) "Tread" else "bike"}'s numbers"
+                    else -> "In your app, pick the trainer called Grupetto"
+                })
         }
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             SettingsTile("Show on the overlay", Modifier.weight(1f).fillMaxHeight(), Color(0xFF34D399)) {
