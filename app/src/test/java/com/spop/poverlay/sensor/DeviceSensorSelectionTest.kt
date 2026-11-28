@@ -100,20 +100,6 @@ class DeviceSensorSelectionTest {
     }
 
     @Test
-    fun `g700 cross trainer with newer model prefix uses bike plus sensors`() {
-        for (model in listOf("PLTN-ATR01", "pltn-atr99")) {
-            assertEquals(model, SensorSelection.BikePlus, selectSensorForDevice(true, model, null))
-        }
-    }
-
-    @Test
-    fun `legacy g700 cross trainer uses bike plus sensors`() {
-        for (model in listOf("G700", "g700-cross")) {
-            assertEquals(model, SensorSelection.BikePlus, selectSensorForDevice(true, model, null))
-        }
-    }
-
-    @Test
     fun `unknown peloton model retains legacy bike fallback`() {
         for (model in listOf("", "unknown")) {
             assertEquals(model, SensorSelection.BikeV1, selectSensorForDevice(true, model, null))

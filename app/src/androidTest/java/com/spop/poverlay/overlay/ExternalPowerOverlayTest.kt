@@ -49,10 +49,32 @@ class ExternalPowerOverlayTest {
     @Test fun minimizedComparisonFitsWithoutAttachedShifters() {
         compose.setContent { MaterialTheme {
             Box(Modifier.fillMaxSize().background(Color(0xFF101820)).padding(12.dp)) {
-                OverlayMinimizedContent(true, true, OverlayLocation.Top, false,
-                    "210", "85", "20.5", "40", "0", "125", true, true, true, false,
-                    Color.White, 1f, "12:34", false, {}, {}, {}, {}, {},
-                    powerComparison = "Peloton 145 W")
+                OverlayMinimizedContent(
+                    isMinimized = true,
+                    showTimerWhenMinimized = true,
+                    location = OverlayLocation.Top,
+                    isTread = false,
+                    powerLabel = "210",
+                    cadenceLabel = "85",
+                    speedLabel = "20.5",
+                    resistanceLabel = "40",
+                    inclineLabel = "0",
+                    heartRateLabel = "125",
+                    showPowerField = true,
+                    showCadenceField = true,
+                    showResistanceField = true,
+                    showInclineField = false,
+                    heartRateColor = Color.White,
+                    contentAlpha = 1f,
+                    timerLabel = "12:34",
+                    timerPaused = false,
+                    onTap = {},
+                    onLongPress = {},
+                    onOpenSettings = {},
+                    onMinimizeToggle = {},
+                    onLayout = {},
+                    powerComparison = "Peloton 145 W",
+                )
             }
         } }
         compose.onNodeWithText("Peloton 145 W").assertIsDisplayed()
